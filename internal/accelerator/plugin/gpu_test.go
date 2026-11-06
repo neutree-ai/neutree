@@ -40,6 +40,15 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, InternalPluginType, plugin.Type())
 }
 
+func TestGPUOperatorFactorySelectsOperatorMode(t *testing.T) {
+	assert.Equal(t, DependencyDeployModeOperator,
+		PluginDependencyDeployMode(v1.AcceleratorTypeNVIDIAGPU.String(), v1.KubernetesClusterType))
+	assert.Equal(t, DependencyDeployModeLegacy,
+		PluginDependencyDeployMode(v1.AcceleratorTypeNVIDIAGPU.String(), v1.SSHClusterType))
+	assert.Equal(t, DependencyDeployModeLegacy,
+		PluginDependencyDeployMode(v1.AcceleratorTypeAMDGPU.String(), v1.KubernetesClusterType))
+}
+
 func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, testNvidiaLspciOutput, nil)
@@ -463,4 +472,16 @@ func TestGPUAcceleratorPluginProfileNodeAgentExplicit(t *testing.T) {
 	assert.Equal(t, []string{"--gpus all"}, profile.NodeAgentRuntime.DockerRunOptions)
 	assert.Empty(t, profile.NodeAgentRuntime.Volumes)
 	assert.Empty(t, profile.NodeAgentRuntime.VolumeMounts)
+}
+
+func TestGPUAcceleratorPluginMatcherIsImplementedOnPlugin(t *testing.T) {
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{}}}
+	plugin := &GPUAcceleratorPlugin{}
+	if !plugin.MatchCluster(cluster) {
+		t.Fatal("expected an unqualified cluster to match NVIDIA plugin")
+	}
+	cluster.Spec.Config.AcceleratorType = v1.AcceleratorTypeAMDGPU.StringPtr()
+	if plugin.MatchCluster(cluster) {
+		t.Fatal("expected AMD-selected cluster not to match NVIDIA plugin")
+	}
 }

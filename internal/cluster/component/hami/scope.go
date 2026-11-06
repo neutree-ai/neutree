@@ -200,6 +200,10 @@ func (h *HAMiComponent) resolveVirtualizationConfigs(
 	configs := make([]*accelerator.VirtualizationConfig, 0)
 
 	for _, acceleratorType := range h.pluginProvider.SupportPlugins() {
+		if _, excluded := h.excludedAccelerators[acceleratorType]; excluded {
+			continue
+		}
+
 		acceleratorPlugin, ok := h.pluginProvider.GetPlugin(acceleratorType)
 		if !ok || acceleratorPlugin == nil {
 			continue

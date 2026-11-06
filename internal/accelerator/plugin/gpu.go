@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
@@ -91,8 +92,17 @@ DCGM_FI_DRIVER_VERSION, label, Driver Version.
 )
 
 func init() { //nolint:gochecknoinits
-	registerAcceleratorPlugin(&GPUAcceleratorPlugin{
+	gpuPlugin := &GPUAcceleratorPlugin{
 		executor: &command.OSExecutor{},
+	}
+	registerAcceleratorPlugin(gpuPlugin)
+	// Register NVIDIA's Kubernetes operator alongside the legacy Plugin. The
+	// legacy registration remains available for non-Kubernetes/static paths.
+	_ = RegisterPlugin(PluginRegistration{
+		Plugin: gpuPlugin,
+		KubernetesOperatorFactory: func(*v1.Cluster) (operator.AcceleratorOperator, error) {
+			return operator.NewNvidiaAcceleratorOperator(), nil
+		},
 	})
 }
 
@@ -315,6 +325,10 @@ func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 
 func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
+}
+
+func (p *GPUAcceleratorPlugin) MatchCluster(cluster *v1.Cluster) bool {
+	return clusterMatchesAccelerator(cluster, p.Resource())
 }
 
 func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {

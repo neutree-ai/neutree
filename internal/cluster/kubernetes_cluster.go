@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -12,13 +13,16 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -173,7 +177,12 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
 	reconcileComps = append(reconcileComps, routerComp)
 
-	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
+	operatorAccelerators, err := c.reconcileAcceleratorOperators(reconcileCtx, imagePrefix)
+	if err != nil {
+		return errors.Wrap(err, "failed to reconcile accelerator operators")
+	}
+
+	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix, operatorAccelerators)
 	reconcileComps = append(reconcileComps, needReconcileAdditionalComps...)
 	reconcileDeleteComps = append(reconcileDeleteComps, needDeleteAdditionalComps...)
 
@@ -211,6 +220,84 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	return nil
 }
 
+// reconcileAcceleratorOperators dispatches accelerator types that have a
+// registered Kubernetes Operator factory. Legacy accelerator types remain
+// owned by Metrics/HAMi profile and configuration injection.
+func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(
+	reconcileCtx *ReconcileContext,
+	imagePrefix string,
+) (map[string]struct{}, error) {
+	operatorAccelerators := map[string]struct{}{}
+	targetRegistry := metricsconfig.NewRegistry()
+
+	if c.acceleratorMgr == nil {
+		return operatorAccelerators, nil
+	}
+
+	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
+		acceleratorPlugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
+		if !ok || acceleratorPlugin == nil {
+			continue
+		}
+
+		if !publicaccelerator.PluginMatchesCluster(acceleratorPlugin, reconcileCtx.Cluster) {
+			continue
+		}
+
+		if c.acceleratorMgr.PluginDependencyDeployMode(acceleratorType, string(v1.KubernetesClusterType)) != accelerator.DependencyDeployModeOperator {
+			continue
+		}
+
+		acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
+		if err != nil {
+			return nil, errors.Wrapf(err, "create accelerator operator for %s", acceleratorType)
+		}
+
+		operatorConfig := v1.KubernetesClusterConfig{}
+		if reconcileCtx.kubernetesClusterConfig != nil {
+			operatorConfig = *reconcileCtx.kubernetesClusterConfig
+		}
+
+		operatorContext := &acceleratoroperator.OperatorContext{
+			Cluster:         reconcileCtx.Cluster,
+			Client:          reconcileCtx.ctrClient,
+			Namespace:       reconcileCtx.clusterNamespace,
+			ImagePrefix:     imagePrefix,
+			ImagePullSecret: ImagePullSecretName,
+			Config:          operatorConfig,
+			Renderer:        acceleratoroperator.NewNvidiaResourceRenderer(c.acceleratorMgr),
+			MetricsTargets:  targetRegistry,
+		}
+
+		if _, err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {
+			return nil, errors.Wrapf(err, "reconcile accelerator operator %s", acceleratorType)
+		}
+
+		status, err := acceleratorOperator.Status(reconcileCtx.Ctx, operatorContext)
+		if err != nil {
+			return nil, errors.Wrapf(err, "get accelerator operator %s status", acceleratorType)
+		}
+
+		if status != nil {
+			if reconcileCtx.Cluster.Status == nil {
+				reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
+			}
+
+			if reconcileCtx.Cluster.Status.ComponentStatus == nil {
+				reconcileCtx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
+			}
+
+			reconcileCtx.Cluster.Status.ComponentStatus[fmt.Sprintf("accelerator-operator/%s", acceleratorType)] = status
+		}
+
+		operatorAccelerators[acceleratorType] = struct{}{}
+	}
+
+	reconcileCtx.metricsTargets = targetRegistry
+
+	return operatorAccelerators, nil
+}
+
 // inferenceScrapeRules derives the metrics-scrape adjustments for this cluster
 // from the engines registered in its workspace.
 //
@@ -243,27 +330,65 @@ func (c *NativeKubernetesClusterReconciler) inferenceScrapeRules(cluster *v1.Clu
 }
 
 func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcileCtx *ReconcileContext,
-	imagePrefix string) ([]component.Component, []component.Component) {
+	imagePrefix string, operatorAccelerators ...map[string]struct{}) ([]component.Component, []component.Component) {
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
+
+	operatorTypes := map[string]struct{}{}
+	if len(operatorAccelerators) > 0 && operatorAccelerators[0] != nil {
+		operatorTypes = operatorAccelerators[0]
+	}
 
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
+		WithExcludedAccelerators(operatorTypes).
+		WithMetricsTargets(reconcileCtx.metricsTargets).
 		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster)).
 		WithCacheProviders(c.cacheProviders)
 	reconcileComps = append(reconcileComps, metricsComp)
 
 	hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
-		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
-	if reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
+		WithExcludedAccelerators(operatorTypes)
+	legacyHAMi := len(operatorAccelerators) == 0 || len(operatorTypes) == 0 || c.hasLegacyAccelerator(reconcileCtx.Cluster, operatorTypes)
+
+	if reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() && legacyHAMi {
 		reconcileComps = append(reconcileComps, hamiComp)
-	} else {
+	} else if !reconcileCtx.Cluster.Spec.AcceleratorVirtualizationEnabled() {
 		reconcileDeleteComps = append(reconcileDeleteComps, hamiComp)
 	}
 
 	return reconcileComps, reconcileDeleteComps
+}
+
+func (c *NativeKubernetesClusterReconciler) hasLegacyAccelerator(
+	cluster *v1.Cluster,
+	operatorAccelerators map[string]struct{},
+) bool {
+	if c.acceleratorMgr == nil {
+		return false
+	}
+
+	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
+		if _, operatorOwned := operatorAccelerators[acceleratorType]; operatorOwned {
+			continue
+		}
+
+		acceleratorPlugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
+		if !ok || acceleratorPlugin == nil {
+			continue
+		}
+
+		if !publicaccelerator.PluginMatchesCluster(acceleratorPlugin, cluster) {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }
 
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {

@@ -102,7 +102,14 @@ func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion st
 		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
 	}
 
-	return mergeChartValues(values, h.protectedChartValues(hamiVersion))
+	values = mergeChartValues(values, h.protectedChartValues(hamiVersion))
+	if h.externalDevicePlugin {
+		values = mergeChartValues(values, map[string]interface{}{
+			"devicePlugin": map[string]interface{}{"enabled": false},
+		})
+	}
+
+	return values
 }
 
 func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
@@ -273,7 +280,7 @@ func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.
 	}
 
 	// The accelerator plugin does not require an additional device plugin.
-	if scopePlan.DevicePluginTemplate == nil {
+	if h.externalDevicePlugin || scopePlan.DevicePluginTemplate == nil {
 		return resources, nil
 	}
 
@@ -293,4 +300,32 @@ func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.
 	resources.Items = append(resources.Items, templateResources.Items...)
 
 	return resources, nil
+}
+
+// RenderControlPlaneResources renders Hami scheduler/webhook/configuration
+// while leaving the accelerator device plugin to an AcceleratorOperator.
+func (h *HAMiComponent) RenderControlPlaneResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
+	h.externalDevicePlugin = true
+
+	return h.renderResources(scopePlan)
+}
+
+// RenderDevicePluginResources renders only the Hami device-plugin template.
+// AcceleratorOperator uses this in operator mode so Hami remains the owner of
+// virtualization configuration while the operator owns the device-plugin
+// DaemonSet lifecycle.
+func (h *HAMiComponent) RenderDevicePluginResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
+	if scopePlan.DevicePluginTemplate == nil {
+		return &unstructured.UnstructuredList{}, nil
+	}
+
+	return util.RenderKubernetesManifest(scopePlan.DevicePluginTemplate.Manifest, struct {
+		Namespace      string
+		NodeScopeLabel NodeScopeLabel
+		ImagePrefix    string
+	}{
+		Namespace:      h.namespace,
+		NodeScopeLabel: scopePlan.NodeScopeLabel,
+		ImagePrefix:    h.normalizedImagePrefix(),
+	})
 }

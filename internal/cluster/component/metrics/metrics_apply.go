@@ -33,12 +33,19 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
 
+	if m.acceleratorOnly != "" {
+		variables.EnableVMAgent = false
+		variables.EnableKubeStateMetrics = false
+		variables.EnableNodeExporter = false
+		variables.EnableNeutreeNodeAgentMetrics = true
+	}
+
 	acceleratorPlans := []metricsAcceleratorPlan(nil)
 	acceleratorExporterTargets := []metricsScrapeTarget(nil)
 	virtualizationEnabled := m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
-	if enableManagedMetricsExporters || virtualizationEnabled || external {
+	if enableManagedMetricsExporters || virtualizationEnabled || external || m.acceleratorOnly != "" {
 		acceleratorPlans, err = m.planAcceleratorExporters(ctx)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
@@ -51,7 +58,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 			variables.VirtualizationMetricsScrapeTargets = virtualizationMetricsScrapeTargets(acceleratorPlans)
 		}
 
-		if enableManagedMetricsExporters && !external {
+		if (enableManagedMetricsExporters || m.acceleratorOnly != "") && !external {
 			variables.AcceleratorExporters = managedAcceleratorExporters(acceleratorPlans)
 		}
 	}
@@ -109,7 +116,8 @@ func (m *MetricsComponent) replaceLegacyTargetContributions(
 	virtualizationTargets []metricsScrapeTarget,
 ) {
 	for _, target := range exporterTargets {
-		m.metricsTargets.Replace("legacy/accelerator/"+target.AcceleratorType, []metricsconfig.Target{{
+		owner := "legacy/accelerator/" + target.AcceleratorType
+		m.metricsTargets.Replace(owner, []metricsconfig.Target{{
 			AcceleratorType: target.AcceleratorType,
 			JobName:         target.JobName(),
 			Kind:            metricsconfig.TargetKindAcceleratorExporter,
@@ -119,8 +127,10 @@ func (m *MetricsComponent) replaceLegacyTargetContributions(
 			MetricsPath:     target.MetricsPath,
 		}})
 	}
+
 	for _, target := range virtualizationTargets {
-		m.metricsTargets.Replace("legacy/virtualization/"+target.AcceleratorType, []metricsconfig.Target{{
+		owner := "legacy/virtualization/" + target.AcceleratorType
+		m.metricsTargets.Replace(owner, []metricsconfig.Target{{
 			AcceleratorType: target.AcceleratorType,
 			JobName:         target.JobName(),
 			Kind:            metricsconfig.TargetKindVirtualizationMonitor,
@@ -135,6 +145,7 @@ func (m *MetricsComponent) replaceLegacyTargetContributions(
 func (m *MetricsComponent) registryTargets() ([]metricsScrapeTarget, []metricsScrapeTarget) {
 	var exporters []metricsScrapeTarget
 	var virtualization []metricsScrapeTarget
+
 	for _, target := range m.metricsTargets.Snapshot().Targets {
 		resolved := metricsScrapeTarget{
 			AcceleratorType: target.AcceleratorType,
@@ -144,6 +155,7 @@ func (m *MetricsComponent) registryTargets() ([]metricsScrapeTarget, []metricsSc
 			Port:            target.Port,
 			MetricsPath:     metricsTargetPath(target.MetricsPath),
 		}
+
 		switch target.Kind {
 		case metricsconfig.TargetKindAcceleratorExporter:
 			exporters = append(exporters, resolved)
@@ -151,7 +163,15 @@ func (m *MetricsComponent) registryTargets() ([]metricsScrapeTarget, []metricsSc
 			virtualization = append(virtualization, resolved)
 		}
 	}
+
 	return exporters, virtualization
+}
+
+// GetAcceleratorResources renders only the NodeAgent and accelerator exporter
+// resources for an operator-owned accelerator. Generic vmagent, node exporter,
+// and kube-state-metrics resources remain owned by MetricsComponent.
+func (m *MetricsComponent) GetAcceleratorResources(ctx context.Context, acceleratorType string) (*unstructured.UnstructuredList, error) {
+	return m.WithAcceleratorOnly(acceleratorType).GetMetricsResources(ctx)
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
