@@ -131,23 +131,9 @@ func TestOrgScopedRoleAssignment_DefaultNeverGrantsBySubtree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A subtree-scoped department-admin assignment. The default checks reject
-	// writing one, so they are bypassed for this seed only.
+	// A subtree-scoped department-admin assignment.
 	scoped := createGoTrueTestUser(t, "osra-scoped", "password123")
-	if err := execWithContext(t, db, nil, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
-			VALUES ('v1', 'RoleAssignment',
-				ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW($2::uuid, NULL, FALSE, 'department-admin', $3)::api.role_assignment_spec)
-		`, newOrgName("osra-scoped"), scoped.ID, root.Metadata.Name)
-		return err
-	}); err != nil {
-		t.Fatalf("seeding the scoped assignment failed: %v", err)
-	}
+	seedOrgScopedAssignment(t, db, scoped.ID, "department-admin", root.Metadata.Name)
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid)`, globalID, scoped.ID)

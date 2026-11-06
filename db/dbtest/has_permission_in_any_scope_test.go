@@ -34,27 +34,8 @@ func TestHasPermissionInAnyScope(t *testing.T) {
 	onActive := createGoTrueTestUser(t, "hpias-active", "password123")
 	onInactive := createGoTrueTestUser(t, "hpias-inactive", "password123")
 
-	// The default checks reject writing an OrgUnit scope, so they are
-	// bypassed to seed OrgUnit-scoped assignments.
-	for _, seed := range []struct{ user, unit string }{
-		{onActive.ID, active.Metadata.Name},
-		{onInactive.ID, inactive.Metadata.Name},
-	} {
-		if err := execWithContext(t, db, nil, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, `
-				INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
-				VALUES ('v1', 'RoleAssignment',
-					ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-					ROW($2::uuid, NULL, FALSE, 'department-admin', $3)::api.role_assignment_spec)
-			`, newOrgName("hpias"), seed.user, seed.unit)
-			return err
-		}); err != nil {
-			t.Fatalf("seeding the scoped assignment failed: %v", err)
-		}
-	}
+	seedOrgScopedAssignment(t, db, onActive.ID, "department-admin", active.Metadata.Name)
+	seedOrgScopedAssignment(t, db, onInactive.ID, "department-admin", inactive.Metadata.Name)
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid, $3::uuid)`,
