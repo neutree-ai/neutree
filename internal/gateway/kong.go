@@ -56,6 +56,7 @@ func (k *Kong) Init() error {
 	plugins = append(plugins, k.generateKeyAuthenticationPlugin())
 	plugins = append(plugins, k.generateRewriteApiKeyHeaderPlugin())
 	plugins = append(plugins, k.generateHttpLogPlugin())
+	plugins = append(plugins, generateAccessFallbackPlugin())
 	plugins = append(plugins, &kong.Plugin{
 		Name:         pointy.String("prometheus"),
 		InstanceName: pointy.String("neutree-prometheus"),
@@ -96,6 +97,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 	if isResourceNotFoundError(err) {
 		consumer = &kong.Consumer{
 			CustomID: &apiKey.ID,
+			Tags:     []*string{pointy.String(apiKeyAccessRulesTag)},
 		}
 
 		consumer, err = k.kongClient.Consumers.Create(context.Background(), consumer)
@@ -183,16 +185,35 @@ func isManagedAPIKeyLimitPlugin(p *kong.Plugin) bool {
 		strings.HasPrefix(*p.InstanceName, "neutree-ai-quota-")
 }
 
+// apiKeyAccessRulesTag marks a consumer that always gets its own
+// neutree-ai-access instance. The global fallback instance rejects a consumer
+// with this tag, because its own instance is not loaded yet. Consumers created
+// before the tag existed lack it, so they are not rejected while their own
+// instance is first written. Must match RULES_TAG in the plugin handler.
+const apiKeyAccessRulesTag = "neutree-access-rules"
+
+// generateAccessFallbackPlugin builds the global neutree-ai-access instance.
+// Kong prefers a consumer-scoped instance, so this one only runs for a consumer
+// whose own instance Kong has not loaded yet.
+func generateAccessFallbackPlugin() *kong.Plugin {
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-access"),
+		InstanceName: pointy.String("neutree-access-fallback"),
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       kong.Configuration{"fallback": true},
+	}
+}
+
 // generateAPIKeyAccessPlugin builds the per-consumer neutree-ai-access plugin
 // from the key's static access limits (disabled / allowed models / concurrency /
-// RPS+RPM). Returns nil when the key has no access limits (so the plugin is
-// absent and the key is unrestricted on the access dimension).
+// RPS+RPM). A key without access limits still gets the plugin, with every limit
+// off, so the global fallback instance never judges it.
 func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
-	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
-		return nil
+	l := &v1.ApiKeyLimits{}
+	if apiKey.Spec != nil && apiKey.Spec.Limits != nil {
+		l = apiKey.Spec.Limits
 	}
 
-	l := apiKey.Spec.Limits
 	// Emit a COMPLETE config with explicit empty values for "off" (not null) so an
 	// update always overwrites prior config. syncPlugin reconciles via JSON
 	// merge-patch (RFC 7386), under which an omitted key keeps the stale value;
@@ -210,16 +231,12 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 		"concurrency":    0,
 		"rate_limits":    []map[string]interface{}{},
 	}
-	needed := l.Disabled
-
 	if l.AllowedModels != nil {
 		cfg["allowed_models"] = accessPluginAllowedModels(l.AllowedModels)
-		needed = true
 	}
 
 	if l.Concurrency > 0 {
 		cfg["concurrency"] = l.Concurrency
-		needed = true
 	}
 
 	rateLimits := make([]map[string]interface{}, 0, 2)
@@ -233,13 +250,6 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 
 	if len(rateLimits) > 0 {
 		cfg["rate_limits"] = rateLimits
-		needed = true
-	}
-
-	// No active limit -> no plugin (syncAPIKeyLimitPlugins deletes any stale one),
-	// so an unconfigured key stays unrestricted (by design).
-	if !needed {
-		return nil
 	}
 
 	return &kong.Plugin{
@@ -335,9 +345,8 @@ func hasPerModelTokenQuota(l *v1.ApiKeyLimits) bool {
 // the desired ones and prune managed plugins that are no longer desired.
 func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) error {
 	desired := make(map[string]*kong.Plugin)
-	if p := k.generateAPIKeyAccessPlugin(consumerID, apiKey); p != nil {
-		desired[*p.InstanceName] = p
-	}
+	access := k.generateAPIKeyAccessPlugin(consumerID, apiKey)
+	desired[*access.InstanceName] = access
 
 	if p := k.generateAPIKeyQuotaPlugin(consumerID, apiKey); p != nil {
 		desired[*p.InstanceName] = p

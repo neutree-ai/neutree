@@ -11,6 +11,9 @@ return {
         type = "record",
         fields = {
           { disabled = { type = "boolean", default = false } },
+          -- Set only on the global instance. It runs for a consumer whose own
+          -- instance is not loaded yet and rejects consumers that should have one.
+          { fallback = { type = "boolean", default = false } },
           {
             -- Endpoint-scoped model allowlist. Each entry is { model, type?,
             -- endpoint_name? }: a request is permitted when its client-facing model

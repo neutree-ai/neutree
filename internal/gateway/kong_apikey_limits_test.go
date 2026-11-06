@@ -29,15 +29,24 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	k := &Kong{}
 	cid := pointy.String("consumer-1")
 
-	// no spec / no limits -> no plugin
-	assert.Nil(t, k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{ID: "k"}))
-	assert.Nil(t, k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{ID: "k", Spec: &v1.ApiKeySpec{}}))
-
-	// only a token quota (no access dimension) -> no access plugin
-	assert.Nil(t, k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
-		ID:   "k",
-		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 100}}},
-	}))
+	// No access limits -> the plugin is still written, with every limit off, so
+	// the global fallback instance never judges the key.
+	for _, key := range []*v1.ApiKey{
+		{ID: "k"},
+		{ID: "k", Spec: &v1.ApiKeySpec{}},
+		{ID: "k", Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 100}}}},
+	} {
+		p := k.generateAPIKeyAccessPlugin(cid, key)
+		require.NotNil(t, p)
+		assert.Equal(t, "neutree-ai-access-"+util.HashString("k"), *p.InstanceName)
+		assert.Equal(t, cid, p.Consumer.ID)
+		assert.Equal(t, kong.Configuration{
+			"disabled":       false,
+			"allowed_models": nil,
+			"concurrency":    0,
+			"rate_limits":    []map[string]interface{}{},
+		}, p.Config)
+	}
 
 	// full access limits -> complete config
 	apiKey := &v1.ApiKey{
@@ -149,6 +158,58 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	assert.Equal(t, "http://postgrest:6432", ps.Config["api_url"])
 }
 
+func TestGenerateAccessFallbackPlugin(t *testing.T) {
+	p := generateAccessFallbackPlugin()
+	assert.Equal(t, "neutree-ai-access", *p.Name)
+	// Global: no consumer, route or service scope.
+	assert.Nil(t, p.Consumer)
+	assert.Nil(t, p.Route)
+	assert.Nil(t, p.Service)
+	assert.Equal(t, kong.Configuration{"fallback": true}, p.Config)
+	// The fallback is not a per-key instance, so key reconcile never prunes it.
+	assert.False(t, isManagedAPIKeyLimitPlugin(p))
+}
+
+// TestSyncAPIKeyTagsNewConsumer verifies that a new consumer carries the tag
+// the fallback instance uses to reject a key whose rules are not loaded yet.
+func TestSyncAPIKeyTagsNewConsumer(t *testing.T) {
+	apiKey := &v1.ApiKey{ID: "key-1", Status: &v1.ApiKeyStatus{SkValue: "sk-1"}}
+
+	var createdConsumer kong.Consumer
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/consumers":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/consumers":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&createdConsumer))
+			_, _ = w.Write([]byte(`{"id":"consumer-1","custom_id":"key-1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/consumers/consumer-1/key-auth":
+			_, _ = w.Write([]byte(`{"data":[{"key":"sk-1"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/consumers/consumer-1/acls":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/consumers/consumer-1/plugins":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/plugins/neutree-ai-access-"+util.HashString("key-1"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not found"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/plugins":
+			_, _ = w.Write([]byte(`{"id":"created-id"}`))
+		default:
+			t.Fatalf("unexpected Kong request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := kong.NewClient(pointy.String(server.URL), server.Client())
+	require.NoError(t, err)
+	k := &Kong{kongClient: client}
+
+	require.NoError(t, k.SyncAPIKey(apiKey))
+	require.Len(t, createdConsumer.Tags, 1)
+	assert.Equal(t, apiKeyAccessRulesTag, *createdConsumer.Tags[0])
+}
+
 // TestSyncAPIKeyLimitPlugins verifies the reconcile/prune path: the desired
 // plugin(s) are upserted, stale *managed* plugins are deleted, and unrelated
 // plugins are left untouched. The Kong admin API is faked with httptest.
@@ -158,12 +219,13 @@ func TestSyncAPIKeyLimitPlugins(t *testing.T) {
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 100, Period: "monthly"}}},
 	}
 	quotaInstance := "neutree-ai-quota-" + util.HashString("key-1")
+	accessInstance := "neutree-ai-access-" + util.HashString("key-1")
 
 	var created []string
 	var deleted []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/plugins/"+quotaInstance:
+		case r.Method == http.MethodGet && (r.URL.Path == "/plugins/"+quotaInstance || r.URL.Path == "/plugins/"+accessInstance):
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"Not found"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/plugins":
@@ -195,8 +257,8 @@ func TestSyncAPIKeyLimitPlugins(t *testing.T) {
 	err = k.syncAPIKeyLimitPlugins(pointy.String("consumer-1"), apiKey)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{quotaInstance}, created)           // desired quota plugin upserted
-	assert.Equal(t, []string{"/plugins/stale-access"}, deleted) // stale managed access plugin pruned; acl untouched
+	assert.ElementsMatch(t, []string{quotaInstance, accessInstance}, created) // desired plugins upserted
+	assert.Equal(t, []string{"/plugins/stale-access"}, deleted)               // stale managed access plugin pruned; acl untouched
 }
 
 func TestAccessPluginAllowedModels(t *testing.T) {
