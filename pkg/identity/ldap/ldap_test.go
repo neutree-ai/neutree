@@ -529,7 +529,8 @@ func TestFormatGUID(t *testing.T) {
 }
 
 // TestNoNeutreeImports keeps the package reusable outside neutree: only the standard
-// library and go-ldap may be imported by non-test files.
+// library, go-ldap and the stdlib-only sibling pkg/identity/orgsync may be imported by
+// non-test files.
 func TestNoNeutreeImports(t *testing.T) {
 	pkg, err := build.ImportDir(".", 0)
 	require.NoError(t, err)
@@ -540,7 +541,9 @@ func TestNoNeutreeImports(t *testing.T) {
 			continue // standard library
 		}
 
-		assert.True(t, strings.HasPrefix(path, "github.com/go-ldap/ldap/"), "unexpected import %q", path)
+		allowed := strings.HasPrefix(path, "github.com/go-ldap/ldap/") ||
+			path == "github.com/neutree-ai/neutree/pkg/identity/orgsync"
+		assert.True(t, allowed, "unexpected import %q", path)
 	}
 }
 

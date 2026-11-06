@@ -65,6 +65,28 @@ func TestLDAPConfig(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
+func TestLDAPSyncConfig(t *testing.T) {
+	spec := ldapSpec("ldap://ldap.example.org").LDAP
+
+	assert.Equal(t, ldap.SyncConfig{}, LDAPSyncConfig(spec))
+
+	spec.Sync = &v1.IdentitySourceLDAPSyncSpec{
+		OrgUnitBaseDN:        "ou=org,dc=example,dc=org",
+		GroupBaseDN:          "ou=groups,dc=example,dc=org",
+		GroupMemberAttribute: "uniqueMember",
+		DisabledUserFilter:   "(employeeType=disabled)",
+		PageSize:             200,
+	}
+
+	assert.Equal(t, ldap.SyncConfig{
+		OrgUnitBaseDN:        "ou=org,dc=example,dc=org",
+		GroupBaseDN:          "ou=groups,dc=example,dc=org",
+		GroupMemberAttribute: "uniqueMember",
+		DisabledUserFilter:   "(employeeType=disabled)",
+		PageSize:             200,
+	}, LDAPSyncConfig(spec))
+}
+
 func TestOIDCConfig(t *testing.T) {
 	cfg := OIDCConfig(&v1.IdentitySourceOIDCSpec{
 		Issuer:      "https://idp.example.org",
@@ -89,6 +111,17 @@ func TestFingerprint(t *testing.T) {
 	assert.Equal(t, base, Fingerprint(ldapSpec("ldap://a:389"), &storage.IdentitySourceSecrets{LDAPBindPassword: "pw"}))
 	assert.NotEqual(t, base, Fingerprint(ldapSpec("ldap://b:389"), secrets), "spec change")
 	assert.NotEqual(t, base, Fingerprint(spec, &storage.IdentitySourceSecrets{LDAPBindPassword: "pw2"}), "secret change")
+
+	synced := ldapSpec("ldap://a:389")
+	synced.Sync = &v1.IdentitySourceSyncSpec{Enabled: true, Interval: 600, RequestedAt: "2026-10-09T12:00:00Z"}
+	synced.LDAP.Sync = &v1.IdentitySourceLDAPSyncSpec{OrgUnitBaseDN: "ou=org,dc=example,dc=org"}
+	assert.Equal(t, base, Fingerprint(synced, secrets), "sync settings only")
+	assert.NotNil(t, synced.Sync, "the caller's spec is left alone")
+	assert.NotNil(t, synced.LDAP.Sync, "the caller's spec is left alone")
+
+	synced.LDAP.BindDN = "cn=other,dc=example,dc=org"
+	assert.NotEqual(t, base, Fingerprint(synced, secrets), "connection change next to sync settings")
+	assert.NotEqual(t, Fingerprint(nil, secrets), base)
 }
 
 func TestConnectionTest_OIDC(t *testing.T) {

@@ -1,5 +1,6 @@
 // Package ldap authenticates users against an LDAP directory (OpenLDAP, Active Directory)
-// with the search-then-bind flow.
+// with the search-then-bind flow. Directory reads the whole directory (departments,
+// groups, users) into an orgsync.Snapshot for an organization sync.
 package ldap
 
 import (
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -243,27 +245,11 @@ func (a *Authenticator) Authenticate(ctx context.Context, username, password str
 		return nil, ErrEmptyPassword
 	}
 
-	conn, err := a.dial(ctx)
+	conn, release, err := a.cfg.connectAndBind(ctx, a.dial)
 	if err != nil {
-		if errors.Is(err, ErrConnection) || errors.Is(err, ErrTLS) || errors.Is(err, ErrInvalidConfig) {
-			return nil, err
-		}
-
-		return nil, connectionError("dial", err)
+		return nil, err
 	}
-
-	var closeOnce sync.Once
-	closeConn := func() { closeOnce.Do(func() { _ = conn.Close() }) }
-
-	defer closeConn()
-
-	// Closing the connection aborts any in-flight operation when ctx is done.
-	stop := context.AfterFunc(ctx, closeConn)
-	defer stop()
-
-	if err := conn.Bind(a.cfg.BindDN, a.cfg.BindPassword); err != nil {
-		return nil, a.operationError(ctx, ErrServiceBindFailed, "service bind", err)
-	}
+	defer release()
 
 	entry, err := a.searchUser(ctx, conn, username)
 	if err != nil {
@@ -275,36 +261,53 @@ func (a *Authenticator) Authenticate(ctx context.Context, username, password str
 			return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 		}
 
-		return nil, a.operationError(ctx, nil, "user bind", err)
+		return nil, operationError(ctx, nil, "user bind", err)
 	}
 
-	return a.mapEntry(entry)
+	return a.cfg.Attributes.mapEntry(entry)
 }
 
 // Ping dials and binds as the service account, to test a configuration.
 func (a *Authenticator) Ping(ctx context.Context) error {
-	conn, err := a.dial(ctx)
+	_, release, err := a.cfg.connectAndBind(ctx, a.dial)
+	if err != nil {
+		return err
+	}
+
+	release()
+
+	return nil
+}
+
+// connectAndBind dials and binds as the service account. The connection is
+// also closed when ctx is done, which aborts any in-flight operation; release
+// closes it for good.
+func (c Config) connectAndBind(ctx context.Context, dial Dialer) (goldap.Client, func(), error) {
+	conn, err := dial(ctx)
 	if err != nil {
 		if errors.Is(err, ErrConnection) || errors.Is(err, ErrTLS) || errors.Is(err, ErrInvalidConfig) {
-			return err
+			return nil, nil, err
 		}
 
-		return connectionError("dial", err)
+		return nil, nil, connectionError("dial", err)
 	}
 
 	var closeOnce sync.Once
+
 	closeConn := func() { closeOnce.Do(func() { _ = conn.Close() }) }
-
-	defer closeConn()
-
 	stop := context.AfterFunc(ctx, closeConn)
-	defer stop()
-
-	if err := conn.Bind(a.cfg.BindDN, a.cfg.BindPassword); err != nil {
-		return a.operationError(ctx, ErrServiceBindFailed, "service bind", err)
+	release := func() {
+		stop()
+		closeConn()
 	}
 
-	return nil
+	if err := conn.Bind(c.BindDN, c.BindPassword); err != nil {
+		release()
+
+		return nil, nil, operationError(ctx, ErrServiceBindFailed, "service bind", err)
+	}
+
+	return conn, release, nil
 }
 
 func (a *Authenticator) searchUser(ctx context.Context, conn goldap.Client, username string) (*goldap.Entry, error) {
@@ -328,7 +331,7 @@ func (a *Authenticator) searchUser(ctx context.Context, conn goldap.Client, user
 			return nil, ErrMultipleUsers
 		}
 
-		return nil, a.operationError(ctx, nil, "search user", err)
+		return nil, operationError(ctx, nil, "search user", err)
 	}
 
 	switch len(result.Entries) {
@@ -343,33 +346,28 @@ func (a *Authenticator) searchUser(ctx context.Context, conn goldap.Client, user
 
 func (a *Authenticator) requestedAttributes() []string {
 	m := a.cfg.Attributes
-	attrs := make([]string, 0, 5)
 
-	for _, name := range []string{m.ID, m.Username, m.Email, m.DisplayName, m.MemberOf} {
-		if name == "" {
+	return uniqueAttributes(m.ID, m.Username, m.Email, m.DisplayName, m.MemberOf)
+}
+
+// uniqueAttributes drops empty names and case-insensitive duplicates, keeping order.
+func uniqueAttributes(names ...string) []string {
+	out := make([]string, 0, len(names))
+
+	for _, name := range names {
+		if name == "" || slices.ContainsFunc(out, func(existing string) bool { return strings.EqualFold(existing, name) }) {
 			continue
 		}
 
-		duplicate := false
-
-		for _, existing := range attrs {
-			if strings.EqualFold(existing, name) {
-				duplicate = true
-				break
-			}
-		}
-
-		if !duplicate {
-			attrs = append(attrs, name)
-		}
+		out = append(out, name)
 	}
 
-	return attrs
+	return out
 }
 
-func (a *Authenticator) mapEntry(entry *goldap.Entry) (*Identity, error) {
-	m := a.cfg.Attributes
-
+// mapEntry reads a user entry into an Identity. Login and the organization
+// sync both use it, so they accept and read users the same way.
+func (m AttributeMapping) mapEntry(entry *goldap.Entry) (*Identity, error) {
 	id, err := externalID(entry, m.ID)
 	if err != nil {
 		return nil, err
@@ -437,7 +435,7 @@ func formatGUID(b []byte) (string, error) {
 }
 
 // operationError lets cancellation and network/TLS failures win over sentinel (may be nil).
-func (a *Authenticator) operationError(ctx context.Context, sentinel error, op string, err error) error {
+func operationError(ctx context.Context, sentinel error, op string, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("%w: %s: %w", ErrConnection, op, ctxErr)
 	}

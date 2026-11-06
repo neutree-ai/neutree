@@ -53,6 +53,33 @@ func LDAPConfig(spec *v1.IdentitySourceLDAPSpec, bindPassword string) ldap.Confi
 	return cfg
 }
 
+// LDAPSyncConfig builds the organization sync configuration of an LDAP
+// identity source. The spec is a stored one: the database has trimmed it.
+func LDAPSyncConfig(spec *v1.IdentitySourceLDAPSpec) ldap.SyncConfig {
+	sync := spec.Sync
+	if sync == nil {
+		return ldap.SyncConfig{}
+	}
+
+	cfg := ldap.SyncConfig{
+		OrgUnitBaseDN:        sync.OrgUnitBaseDN,
+		OrgUnitFilter:        sync.OrgUnitFilter,
+		OrgUnitNameAttribute: sync.OrgUnitNameAttribute,
+		GroupBaseDN:          sync.GroupBaseDN,
+		GroupFilter:          sync.GroupFilter,
+		GroupNameAttribute:   sync.GroupNameAttribute,
+		GroupMemberAttribute: sync.GroupMemberAttribute,
+		UserListFilter:       sync.UserListFilter,
+		DisabledUserFilter:   sync.DisabledUserFilter,
+	}
+
+	if sync.PageSize > 0 {
+		cfg.PageSize = uint32(sync.PageSize) //nolint:gosec // positive and bounded by the column type
+	}
+
+	return cfg
+}
+
 // OIDCConfig builds the relying party configuration of an OIDC identity
 // source. The spec is a stored one: the database has filled in the defaults.
 func OIDCConfig(spec *v1.IdentitySourceOIDCSpec, clientSecret string) oidc.Config {
@@ -79,10 +106,25 @@ func OIDCConfig(spec *v1.IdentitySourceOIDCSpec, clientSecret string) oidc.Confi
 	return cfg
 }
 
-// Fingerprint identifies what a source's clients are built from: its spec and
-// its secrets. Two equal fingerprints build the same clients. It is kept in
-// memory only; it is a hash of the secrets, so it is never written anywhere.
+// Fingerprint identifies what a source's login clients are built from: its
+// spec without the sync settings, and its secrets. Two equal fingerprints build
+// the same clients, so a sync request or a sync setting change rebuilds nothing.
+// It is kept in memory only; it is a hash of the secrets, so it is never
+// written anywhere.
 func Fingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSecrets) [sha256.Size]byte {
+	if spec != nil {
+		login := *spec
+		login.Sync = nil
+
+		if spec.LDAP != nil {
+			ldapSpec := *spec.LDAP
+			ldapSpec.Sync = nil
+			login.LDAP = &ldapSpec
+		}
+
+		spec = &login
+	}
+
 	specJSON, _ := json.Marshal(spec)       //nolint:errcheck // plain structs always marshal
 	secretsJSON, _ := json.Marshal(secrets) //nolint:errcheck // plain structs always marshal
 
