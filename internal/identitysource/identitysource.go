@@ -131,6 +131,25 @@ func Fingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSec
 	return sha256.Sum256(append(append(specJSON, 0), secretsJSON...))
 }
 
+// SyncFingerprint identifies what an organization sync reads the directory
+// with: the whole spec, sync settings included, and the secrets. It leaves
+// out spec.sync.requested_at, which triggers a sync by itself. Like
+// Fingerprint, it is kept in memory only.
+func SyncFingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSecrets) [sha256.Size]byte {
+	if spec != nil && spec.Sync != nil {
+		withoutRequest := *spec
+		syncSpec := *spec.Sync
+		syncSpec.RequestedAt = ""
+		withoutRequest.Sync = &syncSpec
+		spec = &withoutRequest
+	}
+
+	specJSON, _ := json.Marshal(spec)       //nolint:errcheck // plain structs always marshal
+	secretsJSON, _ := json.Marshal(secrets) //nolint:errcheck // plain structs always marshal
+
+	return sha256.Sum256(append(append(specJSON, 0), secretsJSON...))
+}
+
 // ConnectionTest checks that the source answers with its configuration: an
 // LDAP source dials and binds as the service account, an OIDC source fetches
 // its discovery document and signing keys. It does not log anyone in.

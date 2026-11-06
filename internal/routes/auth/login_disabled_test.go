@@ -50,6 +50,7 @@ func TestLDAPToken_ExpiredBanAllowsLogin(t *testing.T) {
 			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.LDAPSource, testLDAPSource),
 		}}, nil).Once()
 	expectProfile(d.storage, userID.String(), id.DisplayName, id.Email)
+	d.storage.EXPECT().UpdateExternalIdentityAccount(mock.Anything).Return(nil).Maybe()
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
 		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
 	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()

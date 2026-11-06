@@ -125,6 +125,8 @@ func (d *ldapTestDeps) expectEmail(userID, email string) {
 		Metadata: &v1.Metadata{Name: id.Username, DisplayName: id.DisplayName},
 		Spec:     &v1.UserProfileSpec{Email: id.Email},
 	}, nil).Maybe()
+	// The links in these tests record no username or email.
+	d.storage.EXPECT().UpdateExternalIdentityAccount(mock.Anything).Return(nil).Maybe()
 }
 
 func (d *ldapTestDeps) expectSession(userID string) {
@@ -154,6 +156,7 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String(),
+		Username: "alice", Email: "alice@example.org",
 	}).Return(nil).Once()
 	d.expectSession(userID.String())
 
@@ -363,12 +366,12 @@ func TestAuthRoutes_Registration(t *testing.T) {
 // IDs differing only in case are distinct accounts, and any ID gives a valid
 // email.
 func TestLDAPPlaceholderEmail(t *testing.T) {
-	upper := ldapPlaceholderEmail(testLDAPSource, "ABC")
-	lower := ldapPlaceholderEmail(testLDAPSource, "abc")
+	upper := internalauth.LDAPPlaceholderEmail(testLDAPSource, "ABC")
+	lower := internalauth.LDAPPlaceholderEmail(testLDAPSource, "abc")
 	assert.NotEqual(t, upper, lower)
 
 	for _, id := range []string{"ABC", "John Smith", "a@b", "cn=x,dc=y"} {
-		email := ldapPlaceholderEmail(testLDAPSource, id)
+		email := internalauth.LDAPPlaceholderEmail(testLDAPSource, id)
 		local, domain, ok := strings.Cut(email, "@")
 		assert.True(t, ok, id)
 		assert.Regexp(t, "^[0-9a-f]{32}$", local, id)
