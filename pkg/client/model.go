@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -231,13 +232,19 @@ type ModelDetail struct {
 
 // Get retrieves detailed information about a specific model version
 func (s *ModelsService) Get(workspace, registry, modelName, version string) (*ModelDetail, error) {
+	return s.GetContext(context.Background(), workspace, registry, modelName, version)
+}
+
+// GetContext retrieves detailed information about a specific model version with
+// a cancelable request.
+func (s *ModelsService) GetContext(ctx context.Context, workspace, registry, modelName, version string) (*ModelDetail, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s",
 		s.client.baseURL, workspace, registry, modelName)
 	if version != "" && version != v1.LatestVersion {
 		endpoint = endpoint + "?" + url.Values{"version": []string{version}}.Encode()
 	}
 
-	req, err := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}

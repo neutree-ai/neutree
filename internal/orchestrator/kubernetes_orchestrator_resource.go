@@ -403,18 +403,6 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 // setModelRegistryVariables adapts model registry specific settings
 func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint,
 	deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry) error {
-	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
-
-	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get model caches")
-	}
-
-	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
-	if len(modelCaches) > 0 {
-		modelCacheRelativePath = modelCaches[0].Name
-	}
-
 	// With no registry there is nothing to place from: the model args keep the
 	// bare name / version the spec carries.
 	switch endpointModelRegistryType(modelRegistry) {
@@ -431,7 +419,13 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+			modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultK8sClusterModelCacheMountPath)
+			if err != nil {
+				return errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+			}
+
+			data.ModelArgs["path"] = modelPath
 
 			data.Volumes = append(data.Volumes, corev1.Volume{
 				Name: "bentoml-model-registry",
@@ -462,7 +456,13 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+		modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultK8sClusterModelCacheMountPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+		}
+
+		data.ModelArgs["path"] = modelPath
 
 	case v1.ModelScopeModelRegistryType:
 		data.Env[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -477,7 +477,13 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+		modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultK8sClusterModelCacheMountPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+		}
+
+		data.ModelArgs["path"] = modelPath
 	}
 
 	return nil

@@ -9,6 +9,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cleanup"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/delete"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/engine"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/exp"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/export"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/get"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
@@ -30,6 +31,7 @@ Available Commands:
   • model: Manage Neutree models
   • image: Push container images to a Neutree-managed image registry
   • engine: Manage Neutree engines
+  • exp: Run experimental commands
 
 Examples:
   # Show help information
@@ -55,6 +57,7 @@ Examples:
 	neutreeCliCmd.AddCommand(cleanup.NewCleanupCmd())
 	neutreeCliCmd.AddCommand(delete.NewDeleteCmd())
 	neutreeCliCmd.AddCommand(engine.NewEngineCmd())
+	neutreeCliCmd.AddCommand(exp.NewExpCmd())
 	neutreeCliCmd.AddCommand(export.NewExportCmd())
 	neutreeCliCmd.AddCommand(get.NewGetCmd())
 	neutreeCliCmd.AddCommand(image.NewImageCmd())
