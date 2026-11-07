@@ -226,6 +226,10 @@ gateway-lua-test: ## Run the Kong plugin Lua unit tests (LuaJIT + busted, in Doc
 	docker build --progress=plain -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec
 	docker run --rm -v $(CURDIR)/gateway:/gateway -w /gateway/kong/plugins/neutree-ai-gateway $(GATEWAY_LUA_TEST_IMAGE) sh spec/run.sh
 
+.PHONY: gateway-integration-test
+gateway-integration-test: ## Run real Kong multi-worker failover acceptance (Linux + Docker)
+	python3 $(GATEWAY_PLUGIN_DIR)/spec/cooldown_integration.py
+
 ##@ Database Testing
 
 .PHONY: db-test

@@ -1,6 +1,6 @@
 -- Model-routing metric definitions and aggregation. Business state is read-only.
 local M = {}
-local completed, duration, inflight, limits, compiled
+local completed, duration, inflight, limits, compiled, cooldowns
 local seeded = {}
 local names = { "endpoint", "virtual_model", "gateway_instance", "upstream", "upstream_model" }
 
@@ -10,6 +10,8 @@ end
 
 -- Called once per worker by the metrics dispatcher.
 function M.init(prometheus)
+    cooldowns = prometheus:counter("neutree_route_target_cooldowns_total",
+        "Successful entries into target failure cooldown, including failed recovery probes", names)
     completed = prometheus:counter("neutree_route_completed_requests_total",
         "Completed logical routing requests, including requests with no selected target",
         { "endpoint", "virtual_model", "gateway_instance", "upstream", "upstream_model", "request_mode", "status_code" })
@@ -23,12 +25,21 @@ function M.init(prometheus)
         { "endpoint", "virtual_model", "gateway_instance" }, prometheus.LOCAL_STORAGE)
 end
 
+-- Called only after a health transition commits; no request context is needed
+-- because lock contention may defer that transition beyond the log phase.
+function M.cooldown(key, instance)
+    if not cooldowns then return end -- The optional metrics plugin is disabled.
+    local endpoint, model, upstream, upstream_model = key:match("^([^%z]*)%z([^%z]*)%z([^%z]*)%z([^%z]*)$")
+    cooldowns:inc(1, labels(endpoint, model, upstream, upstream_model, instance))
+end
+
 local function seed_target(target, seen, instance)
     if target.limit == nil then return end -- draining targets are not configured
     local values = labels(target.endpoint, target.virtual_model, target.upstream, target.upstream_model, instance)
     local key = table.concat(values, "\0")
     seen[key] = true
     if seeded[key] then return end
+    cooldowns:inc(0, values)
     for _, mode in ipairs({ "stream", "non_stream", "unknown" }) do
         values[6], values[7] = mode, "200"
         completed:inc(0, values)

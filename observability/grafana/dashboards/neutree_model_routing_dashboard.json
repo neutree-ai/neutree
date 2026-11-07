@@ -1382,7 +1382,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "One row per original exposed-model, upstream and upstream-model combination. Model routing shares use all completed requests with a selected target for that model, including successes and failures. Column filters do not change the denominator. HTTP outcomes are attributed to routing targets and do not measure provider health.",
+      "description": "One row per original exposed-model, upstream and upstream-model combination. Model routing shares use all completed requests with a selected target for that model, including successes and failures. Column filters do not change the denominator. HTTP outcomes are attributed to routing targets and do not measure provider health. Cooldowns counts successful entries into failure cooldown within the selected time range, including failed recovery probes, summed across gateway instances. It is not current health or the number of failover requests. Scraped counter increases are estimates; restarts before scraping can lose events.",
       "targets": [
         {
           "refId": "A",
@@ -1429,6 +1429,13 @@
         {
           "refId": "H",
           "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "I",
+          "expr": "label_replace(sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_target_cooldowns_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])), \"metric_column\", \"cooldowns\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -1865,6 +1872,30 @@
                 "value": "Average latency"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cooldowns"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cooldowns"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              }
+            ]
           }
         ]
       },
@@ -1898,10 +1929,11 @@
               "routing_share": 3,
               "success_count": 4,
               "failure_count": 5,
-              "success_rate": 6,
-              "p95_latency": 7,
-              "p99_latency": 8,
-              "average_latency": 9
+              "success_rate": 7,
+              "p95_latency": 8,
+              "p99_latency": 9,
+              "average_latency": 10,
+              "cooldowns": 6
             }
           }
         },

@@ -223,6 +223,32 @@ local function target_mapping(state, model)
     return state and state.current and state.current.upstream_model
 end
 
+local function observe_target_result()
+    local ctx = kong.ctx.plugin
+    local state = ctx.routing_state
+    if not state or state.legacy then return end
+    local outcome = "neutral"
+    if ctx.target_failure then
+        outcome = "failure"
+    elseif ngx.ctx.KONG_PROXIED then
+        local status = kong.service.response.get_status()
+        -- Kong's buffered subrequest exits with 502/504 without a service
+        -- status. Local access/quota rejections never set KONG_PROXIED.
+        if not status then
+            local response_status = kong.response.get_status()
+            if response_status == 502 or response_status == 503 or response_status == 504 then
+                status = response_status
+            end
+        end
+        if status == 429 or status == 502 or status == 503 or status == 504 then
+            outcome = "failure"
+        elseif status == 200 then
+            outcome = "success"
+        end
+    end
+    routing.observe(state, outcome)
+end
+
 local function target_entry(conf, state)
     if state and state.legacy then
         return state.current
@@ -259,6 +285,7 @@ local function set_upstream_target(entry)
         -- blocks the whole worker for the resolver timeout when a query is lost.
         local ip, err = kong.dns.toip(target_host)
         if not ip then
+            kong.ctx.plugin.target_failure = true
             return nil, kong.response.exit(502, {
                 error = {
                     message = "DNS resolution failed for upstream: " .. target_host .. " (" .. (err or "unknown") .. ")",
@@ -1352,6 +1379,13 @@ function AIGatewayHandler:access(conf)
         if conf.model_routes or conf.upstreams then
             local state, matched_entry, detail = begin_routing(conf, openai_req.model)
             if not state then
+                if matched_entry == "health_unavailable" then
+                    kong.log.err("unable to check upstream health: ", detail)
+                    return anthropic_error(500, "api_error", "Unable to check upstream health")
+                end
+                if matched_entry == "targets_unavailable" then
+                    return anthropic_error(503, "overloaded_error", "All upstreams are temporarily unavailable")
+                end
                 if matched_entry == "counter_unavailable" then
                     kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
                     return anthropic_error(500, "api_error", "Unable to check upstream capacity")
@@ -1477,6 +1511,13 @@ function AIGatewayHandler:access(conf)
 
         local state, matched_entry, detail = begin_routing(conf, ai_request.model)
         if not state then
+            if matched_entry == "health_unavailable" then
+                kong.log.err("unable to check upstream health: ", detail)
+                return fail(500, "Unable to check upstream health")
+            end
+            if matched_entry == "targets_unavailable" then
+                return fail(503, "All upstreams are temporarily unavailable")
+            end
             if matched_entry == "counter_unavailable" then
                 kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
                 return fail(500, "Unable to check upstream capacity")
@@ -1529,6 +1570,8 @@ function AIGatewayHandler:header_filter(conf)
     if kong.ctx.plugin.skip then
         return
     end
+
+    observe_target_result()
 
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
@@ -1588,6 +1631,8 @@ function AIGatewayHandler:log(conf)
     if kong.ctx.plugin.skip then
         return
     end
+
+    observe_target_result()
 
     local response_status = kong.service.response.get_status()
 
