@@ -419,6 +419,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "neutree.fullname" . }}-vector-pvc
+  annotations:
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
