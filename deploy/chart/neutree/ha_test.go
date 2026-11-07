@@ -13,14 +13,14 @@ import (
 )
 
 // haDeployments maps each HA-capable values block to its Deployment name and
-// the component label its pods carry.
+// the component label its pods carry. Vector, a StatefulSet in HA mode, has
+// its own tests.
 var haDeployments = map[string]struct{ deployment, component string }{
 	"api":       {"neutree-api", "neutree-api"},
 	"auth":      {"neutree-auth", "neutree-auth"},
 	"postgrest": {"neutree-postgrest", "neutree-postgrest"},
 	"core":      {"neutree-core", "neutree-core"},
 	"kong":      {"neutree-kong", "neutree-kong"},
-	"vector":    {"neutree-vector", "neutree-vector"},
 }
 
 // haValues is values-ha.yaml with extra top-level blocks replacing its own.
@@ -84,10 +84,11 @@ func TestHAModeDeployments(t *testing.T) {
 
 func TestHAModePodDisruptionBudgets(t *testing.T) {
 	resources := renderChart(t, haValues(nil))
-	// One per stateless component, plus vmagent, the subcharts' vminsert,
-	// vmselect, vmstorage and grafana (observability_ha_test.go), and the
-	// CloudNativePG operator (TestHAModeOperatorReplicas).
-	require.Len(t, renderedPDBs(resources), len(haDeployments)+6)
+	// One per stateless component, plus vector (TestVectorHAStatefulSet),
+	// vmagent, the subcharts' vminsert, vmselect, vmstorage and grafana
+	// (observability_ha_test.go), and the CloudNativePG operator
+	// (TestHAModeOperatorReplicas).
+	require.Len(t, renderedPDBs(resources), len(haDeployments)+7)
 
 	for key, want := range haDeployments {
 		var pdb policyv1.PodDisruptionBudget
@@ -225,4 +226,82 @@ func TestHAModeOperatorReplicas(t *testing.T) {
 	renderedObject(t, renderChart(t, nil), "Deployment", "neutree-cloudnative-pg", &deployment)
 	require.Equal(t, int32(1), *deployment.Spec.Replicas)
 	require.Nil(t, deployment.Spec.Template.Spec.Affinity)
+}
+
+func TestVectorSingleModeDeployment(t *testing.T) {
+	resources := renderChart(t, nil)
+
+	var deployment appsv1.Deployment
+	renderedObject(t, resources, "Deployment", "neutree-vector", &deployment)
+	require.Equal(t, int32(1), *deployment.Spec.Replicas)
+	require.Equal(t, appsv1.RecreateDeploymentStrategyType, deployment.Spec.Strategy.Type)
+	require.Nil(t, deployment.Spec.Template.Spec.Affinity)
+
+	var pvc corev1.PersistentVolumeClaim
+	renderedObject(t, resources, "PersistentVolumeClaim", "neutree-vector-pvc", &pvc)
+	require.Equal(t, "neutree-vector-pvc", vectorDataVolume(t, deployment.Spec.Template.Spec).PersistentVolumeClaim.ClaimName)
+}
+
+func TestVectorHAStatefulSet(t *testing.T) {
+	resources := renderChart(t, haValues(map[string]interface{}{
+		"vector": map[string]interface{}{
+			"persistence": map[string]interface{}{"enabled": true, "size": "20Gi", "storageClassName": "fast"},
+		},
+	}))
+
+	for _, r := range resources.Items {
+		require.False(t, r.GetKind() == "Deployment" && r.GetName() == "neutree-vector", "no Vector Deployment in HA mode")
+		require.False(t, r.GetKind() == "PersistentVolumeClaim" && r.GetName() == "neutree-vector-pvc", "no shared PVC in HA mode")
+	}
+
+	var sts appsv1.StatefulSet
+	renderedObject(t, resources, "StatefulSet", "neutree-vector", &sts)
+	require.Equal(t, int32(3), *sts.Spec.Replicas)
+	require.Equal(t, "neutree-vector", sts.Spec.ServiceName)
+	require.Equal(t, appsv1.ParallelPodManagement, sts.Spec.PodManagementPolicy)
+	require.Equal(t, appsv1.RollingUpdateStatefulSetStrategyType, sts.Spec.UpdateStrategy.Type)
+	requireHostnameAntiAffinity(t, sts.Spec.Template.Spec.Affinity, "neutree-vector", "vector")
+
+	require.Len(t, sts.Spec.VolumeClaimTemplates, 1)
+	claim := sts.Spec.VolumeClaimTemplates[0]
+	require.Equal(t, "data", claim.Name)
+	require.NotContains(t, claim.Labels, "helm.sh/chart", "claim templates are immutable")
+	require.Equal(t, "fast", *claim.Spec.StorageClassName)
+	require.Equal(t, "20Gi", claim.Spec.Resources.Requests.Storage().String())
+	for _, v := range sts.Spec.Template.Spec.Volumes {
+		require.NotEqual(t, "data", v.Name, "data comes from the claim template")
+	}
+
+	var pdb policyv1.PodDisruptionBudget
+	renderedObject(t, resources, "PodDisruptionBudget", "neutree-vector", &pdb)
+	require.Equal(t, intstr.FromInt32(1), *pdb.Spec.MaxUnavailable)
+}
+
+func TestVectorHAWithoutPersistence(t *testing.T) {
+	resources := renderChart(t, haValues(map[string]interface{}{
+		"vector": map[string]interface{}{
+			"replicaCount": 2,
+			"persistence":  map[string]interface{}{"enabled": false},
+		},
+	}))
+
+	var sts appsv1.StatefulSet
+	renderedObject(t, resources, "StatefulSet", "neutree-vector", &sts)
+	require.Equal(t, int32(2), *sts.Spec.Replicas)
+	require.Empty(t, sts.Spec.VolumeClaimTemplates)
+	require.NotNil(t, vectorDataVolume(t, sts.Spec.Template.Spec).EmptyDir)
+}
+
+func vectorDataVolume(t *testing.T, spec corev1.PodSpec) corev1.Volume {
+	t.Helper()
+
+	for _, v := range spec.Volumes {
+		if v.Name == "data" {
+			return v
+		}
+	}
+
+	require.Fail(t, "no data volume")
+
+	return corev1.Volume{}
 }

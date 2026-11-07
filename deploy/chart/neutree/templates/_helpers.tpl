@@ -424,6 +424,23 @@ vmagent: neutree-vmagent
 {{- end -}}
 
 {{/*
+PVC spec of Vector's data volume: the single PVC of the Deployment, or the
+per-pod claim template of the StatefulSet in HA mode.
+*/}}
+{{- define "neutree.vector.pvcSpec" -}}
+{{- with .Values.vector.persistence.storageClassName }}
+storageClassName: {{ . }}
+{{- end }}
+accessModes:
+{{- range .Values.vector.persistence.accessModes }}
+  - {{ . | quote }}
+{{- end }}
+resources:
+  requests:
+    storage: {{ .Values.vector.persistence.size | quote }}
+{{- end -}}
+
+{{/*
 vmagent replicas: an explicit vmagent.replicaCount wins; otherwise 2 in HA
 mode (each replica scrapes every target, so a third only adds load), else 1.
 */}}

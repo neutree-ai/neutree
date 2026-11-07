@@ -1,4 +1,6 @@
 {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . -}}
+{{- $ha := include "neutree.ha.enabled" . -}}
+{{- $persistentVolume := .Values.vector.persistence.enabled -}}
 {{- /* The trace sink always uses a disk buffer, which needs the heartbeat. */ -}}
 {{- $traceHeartbeat := $aiTraceStoreUrl -}}
 ---
@@ -327,15 +329,24 @@ spec:
   type: ClusterIP
 ---
 apiVersion: apps/v1
+{{- if $ha }}
+# Each replica locks its own disk buffers, so in HA mode every pod gets its
+# own volume from the volumeClaimTemplates below.
+kind: StatefulSet
+{{- else }}
 kind: Deployment
+{{- end }}
 metadata:
   name: {{ include "neutree.fullname" . }}-vector
   labels:
     {{ include "neutree.labels" . | nindent 4 }}
 spec:
   replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.vector) }}
-  {{- if include "neutree.ha.enabled" . }}
-  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- if $ha }}
+  serviceName: {{ include "neutree.fullname" . }}-vector
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
   {{- else }}
   # The disk buffers are locked by one Vector process and the volume may be
   # ReadWriteOnce, so the old pod must stop before the new one starts.
@@ -425,13 +436,14 @@ spec:
       volumes:
         - name: jwt-secret
           emptyDir: {}
+        {{- if not $persistentVolume }}
         - name: data
-          {{- if .Values.vector.persistence.enabled }}
+          emptyDir: {}
+        {{- else if not $ha }}
+        - name: data
           persistentVolumeClaim:
             claimName: {{ include "neutree.fullname" . }}-vector-pvc
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+        {{- end }}
         - name: logsink-secrets
           secret:
             secretName: {{ include "neutree.fullname" . }}-vector-logsink-secrets
@@ -447,7 +459,18 @@ spec:
                   items:
                     - key: logsinks.yaml
                       path: logsinks.yaml
-{{- if .Values.vector.persistence.enabled }}
+  {{- if and $ha $persistentVolume }}
+  volumeClaimTemplates:
+    # Claim templates cannot change after creation, so they carry no
+    # version labels.
+    - metadata:
+        name: data
+        labels:
+          {{- include "neutree.selectorLabels" . | nindent 10 }}
+      spec:
+        {{- include "neutree.vector.pvcSpec" . | nindent 8 }}
+  {{- end }}
+{{- if and $persistentVolume (not $ha) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -458,14 +481,5 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  {{- if .Values.vector.persistence.storageClassName }}
-  storageClassName: {{ .Values.vector.persistence.storageClassName }}
-  {{- end }}
-  accessModes:
-  {{- range .Values.vector.persistence.accessModes }}
-    - {{ . | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.vector.persistence.size | quote }}
+  {{- include "neutree.vector.pvcSpec" . | nindent 2 }}
 {{- end }}

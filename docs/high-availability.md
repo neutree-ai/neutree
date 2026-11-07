@@ -26,7 +26,7 @@ HA mode does not cover the inference clusters themselves (Ray head, router, engi
 | PostgREST | 1 | 3 | Active-active |
 | PostgreSQL | 1 instance | 3 instances | One primary, two standbys (CloudNativePG). Synchronous replication: a commit returns after one standby has it |
 | Kong | 1 | 3 | Active-active |
-| Vector | 1 | 3 | Active-active |
+| Vector | 1 | 3 | Active-active. A StatefulSet in HA mode, so each pod keeps its disk buffers on its own volume |
 | vmagent | 1 | 2 | Active-active. Each replica scrapes every target; storage keeps one copy |
 | vminsert / vmselect | 1 | 3 | Active-active |
 | vmstorage | 1 | 3 | Every sample is stored on 2 nodes, so one node can be lost without gaps |
@@ -50,9 +50,8 @@ All components reach PostgreSQL through the `<release>-pg-rw` Service. This Serv
 - **Storage.** A StorageClass that provisions ReadWriteOnce volumes. In HA mode the chart creates:
   - one PostgreSQL volume per instance (`db.persistence.size`, 40Gi by default), 3 in total;
   - one volume per vmstorage node, 3 in total;
-  - one VictoriaLogs volume.
-
-  Each Vector pod also uses up to 1 GiB of node disk (an `emptyDir`) as a trace buffer.
+  - one VictoriaLogs volume;
+  - one Vector volume per pod for its disk buffers (`vector.persistence.size`, 10Gi by default), 3 in total.
 
 ## Enabling HA mode
 
@@ -81,6 +80,7 @@ The switch is a planned operational change. Schedule a maintenance window for it
 - **The upgrade takes longer for larger databases.** The new standbys copy the whole database first. Writes are not blocked during the copy.
 - **Grafana starts on an empty database.** Provisioned dashboards and data sources come back. Users and dashboards saved in the Grafana UI stay in the old SQLite volume, which is deleted.
 - **Existing metrics stay on the first vmstorage node only.** Replication applies to samples written after the switch.
+- **Vector moves to a StatefulSet.** Helm deletes the single-mode Vector Deployment and its volume, and the StatefulSet creates one new volume per pod. The old pod tries to deliver its buffered usage records and traces during its 60-second shutdown grace period. Records still in the old volume after that are lost.
 
 ### From a release with PostgreSQL 13
 
@@ -154,9 +154,9 @@ This happens when two of three nodes fail, or when the primary is cut off from b
 
 ## Known limitations
 
-- **VictoriaLogs is a single point of failure.** It stores inference traces. While it is down, trace queries are unavailable. Vector buffers traces on disk and sends them when it is back. After a pod crash, VictoriaLogs returns within seconds. After a node failure, Kubernetes evicts the pod after about 5 minutes and must then detach its volume from the failed node. Trace queries can be unavailable for about 11 minutes. Buffered traces are lost if a Vector pod stops while VictoriaLogs is down for longer than the pod's 60-second shutdown grace period. This can happen during a rolling restart that moves VictoriaLogs to another node.
+- **VictoriaLogs is a single point of failure.** It stores inference traces. While it is down, trace queries are unavailable. Vector buffers traces on its volume and sends them when it is back. After a pod crash, VictoriaLogs returns within seconds. After a node failure, Kubernetes evicts the pod after about 5 minutes and must then detach its volume from the failed node. Trace queries can be unavailable for about 11 minutes.
 - **Trace delivery can be delayed by up to about 10 seconds.** A trace can reach VictoriaLogs up to about 10 seconds after the request ends.
 - **The quota check fails open during a primary switchover.** While the PostgreSQL primary is switching, Kong cannot read the quota balance. Requests are let through without quota enforcement during that window.
 - **Quota lookups add latency when PostgreSQL is slow.** Each Kong pod caches a key's quota balance for 5 seconds. The first request after the cache expires reads the balance from PostgreSQL before it is forwarded. Request success is not affected, but these requests are slower by the database round trips. For example, with 200 ms of network latency to PostgreSQL, about one in four inference requests took about 0.8 seconds longer.
 - **Rate limits and concurrency limits are counted per Kong pod.** Each Kong replica keeps its own counters. With three replicas, an API key can reach up to about three times its configured rate or concurrency limit. Token quotas are not affected, because they are read from the database.
-- **Usage loss can exceed 10 seconds in one case.** While the API or PostgreSQL is unavailable, Vector holds usage records in memory. If a Vector pod crashes during that time, it loses its whole backlog.
+- **A Vector pod on a failed node holds its backlog until the node returns.** Each Vector pod keeps undelivered usage records and traces on its own ReadWriteOnce volume. Kubernetes does not start a StatefulSet pod elsewhere while its node is unreachable, so that backlog is delivered only after the node is back, or after an operator deletes the pod and its volume (the backlog is then lost). The other Vector pods keep serving.
