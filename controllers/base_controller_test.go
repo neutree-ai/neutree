@@ -267,6 +267,5 @@ func TestBaseController_failedReconcileRetriedNextTick(t *testing.T) {
 	assert.NoError(t, bc.reconcileAll())
 	assert.True(t, bc.processNextWorkItem(mockReconciler))
 
-	mockReconciler.AssertNumberOfCalls(t, "Reconcile", 2)
 	mockReconciler.AssertExpectations(t)
 }

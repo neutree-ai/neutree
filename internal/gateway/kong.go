@@ -36,7 +36,7 @@ type Kong struct {
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
-	kongClient, err := kong.NewClient(&opts.AdminUrl, newKongAdminHTTPClient(defaultKongAdminTimeouts))
+	kongClient, err := kong.NewClient(&opts.AdminUrl, newKongAdminHTTPClient(kongAdminRequestTimeout, kongAdminResponseHeaderTimeout))
 	if err != nil {
 		return nil, err
 	}
