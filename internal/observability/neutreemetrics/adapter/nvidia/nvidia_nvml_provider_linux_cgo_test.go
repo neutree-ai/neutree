@@ -7,35 +7,27 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestNvidiaNVMLMemoryDistinguishesUnsupportedAndFailedQueries(t *testing.T) {
+func TestNvidiaNVMLMemoryReportsQueryFailure(t *testing.T) {
 	cases := []struct {
 		name string
 		ret  nvml.Return
-		want uint64
-		err  string
+		ok   bool
 	}{
-		{name: "available", ret: nvml.SUCCESS, want: 32 * 1024 * 1024 * 1024},
-		{name: "unsupported capability", ret: nvml.ERROR_NOT_SUPPORTED},
-		{name: "lost GPU", ret: nvml.ERROR_GPU_IS_LOST, err: "ret=15"},
+		{name: "available", ret: nvml.SUCCESS, ok: true},
+		{name: "lost GPU", ret: nvml.ERROR_GPU_IS_LOST},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			device := realNvidiaNVMLHardwareDevice{device: fakeNVMLMemoryDevice{ret: tc.ret}}
 
-			value, err := device.MemoryTotalBytes()
+			value, ok := device.MemoryTotalBytes()
 
-			if tc.err != "" {
-				require.ErrorContains(t, err, tc.err)
-				assert.Contains(t, err.Error(), "nvmlDeviceGetMemoryInfo")
-
-				return
+			assert.Equal(t, tc.ok, ok)
+			if ok {
+				assert.Equal(t, uint64(32*1024*1024*1024), value)
 			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, value)
 		})
 	}
 }

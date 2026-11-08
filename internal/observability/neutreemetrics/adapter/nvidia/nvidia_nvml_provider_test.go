@@ -3,7 +3,6 @@ package nvidia
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -53,41 +52,36 @@ func TestNvidiaNVMLHardwareInfoProviderBuildsInventory(t *testing.T) {
 	assert.Equal(t, "0", infos[0].NUMANode)
 }
 
-func TestNvidiaNVMLHardwareInfoProviderUnavailableReturnsNoInventory(t *testing.T) {
+func TestNvidiaNVMLHardwareInfoProviderPanicsOnInitFailure(t *testing.T) {
 	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{}}
-	infos, err := provider.GPUHardwareInfos(context.Background())
-
-	require.Error(t, err)
-	assert.Empty(t, infos)
-	assert.Error(t, (&accelerator{provider: provider}).ValidateHardware(context.Background()))
+	assert.Panics(t, func() { _, _ = provider.GPUHardwareInfos(context.Background()) })
 }
 
 func TestNvidiaNVMLHardwareInfoProviderReportsDeviceCountFailure(t *testing.T) {
-	countErr := errors.New("nvmlDeviceGetCount: ERROR_UNKNOWN (ret=999)")
-	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{initOK: true, countErr: countErr}}
+	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{initOK: true, countUnavailable: true}}
 
 	infos, err := provider.GPUHardwareInfos(context.Background())
 
-	require.ErrorIs(t, err, countErr)
+	require.ErrorContains(t, err, "nvmlDeviceGetCount")
 	assert.Empty(t, infos)
 }
 
 func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 	cases := []struct {
-		name      string
-		handleErr error
-		uuidErr   error
-		wantLog   string
+		name              string
+		handleUnavailable bool
+		uuidUnavailable   bool
+		wantLog           string
 	}{
 		{
-			name:      "GPU handle unavailable as reported by nvidia-smi",
-			handleErr: errors.New("nvmlDeviceGetHandleByIndex: ERROR_UNKNOWN (ret=999)"),
-			wantLog:   "index 4: nvmlDeviceGetHandleByIndex: ERROR_UNKNOWN (ret=999)",
+			name:              "GPU handle unavailable as reported by nvidia-smi",
+			handleUnavailable: true,
+			wantLog:           "nvmlDeviceGetHandleByIndex failed",
 		},
 		{
-			name:    "driver error while reading UUID",
-			uuidErr: errors.New("nvmlDeviceGetUUID: ERROR_UNKNOWN (ret=999)"),
-			wantLog: "index 4: nvmlDeviceGetUUID: ERROR_UNKNOWN (ret=999)",
+			name:            "driver errors while reading GPU properties",
+			uuidUnavailable: true,
+			wantLog:         "nvmlDeviceGetUUID",
 		},
 	}
 
@@ -104,11 +98,19 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 
 			devices := make([]nvidiaNVMLHardwareDevice, 8)
 			for i := range devices {
-				devices[i] = fakeNvidiaNVMLHardwareDevice{uuid: fmt.Sprintf("GPU-%d", i), index: i, minorNumber: i}
+				devices[i] = fakeNvidiaNVMLHardwareDevice{
+					uuid: fmt.Sprintf("GPU-%d", i), index: i, minorNumber: i,
+					product: "RTX 5090", pciBusID: fmt.Sprintf("0000:%02x:00.0", i),
+				}
 			}
-			devices[4] = fakeNvidiaNVMLHardwareDevice{uuid: "GPU-4", index: 4, minorNumber: 4, uuidErr: tc.uuidErr}
+			devices[4] = fakeNvidiaNVMLHardwareDevice{
+				uuid: "GPU-4", index: 4, minorNumber: 4, product: "RTX 5090",
+				pciBusID: "0000:98:00.0", uuidUnavailable: tc.uuidUnavailable,
+				memoryUnavailable: tc.uuidUnavailable,
+			}
 			accel := &accelerator{provider: nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{
-				initOK: true, devices: devices, deviceErrors: map[int]error{4: tc.handleErr},
+				initOK: true, devices: devices, deviceUnavailable: map[int]bool{4: tc.handleUnavailable},
+				driver: "595.58.03", cuda: "13.1",
 			}}}
 
 			snapshot, err := accel.DiscoverHardware(context.Background())
@@ -123,16 +125,22 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 			assert.True(t, snapshot.Accelerator.Devices[7].Healthy)
 			klog.Flush()
 			assert.Contains(t, logs.String(), tc.wantLog)
-			assert.NoError(t, accel.ValidateHardware(context.Background()), "a single failed GPU does not prevent startup")
+			if tc.uuidUnavailable {
+				assert.Contains(t, logs.String(), "nvmlDeviceGetMemoryInfo")
+				require.NotNil(t, snapshot.Accelerator.Devices[4].MinorNumber)
+				assert.Equal(t, 4, *snapshot.Accelerator.Devices[4].MinorNumber)
+				assert.Equal(t, "RTX 5090", snapshot.Accelerator.Devices[4].ProductName)
+				assert.Equal(t, "0000:98:00.0", snapshot.Details[4].PCIEBusID)
+			}
 		})
 	}
 }
 
 func TestNvidiaNVMLHardwareInfoProviderKeepsIdentityWhenMemoryIsLost(t *testing.T) {
 	accel := &accelerator{provider: nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{
-		initOK: true,
+		initOK: true, driver: "595.58.03", cuda: "13.1",
 		devices: []nvidiaNVMLHardwareDevice{fakeNvidiaNVMLHardwareDevice{
-			uuid: "GPU-lost", memoryUnavailable: true,
+			uuid: "GPU-lost", product: "RTX 5090", pciBusID: "0000:98:00.0", memoryUnavailable: true,
 		}},
 	}}}
 
@@ -149,36 +157,27 @@ func TestNvidiaNVMLHardwareInfoProviderKeepsIdentityWhenMemoryIsLost(t *testing.
 }
 
 type fakeNvidiaNVMLHardwareClient struct {
-	initOK       bool
-	countErr     error
-	deviceErrors map[int]error
-	driver       string
-	cuda         string
-	devices      []nvidiaNVMLHardwareDevice
+	initOK            bool
+	countUnavailable  bool
+	deviceUnavailable map[int]bool
+	driver            string
+	cuda              string
+	devices           []nvidiaNVMLHardwareDevice
 }
 
-func (c fakeNvidiaNVMLHardwareClient) Init() error {
-	if !c.initOK {
-		return errors.New("nvmlInit: ERROR_LIBRARY_NOT_FOUND (ret=12)")
-	}
-	return nil
-}
+func (c fakeNvidiaNVMLHardwareClient) Init() bool { return c.initOK }
 
 func (fakeNvidiaNVMLHardwareClient) Shutdown() {}
 
-func (c fakeNvidiaNVMLHardwareClient) DeviceCount() (int, error) {
-	return len(c.devices), c.countErr
+func (c fakeNvidiaNVMLHardwareClient) DeviceCount() (int, bool) {
+	return len(c.devices), !c.countUnavailable
 }
 
-func (c fakeNvidiaNVMLHardwareClient) Device(index int) (nvidiaNVMLHardwareDevice, error) {
-	if err := c.deviceErrors[index]; err != nil {
-		return nil, err
+func (c fakeNvidiaNVMLHardwareClient) Device(index int) (nvidiaNVMLHardwareDevice, bool) {
+	if c.deviceUnavailable[index] {
+		return nil, false
 	}
-	if index < 0 || index >= len(c.devices) {
-		return nil, errors.New("invalid index")
-	}
-
-	return c.devices[index], nil
+	return c.devices[index], true
 }
 
 func (c fakeNvidiaNVMLHardwareClient) DriverVersion() (string, bool) {
@@ -191,7 +190,7 @@ func (c fakeNvidiaNVMLHardwareClient) CUDADriverVersion() (string, bool) {
 
 type fakeNvidiaNVMLHardwareDevice struct {
 	uuid              string
-	uuidErr           error
+	uuidUnavailable   bool
 	index             int
 	minorNumber       int
 	product           string
@@ -206,7 +205,7 @@ type fakeNvidiaNVMLHardwareDevice struct {
 	numaNode          int
 }
 
-func (d fakeNvidiaNVMLHardwareDevice) UUID() (string, error) { return d.uuid, d.uuidErr }
+func (d fakeNvidiaNVMLHardwareDevice) UUID() (string, bool) { return d.uuid, !d.uuidUnavailable }
 
 func (d fakeNvidiaNVMLHardwareDevice) Index() (int, bool) { return d.index, true }
 
@@ -226,12 +225,8 @@ func (d fakeNvidiaNVMLHardwareDevice) PCIEGeneration() (int, bool) { return d.pc
 
 func (d fakeNvidiaNVMLHardwareDevice) PCIEWidth() (int, bool) { return d.pcieWidth, true }
 
-func (d fakeNvidiaNVMLHardwareDevice) MemoryTotalBytes() (uint64, error) {
-	if d.memoryUnavailable {
-		return d.memoryBytes, errors.New("nvmlDeviceGetMemoryInfo: ERROR_GPU_IS_LOST (ret=15)")
-	}
-
-	return d.memoryBytes, nil
+func (d fakeNvidiaNVMLHardwareDevice) MemoryTotalBytes() (uint64, bool) {
+	return d.memoryBytes, !d.memoryUnavailable
 }
 
 func (d fakeNvidiaNVMLHardwareDevice) NUMANode() (int, bool) { return d.numaNode, true }

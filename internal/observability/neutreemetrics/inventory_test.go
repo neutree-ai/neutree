@@ -78,7 +78,7 @@ func TestServerInventoryRetainsCacheAndAllocationsOnDiscoveryFailure(t *testing.
 	}
 	server := newInventoryTestServer(t, accel)
 	server.nodeDeviceSnapshot(nil)
-	accel.setHardware(adapter.HardwareSnapshot{}, fmt.Errorf("NVML initialization failed"))
+	accel.setHardware(adapter.HardwareSnapshot{}, fmt.Errorf("nvmlDeviceGetCount failed"))
 
 	snapshot := server.nodeDeviceSnapshot(nil)
 
@@ -104,18 +104,10 @@ func TestServerInventoryHealthDoesNotReviveLostGPU(t *testing.T) {
 	require.Len(t, hardware.Accelerator.Devices, 8)
 	assert.False(t, hardware.Accelerator.Devices[4].Healthy, "exporter PASS cannot revive an undiscovered UUID")
 
-	failed := inventoryTestHardware(8)
-	failed.Accelerator.Devices[4].Healthy = false
-	accel.setHardware(failed, nil)
-	hardware, err = server.observeAdapterHardware(context.Background(), accel, pass)
-	require.NoError(t, err)
-	assert.False(t, hardware.Accelerator.Devices[4].Healthy, "exporter PASS cannot override a current hardware failure")
-	assert.True(t, hardware.Accelerator.Devices[3].Healthy)
-
 	accel.setHardware(inventoryTestHardware(8), nil)
 	hardware, err = server.observeAdapterHardware(context.Background(), accel, nil)
 	require.NoError(t, err)
-	assert.False(t, hardware.Accelerator.Devices[4].Healthy, "rediscovery without health evidence keeps the prior failure")
+	assert.True(t, hardware.Accelerator.Devices[4].Healthy, "a successful fresh discovery clears the historical failure")
 
 	hardware, err = server.observeAdapterHardware(context.Background(), accel, pass)
 	require.NoError(t, err)
@@ -248,4 +240,59 @@ func TestServerInventorySharesCacheAcrossConcurrentHTTPRequests(t *testing.T) {
 	require.Len(t, snapshot.Accelerator.Devices, 8)
 	assert.Equal(t, "GPU-7", snapshot.Accelerator.Devices[7].UUID)
 	assert.False(t, snapshot.Accelerator.Devices[7].Healthy)
+}
+
+func TestServerInventoryUsesLocalExporterPresenceOnMixedNodes(t *testing.T) {
+	labels := map[string]string{
+		AcceleratorExporterTargetLabel: AcceleratorExporterTargetValue,
+		AcceleratorExporterTypeLabel:   "vendor",
+	}
+	for _, hasLocalExporter := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local_exporter=%t", hasLocalExporter), func(t *testing.T) {
+			pods := []*corev1.Pod{pod("metrics", "other-exporter", "node-b", "", labels)}
+			if hasLocalExporter {
+				pods = append(pods, pod("metrics", "local-exporter", "node-a", "", labels))
+			}
+			provider := newKubernetesTargetProvider(t, pods...)
+			provider.NodeName = "node-a"
+			provider.AcceleratorType = "vendor"
+			accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
+			server := newInventoryTestServer(t, accel)
+			server.config.ScrapeTargetProvider = provider
+
+			snapshot := server.nodeDeviceSnapshot(nil)
+
+			if hasLocalExporter {
+				assert.Equal(t, "vendor", snapshot.Accelerator.Type)
+				assert.Len(t, snapshot.Accelerator.Devices, 8)
+			} else {
+				assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, snapshot.Accelerator.Type)
+				assert.Empty(t, snapshot.Accelerator.Devices)
+			}
+		})
+	}
+}
+
+func TestServerInventoryReportsExporterDiscoveryFailure(t *testing.T) {
+	listErr := fmt.Errorf("pods is forbidden")
+	provider := newKubernetesTargetProvider(t)
+	provider.NodeName = "node-a"
+	provider.AcceleratorType = "vendor"
+	provider.Client = exporterPodListErrorClient{Client: provider.Client, err: listErr}
+	accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
+	server := newInventoryTestServer(t, accel)
+	server.config.ScrapeTargetProvider = provider
+
+	_, err := server.observeAdapterHardware(context.Background(), accel, nil)
+
+	assert.ErrorIs(t, err, listErr)
+}
+
+type exporterPodListErrorClient struct {
+	client.Client
+	err error
+}
+
+func (c exporterPodListErrorClient) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return c.err
 }

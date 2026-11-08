@@ -22,30 +22,11 @@ func (s *Server) observeAdapterHardware(
 	defer s.inventoryMu.Unlock()
 
 	fresh, err := s.discoverAdapterHardware(ctx, accel)
-	fresh = fresh.Clone()
-
-	if _, hasHealthProvider := accel.(adapter.HardwareHealthProvider); hasHealthProvider {
-		previousHealth := make(map[string]bool, len(s.inventory.Accelerator.Devices))
-		for _, device := range s.inventory.Accelerator.Devices {
-			previousHealth[device.UUID] = device.Healthy
-		}
-
-		discoveredHealth := make(map[string]bool, len(fresh.Accelerator.Devices))
-		for i, device := range fresh.Accelerator.Devices {
-			discoveredHealth[device.UUID] = device.Healthy
-
-			if healthy, found := previousHealth[device.UUID]; found {
-				fresh.Accelerator.Devices[i].Healthy = device.Healthy && healthy
-			}
-		}
-
-		fresh = s.evaluateAdapterHardwareHealth(accel, fresh, exporter)
-
-		// Exporter health can clear cached failures, but not this cycle's hardware failure.
-		for i, device := range fresh.Accelerator.Devices {
-			fresh.Accelerator.Devices[i].Healthy = device.Healthy && discoveredHealth[device.UUID]
-		}
+	if fresh.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU && len(s.inventory.Accelerator.Devices) == 0 {
+		return fresh, err
 	}
+
+	fresh = s.evaluateAdapterHardwareHealth(accel, fresh, exporter)
 
 	s.inventory = mergeHardwareInventory(s.inventory, fresh, s.config.AcceleratorType)
 
@@ -54,12 +35,12 @@ func (s *Server) observeAdapterHardware(
 			"accelerator_type", s.config.AcceleratorType, "known_devices", len(s.inventory.Accelerator.Devices))
 	}
 
+	// Callers use the result after the inventory mutex is released.
 	return s.inventory.Clone(), err
 }
 
 func mergeHardwareInventory(previous, fresh adapter.HardwareSnapshot, acceleratorType string) adapter.HardwareSnapshot {
-	result := previous.Clone()
-	fresh = fresh.Clone()
+	result := previous
 	result.Accelerator.Type = acceleratorType
 	positions := make(map[string]int, len(result.Accelerator.Devices))
 

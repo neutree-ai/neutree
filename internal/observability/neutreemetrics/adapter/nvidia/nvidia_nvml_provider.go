@@ -27,16 +27,16 @@ type nvidiaNVMLHardwareInfoProvider struct {
 }
 
 type nvidiaNVMLHardwareClient interface {
-	Init() error
+	Init() bool
 	Shutdown()
-	DeviceCount() (int, error)
-	Device(index int) (nvidiaNVMLHardwareDevice, error)
+	DeviceCount() (int, bool)
+	Device(index int) (nvidiaNVMLHardwareDevice, bool)
 	DriverVersion() (string, bool)
 	CUDADriverVersion() (string, bool)
 }
 
 type nvidiaNVMLHardwareDevice interface {
-	UUID() (string, error)
+	UUID() (string, bool)
 	Index() (int, bool)
 	MinorNumber() (int, bool)
 	Product() (string, bool)
@@ -45,13 +45,12 @@ type nvidiaNVMLHardwareDevice interface {
 	PCIEBusID() (string, bool)
 	PCIEGeneration() (int, bool)
 	PCIEWidth() (int, bool)
-	MemoryTotalBytes() (uint64, error)
+	MemoryTotalBytes() (uint64, bool)
 	NUMANode() (int, bool)
 }
 
 func (p nvidiaNVMLHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([]nvidiaHardwareInfo, error) {
 	client := p.client
-
 	if client == nil {
 		client = newNvidiaNVMLHardwareClient()
 	}
@@ -60,130 +59,146 @@ func (p nvidiaNVMLHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([
 		return nil, fmt.Errorf("NVML hardware discovery is unavailable on this platform")
 	}
 
-	if err := client.Init(); err != nil {
-		return nil, err
+	if !client.Init() {
+		panic("nvmlInit failed")
 	}
 
 	defer client.Shutdown()
 
-	count, err := client.DeviceCount()
-	if err != nil {
+	count, ok := client.DeviceCount()
+	if !ok {
+		err := fmt.Errorf("nvmlDeviceGetCount failed")
+		klog.Warning(err)
+
 		return nil, err
 	}
 
-	if count < 0 {
-		return nil, fmt.Errorf("NVML returned invalid device count %d", count)
+	driverVersion, driverOK := client.DriverVersion()
+	if !driverOK {
+		klog.Warning("Unable to read NVIDIA driver version: nvmlSystemGetDriverVersion failed")
 	}
 
-	driverVersion, _ := client.DriverVersion()
-	cudaDriverVersion, _ := client.CUDADriverVersion()
-	infos := make([]nvidiaHardwareInfo, 0, count)
+	cudaDriverVersion, cudaOK := client.CUDADriverVersion()
+	if !cudaOK {
+		klog.Warning("Unable to read CUDA driver version: nvmlSystemGetCudaDriverVersion failed")
+	}
 
-	for index := 0; index < count; index++ {
+	infos := make([]nvidiaHardwareInfo, count)
+	for index := range infos {
 		if err := ctx.Err(); err != nil {
-			return infos, err
+			return nil, err
 		}
 
-		info := nvidiaHardwareInfo{Index: strconv.Itoa(index)}
-		device, err := client.Device(index)
+		info := nvidiaHardwareInfo{
+			Index: strconv.Itoa(index), DriverVersion: driverVersion,
+			CUDADriverVersion: cudaDriverVersion, Unhealthy: !driverOK || !cudaOK,
+		}
+		device, ok := client.Device(index)
 
-		if err != nil {
+		if !ok {
 			info.Unhealthy = true
 
-			klog.Warningf("Unable to discover NVIDIA GPU at index %d: %v; preserving the device slot without identity", index, err)
+			klog.Warningf("Unable to discover NVIDIA GPU at index %d: nvmlDeviceGetHandleByIndex failed; preserving the device slot", index)
 
-			infos = append(infos, info)
+			infos[index] = info
 
 			continue
 		}
 
-		value, err := device.UUID()
-		if err != nil {
+		if err := nvidiaApplyNVMLDeviceHardwareInfo(&info, device); err != nil {
 			info.Unhealthy = true
 
-			klog.Warningf("Unable to read NVIDIA GPU UUID at index %d: %v; preserving the device slot", index, err)
-
-			infos = append(infos, info)
-
-			continue
+			klog.Warning(err)
 		}
-
-		info.UUID = nvidiaCleanHardwareValue(value)
-
-		if info.UUID == "" {
-			info.Unhealthy = true
-
-			klog.Warningf("NVML returned an empty UUID for NVIDIA GPU at index %d", index)
-
-			infos = append(infos, info)
-
-			continue
-		}
-
-		info.DriverVersion = driverVersion
-		info.CUDADriverVersion = cudaDriverVersion
-		nvidiaApplyNVMLDeviceHardwareInfo(&info, device)
 
 		if info.NUMANode == "" {
 			info.NUMANode = nvidiaNUMANodeFromSysFS(p.SysFSRoot, info.PCIEBusID)
 		}
 
-		infos = append(infos, info)
+		infos[index] = info
 	}
 
-	return infos, ctx.Err()
+	return infos, nil
 }
 
-func nvidiaApplyNVMLDeviceHardwareInfo(info *nvidiaHardwareInfo, device nvidiaNVMLHardwareDevice) {
+func nvidiaApplyNVMLDeviceHardwareInfo(info *nvidiaHardwareInfo, device nvidiaNVMLHardwareDevice) error {
+	var failures []string
+
+	if value, ok := device.UUID(); ok && nvidiaCleanHardwareValue(value) != "" {
+		info.UUID = nvidiaCleanHardwareValue(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetUUID")
+	}
+
 	if value, ok := device.Index(); ok {
 		info.Index = strconv.Itoa(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetIndex")
 	}
 
 	if value, ok := device.MinorNumber(); ok {
 		info.MinorNumber = strconv.Itoa(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetMinorNumber")
 	}
 
 	if value, ok := device.Product(); ok {
 		info.Product = value
+	} else {
+		failures = append(failures, "nvmlDeviceGetName")
 	}
 
 	if value, ok := device.Architecture(); ok {
 		info.Architecture = nvidiaNVMLArchitectureLabel(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetArchitecture")
 	}
 
 	if major, minor, ok := device.CUDACapability(); ok {
 		info.CUDACapability = strconv.Itoa(major) + "." + strconv.Itoa(minor)
+	} else {
+		failures = append(failures, "nvmlDeviceGetCudaComputeCapability")
 	}
 
 	if value, ok := device.PCIEBusID(); ok {
 		info.PCIEBusID = value
+	} else {
+		failures = append(failures, "nvmlDeviceGetPciInfo")
 	}
 
 	if value, ok := device.PCIEGeneration(); ok {
 		info.PCIEGeneration = strconv.Itoa(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetMaxPcieLinkGeneration")
 	}
 
 	if value, ok := device.PCIEWidth(); ok {
 		info.PCIEWidth = strconv.Itoa(value)
+	} else {
+		failures = append(failures, "nvmlDeviceGetMaxPcieLinkWidth")
 	}
 
-	if value, err := device.MemoryTotalBytes(); err != nil {
-		klog.Warningf("Unable to read NVIDIA GPU memory for UUID=%q index=%q: %v", info.UUID, info.Index, err)
-
-		if nvidiaIsGPUUnavailableError(err) {
-			info.Unhealthy = true
+	if value, ok := device.MemoryTotalBytes(); ok {
+		if value > 0 {
+			info.MemoryTotalMiB = strconv.FormatUint(value/nvidiaBytesPerMiB, 10)
 		}
-	} else if value > 0 {
-		info.MemoryTotalMiB = strconv.FormatUint(value/nvidiaBytesPerMiB, 10)
+	} else {
+		failures = append(failures, "nvmlDeviceGetMemoryInfo")
 	}
 
-	if value, ok := device.NUMANode(); ok && value >= 0 {
-		info.NUMANode = strconv.Itoa(value)
+	if value, ok := device.NUMANode(); ok {
+		if value >= 0 {
+			info.NUMANode = strconv.Itoa(value)
+		}
+	} else {
+		failures = append(failures, "nvmlDeviceGetNumaNodeId")
 	}
-}
 
-func nvidiaIsGPUUnavailableError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "ERROR_GPU_IS_LOST")
+	if len(failures) > 0 {
+		return fmt.Errorf("NVIDIA GPU UUID=%q index=%q: failed NVML calls: %s", info.UUID, info.Index, strings.Join(failures, ", "))
+	}
+
+	return nil
 }
 
 func nvidiaNVMLArchitectureLabel(architecture uint32) string {

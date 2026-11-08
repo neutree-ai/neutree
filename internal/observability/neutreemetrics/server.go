@@ -167,10 +167,6 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	if err := s.validateAcceleratorStartup(ctx); err != nil {
-		return err
-	}
-
 	server := &http.Server{
 		Addr:              s.config.ListenAddress,
 		Handler:           s.Handler(),
@@ -204,43 +200,6 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
-}
-
-type startupHardwareValidator interface {
-	ValidateHardware(context.Context) error
-}
-
-func (s *Server) validateAcceleratorStartup(ctx context.Context) error {
-	accel := s.selectedAccelerator()
-	validator, ok := accel.(startupHardwareValidator)
-
-	if !ok {
-		return nil
-	}
-
-	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
-	defer cancel()
-
-	// shortcut: use local exporter Pod presence for mixed-node DaemonSets; remove when each node type has its own NodeAgent DaemonSet.
-	if provider, ok := s.config.ScrapeTargetProvider.(acceleratorExporterPodProvider); ok {
-		present, err := provider.hasAcceleratorExporterPod(hardwareCtx)
-		if err != nil {
-			return err
-		}
-
-		if !present {
-			klog.InfoS("Skipping accelerator startup validation without a local exporter Pod",
-				"accelerator_type", s.config.AcceleratorType, "node", s.config.Labels.Node)
-
-			return nil
-		}
-	}
-
-	if err := validator.ValidateHardware(hardwareCtx); err != nil {
-		return fmt.Errorf("accelerator startup validation failed for %s: %w", s.config.AcceleratorType, err)
-	}
-
-	return nil
 }
 
 func (s *Server) runKubernetesAnnotationWriter(ctx context.Context) {
@@ -282,7 +241,7 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 	defer s.inventoryMu.Unlock()
 
 	if s.inventory.Accelerator.Type != "" {
-		snapshot.Accelerator = s.inventory.Clone().Accelerator
+		snapshot.Accelerator = s.inventory.Accelerator
 	}
 
 	writeCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
@@ -409,6 +368,18 @@ func (s *Server) discoverAdapterHardware(
 ) (adapter.HardwareSnapshot, error) {
 	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
 	defer cancel()
+
+	// shortcut: infer mixed-node accelerator presence from exporter Pods until NodeAgent DaemonSets are split by node type.
+	if provider, ok := s.config.ScrapeTargetProvider.(acceleratorExporterPodProvider); ok {
+		present, err := provider.hasAcceleratorExporterPod(hardwareCtx)
+		if err != nil {
+			return adapter.HardwareSnapshot{}, err
+		}
+
+		if !present {
+			return adapter.HardwareSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}, nil
+		}
+	}
 
 	return accel.DiscoverHardware(hardwareCtx)
 }
@@ -627,7 +598,7 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) *v1.NodeDeviceSnapshot {
 		}
 
 		return &v1.NodeDeviceSnapshot{
-			Accelerator: hardware.Clone().Accelerator,
+			Accelerator: hardware.Accelerator,
 			Allocations: result.Allocations,
 		}
 	}
