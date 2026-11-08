@@ -185,15 +185,25 @@ func TestKubernetesScrapeTargetProviderUsesExternalSelectorAndNamespace(t *testi
 		URL:        "http://10.244.0.40:9400/custom/metrics",
 	}}, targets)
 
-	present, err := provider.hasAcceleratorExporterPod(context.Background())
-	require.NoError(t, err)
-	assert.True(t, present)
-	require.NoError(t, provider.Client.Delete(context.Background(), &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "monitoring", Name: "external-a"},
-	}))
-	present, err = provider.hasAcceleratorExporterPod(context.Background())
-	require.NoError(t, err)
-	assert.False(t, present, "other exporters do not match the configured namespace and selector")
+	cases := []struct {
+		name    string
+		present bool
+	}{
+		{name: "matching exporter", present: true},
+		{name: "only exporters outside the configured namespace or selector remain"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.present {
+				require.NoError(t, provider.Client.Delete(context.Background(), &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "monitoring", Name: "external-a"},
+				}))
+			}
+			present, err := provider.hasAcceleratorExporterPod(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, tc.present, present)
+		})
+	}
 
 	// The external namespace is scoped to accelerator exporter discovery only;
 	// unrelated node-exporter discovery must keep using the cluster metrics namespace.

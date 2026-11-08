@@ -23,122 +23,118 @@ import (
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
-func TestServerInventoryRetainsMissingDevicesAndRecovers(t *testing.T) {
-	accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
-	server := newInventoryTestServer(t, accel)
-	initial := server.nodeDeviceSnapshot(nil)
-	require.Len(t, initial.Accelerator.Devices, 8)
-
+func TestServerInventoryLossAndRecovery(t *testing.T) {
+	healthy := inventoryTestHardware(8)
+	unhealthy := inventoryTestHardware(8)
+	for i := range unhealthy.Accelerator.Devices {
+		unhealthy.Accelerator.Devices[i].Healthy = false
+	}
 	short := inventoryTestHardware(8)
 	short.Accelerator.Devices = append(short.Accelerator.Devices[:4], short.Accelerator.Devices[5:]...)
 	short.Details = append(short.Details[:4], short.Details[5:]...)
-	accel.setHardware(short, nil)
-	for range 2 {
-		snapshot := server.nodeDeviceSnapshot(nil)
-		require.Len(t, snapshot.Accelerator.Devices, 8)
-		for i, device := range snapshot.Accelerator.Devices {
-			assert.Equal(t, fmt.Sprintf("GPU-%d", i), device.UUID)
-			assert.Equal(t, fmt.Sprint(i), device.ID)
-			require.NotNil(t, device.MinorNumber)
-			assert.Equal(t, i, *device.MinorNumber)
-			assert.Equal(t, i != 4, device.Healthy)
-		}
-	}
-
-	accel.setHardware(inventoryTestHardware(8), nil)
-	recovered := server.nodeDeviceSnapshot(nil)
-	require.Len(t, recovered.Accelerator.Devices, 8)
-	for _, device := range recovered.Accelerator.Devices {
-		assert.True(t, device.Healthy)
-	}
-}
-
-func TestServerInventoryRetainsIdentityOnPartialRediscovery(t *testing.T) {
-	accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(1)}
-	server := newInventoryTestServer(t, accel)
-	server.nodeDeviceSnapshot(nil)
-	partial := inventoryTestHardware(1)
-	partial.Accelerator.Devices[0] = v1.StaticNodeAcceleratorDeviceStatus{ID: "0", UUID: "GPU-0", Healthy: false}
+	partial := inventoryTestHardware(8)
+	partial.Accelerator.Devices[4] = v1.StaticNodeAcceleratorDeviceStatus{ID: "4", UUID: "GPU-4", Healthy: false}
 	partial.Details = nil
-	accel.setHardware(partial, nil)
-	snapshot := server.nodeDeviceSnapshot(nil)
-	require.Len(t, snapshot.Accelerator.Devices, 1)
-	assert.Equal(t, "0", snapshot.Accelerator.Devices[0].ID)
-	require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
-	assert.Equal(t, 0, *snapshot.Accelerator.Devices[0].MinorNumber)
-	assert.Equal(t, "RTX 5090", snapshot.Accelerator.Devices[0].ProductName)
-	assert.Equal(t, int64(32768), snapshot.Accelerator.Devices[0].MemoryMiB)
-	assert.False(t, snapshot.Accelerator.Devices[0].Healthy)
+	cases := []struct {
+		name          string
+		initial       adapter.HardwareSnapshot
+		hardware      adapter.HardwareSnapshot
+		err           error
+		exporter      *model.ScrapeResult
+		wantUnhealthy []int
+	}{
+		{
+			name: "GPU 4 disappears while exporter still reports PASS", initial: healthy, hardware: short,
+			exporter: &model.ScrapeResult{Up: true}, wantUnhealthy: []int{4},
+		},
+		{name: "GPU 4 identity survives partial rediscovery", initial: healthy, hardware: partial, wantUnhealthy: []int{4}},
+		{
+			name: "device count query fails", initial: healthy, err: fmt.Errorf("nvmlDeviceGetCount failed"),
+			wantUnhealthy: []int{0, 1, 2, 3, 4, 5, 6, 7},
+		},
+		{name: "successful rediscovery restores health without exporter evidence", initial: unhealthy, hardware: healthy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			allocations := []v1.StaticNodeAllocationStatus{{
+				ReplicaID: "ns/pod-a", Devices: []v1.DeviceAllocation{{UUID: "GPU-7", MemoryMiB: 30720, CoreUnits: 85}},
+			}}
+			accel := &inventoryTestHealthAccelerator{inventoryTestAccelerator: &inventoryTestAccelerator{
+				hardware: tc.initial, allocations: allocations,
+			}}
+			server := newInventoryTestServer(t, accel)
+			server.nodeDeviceSnapshot(nil)
+			accel.setHardware(tc.hardware, tc.err)
+			hardware, err := server.observeAdapterHardware(context.Background(), accel, tc.exporter)
+			require.ErrorIs(t, err, tc.err)
+			want := inventoryTestHardware(8)
+			for _, index := range tc.wantUnhealthy {
+				want.Accelerator.Devices[index].Healthy = false
+			}
+			assert.Equal(t, want, hardware)
+
+			snapshot := server.nodeDeviceSnapshot(nil)
+			assert.Equal(t, want.Accelerator, snapshot.Accelerator)
+			assert.Equal(t, allocations, snapshot.Allocations)
+		})
+	}
 }
 
-func TestServerInventoryRetainsCacheAndAllocationsOnDiscoveryFailure(t *testing.T) {
-	accel := &inventoryTestAccelerator{
-		hardware:    inventoryTestHardware(8),
-		allocations: []v1.StaticNodeAllocationStatus{{ReplicaID: "ns/pod-a"}},
+func TestServerInventoryConcurrentConsumers(t *testing.T) {
+	cases := []struct {
+		name        string
+		annotations bool
+	}{
+		{name: "metrics and HTTP snapshots share inventory"},
+		{name: "annotations publish the latest inventory", annotations: true},
 	}
-	server := newInventoryTestServer(t, accel)
-	server.nodeDeviceSnapshot(nil)
-	accel.setHardware(adapter.HardwareSnapshot{}, fmt.Errorf("nvmlDeviceGetCount failed"))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			accel := &inventoryTestAccelerator{
+				hardware: inventoryTestHardware(8), buildEntered: make(chan struct{}), buildRelease: make(chan struct{}),
+			}
+			server := newInventoryTestServer(t, accel)
+			ctrClient := fake.NewClientBuilder().WithObjects(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}).
+				WithIndex(&corev1.Pod{}, "spec.nodeName", func(object client.Object) []string { return nil }).Build()
+			server.config.KubernetesWriter = &metricskubernetes.AnnotationWriter{Client: ctrClient, NodeName: "node-a"}
+			baseline := httptest.NewRecorder()
+			response := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				if tc.annotations {
+					server.writeKubernetesAnnotations(context.Background())
+				} else {
+					server.Handler().ServeHTTP(baseline, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+				}
+				close(done)
+			}()
+			<-accel.buildEntered
+			accel.setHardware(inventoryTestHardware(7), nil)
+			if tc.annotations {
+				server.acceleratorSamples(context.Background(), accel, nil)
+			} else {
+				server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/node/device-snapshot", nil))
+			}
+			close(accel.buildRelease)
+			<-done
 
-	snapshot := server.nodeDeviceSnapshot(nil)
-
-	require.Len(t, snapshot.Accelerator.Devices, 8)
-	for _, device := range snapshot.Accelerator.Devices {
-		assert.False(t, device.Healthy)
+			var devices []v1.StaticNodeAcceleratorDeviceStatus
+			if tc.annotations {
+				node := &corev1.Node{}
+				require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
+				require.NoError(t, json.Unmarshal([]byte(node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation]), &devices))
+			} else {
+				require.Equal(t, http.StatusOK, baseline.Code)
+				require.Equal(t, http.StatusOK, response.Code)
+				var snapshot v1.NodeDeviceSnapshot
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+				devices = snapshot.Accelerator.Devices
+			}
+			require.Len(t, devices, 8)
+			assert.Equal(t, "GPU-7", devices[7].UUID)
+			assert.False(t, devices[7].Healthy)
+		})
 	}
-	require.Len(t, snapshot.Allocations, 1)
-	assert.Equal(t, "ns/pod-a", snapshot.Allocations[0].ReplicaID)
-}
-
-func TestServerInventoryHealthDoesNotReviveLostGPU(t *testing.T) {
-	accel := &inventoryTestHealthAccelerator{inventoryTestAccelerator: &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}}
-	server := newInventoryTestServer(t, accel)
-	pass := &model.ScrapeResult{Up: true}
-	server.acceleratorSamples(context.Background(), accel, pass)
-
-	short := inventoryTestHardware(8)
-	short.Accelerator.Devices = append(short.Accelerator.Devices[:4], short.Accelerator.Devices[5:]...)
-	accel.setHardware(short, nil)
-	hardware, err := server.observeAdapterHardware(context.Background(), accel, pass)
-	require.NoError(t, err)
-	require.Len(t, hardware.Accelerator.Devices, 8)
-	assert.False(t, hardware.Accelerator.Devices[4].Healthy, "exporter PASS cannot revive an undiscovered UUID")
-
-	accel.setHardware(inventoryTestHardware(8), nil)
-	hardware, err = server.observeAdapterHardware(context.Background(), accel, nil)
-	require.NoError(t, err)
-	assert.True(t, hardware.Accelerator.Devices[4].Healthy, "a successful fresh discovery clears the historical failure")
-
-	hardware, err = server.observeAdapterHardware(context.Background(), accel, pass)
-	require.NoError(t, err)
-	assert.True(t, hardware.Accelerator.Devices[4].Healthy)
-}
-
-func TestServerInventoryAnnotationUsesLatestMergedCache(t *testing.T) {
-	accel := &inventoryTestAccelerator{
-		hardware: inventoryTestHardware(8), buildEntered: make(chan struct{}), buildRelease: make(chan struct{}),
-	}
-	server := newInventoryTestServer(t, accel)
-	ctrClient := fake.NewClientBuilder().WithObjects(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}).
-		WithIndex(&corev1.Pod{}, "spec.nodeName", func(object client.Object) []string { return nil }).Build()
-	server.config.KubernetesWriter = &metricskubernetes.AnnotationWriter{Client: ctrClient, NodeName: "node-a"}
-	done := make(chan struct{})
-	go func() {
-		server.writeKubernetesAnnotations(context.Background())
-		close(done)
-	}()
-	<-accel.buildEntered
-	accel.setHardware(inventoryTestHardware(7), nil)
-	server.acceleratorSamples(context.Background(), accel, nil)
-	close(accel.buildRelease)
-	<-done
-	node := &corev1.Node{}
-	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
-	var devices []v1.StaticNodeAcceleratorDeviceStatus
-	require.NoError(t, json.Unmarshal([]byte(node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation]), &devices))
-	require.Len(t, devices, 8)
-	assert.Equal(t, "GPU-7", devices[7].UUID)
-	assert.False(t, devices[7].Healthy, "an older annotation snapshot must not overwrite a newer health observation")
 }
 
 func newInventoryTestServer(t *testing.T, accel adapter.Accelerator) *Server {
@@ -214,78 +210,49 @@ func (*inventoryTestHealthAccelerator) EvaluateHardwareHealth(hardware adapter.H
 	return result
 }
 
-func TestServerInventorySharesCacheAcrossConcurrentHTTPRequests(t *testing.T) {
-	accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
-	server := newInventoryTestServer(t, accel)
-	baseline := httptest.NewRecorder()
-	server.Handler().ServeHTTP(baseline, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	require.Equal(t, http.StatusOK, baseline.Code)
-	accel.setHardware(inventoryTestHardware(7), nil)
-
-	metrics := httptest.NewRecorder()
-	response := httptest.NewRecorder()
-	var group sync.WaitGroup
-	group.Add(1)
-	go func() {
-		defer group.Done()
-		server.Handler().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	}()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/node/device-snapshot", nil))
-	group.Wait()
-
-	require.Equal(t, http.StatusOK, metrics.Code)
-	require.Equal(t, http.StatusOK, response.Code)
-	var snapshot v1.NodeDeviceSnapshot
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
-	require.Len(t, snapshot.Accelerator.Devices, 8)
-	assert.Equal(t, "GPU-7", snapshot.Accelerator.Devices[7].UUID)
-	assert.False(t, snapshot.Accelerator.Devices[7].Healthy)
-}
-
-func TestServerInventoryUsesLocalExporterPresenceOnMixedNodes(t *testing.T) {
+func TestServerInventoryOnMixedNodes(t *testing.T) {
 	labels := map[string]string{
 		AcceleratorExporterTargetLabel: AcceleratorExporterTargetValue,
 		AcceleratorExporterTypeLabel:   "vendor",
 	}
-	for _, hasLocalExporter := range []bool{false, true} {
-		t.Run(fmt.Sprintf("local_exporter=%t", hasLocalExporter), func(t *testing.T) {
+	listErr := fmt.Errorf("pods is forbidden")
+	cases := []struct {
+		name        string
+		localPod    *corev1.Pod
+		listErr     error
+		wantType    string
+		wantDevices int
+	}{
+		{name: "CPU node with exporter only on another node", wantType: v1.StaticNodeAcceleratorTypeCPU},
+		{
+			name: "GPU exporter scheduled without Pod IP", localPod: pod("metrics", "local-exporter", "node-a", "", labels),
+			wantType: "vendor", wantDevices: 8,
+		},
+		{name: "exporter Pod query fails", listErr: listErr, wantType: "vendor"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			pods := []*corev1.Pod{pod("metrics", "other-exporter", "node-b", "", labels)}
-			if hasLocalExporter {
-				pods = append(pods, pod("metrics", "local-exporter", "node-a", "", labels))
+			if tc.localPod != nil {
+				pods = append(pods, tc.localPod)
 			}
 			provider := newKubernetesTargetProvider(t, pods...)
 			provider.NodeName = "node-a"
 			provider.AcceleratorType = "vendor"
+			if tc.listErr != nil {
+				provider.Client = exporterPodListErrorClient{Client: provider.Client, err: tc.listErr}
+			}
 			accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
 			server := newInventoryTestServer(t, accel)
 			server.config.ScrapeTargetProvider = provider
 
-			snapshot := server.nodeDeviceSnapshot(nil)
+			hardware, err := server.observeAdapterHardware(context.Background(), accel, nil)
 
-			if hasLocalExporter {
-				assert.Equal(t, "vendor", snapshot.Accelerator.Type)
-				assert.Len(t, snapshot.Accelerator.Devices, 8)
-			} else {
-				assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, snapshot.Accelerator.Type)
-				assert.Empty(t, snapshot.Accelerator.Devices)
-			}
+			require.ErrorIs(t, err, tc.listErr)
+			assert.Equal(t, tc.wantType, hardware.Accelerator.Type)
+			assert.Len(t, hardware.Accelerator.Devices, tc.wantDevices)
 		})
 	}
-}
-
-func TestServerInventoryReportsExporterDiscoveryFailure(t *testing.T) {
-	listErr := fmt.Errorf("pods is forbidden")
-	provider := newKubernetesTargetProvider(t)
-	provider.NodeName = "node-a"
-	provider.AcceleratorType = "vendor"
-	provider.Client = exporterPodListErrorClient{Client: provider.Client, err: listErr}
-	accel := &inventoryTestAccelerator{hardware: inventoryTestHardware(8)}
-	server := newInventoryTestServer(t, accel)
-	server.config.ScrapeTargetProvider = provider
-
-	_, err := server.observeAdapterHardware(context.Background(), accel, nil)
-
-	assert.ErrorIs(t, err, listErr)
 }
 
 type exporterPodListErrorClient struct {

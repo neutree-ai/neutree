@@ -52,18 +52,34 @@ func TestNvidiaNVMLHardwareInfoProviderBuildsInventory(t *testing.T) {
 	assert.Equal(t, "0", infos[0].NUMANode)
 }
 
-func TestNvidiaNVMLHardwareInfoProviderPanicsOnInitFailure(t *testing.T) {
-	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{}}
-	assert.Panics(t, func() { _, _ = provider.GPUHardwareInfos(context.Background()) })
-}
+func TestNvidiaNVMLHardwareInfoProviderReportsDiscoveryFailure(t *testing.T) {
+	cases := []struct {
+		name      string
+		client    fakeNvidiaNVMLHardwareClient
+		wantPanic bool
+		wantError string
+	}{
+		{name: "NVML initialization fails", wantPanic: true},
+		{
+			name:      "device count query fails",
+			client:    fakeNvidiaNVMLHardwareClient{initOK: true, countUnavailable: true},
+			wantError: "nvmlDeviceGetCount",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := nvidiaNVMLHardwareInfoProvider{client: tc.client}
+			if tc.wantPanic {
+				assert.Panics(t, func() { _, _ = provider.GPUHardwareInfos(context.Background()) })
+				return
+			}
 
-func TestNvidiaNVMLHardwareInfoProviderReportsDeviceCountFailure(t *testing.T) {
-	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{initOK: true, countUnavailable: true}}
+			infos, err := provider.GPUHardwareInfos(context.Background())
 
-	infos, err := provider.GPUHardwareInfos(context.Background())
-
-	require.ErrorContains(t, err, "nvmlDeviceGetCount")
-	assert.Empty(t, infos)
+			require.ErrorContains(t, err, tc.wantError)
+			assert.Empty(t, infos)
+		})
+	}
 }
 
 func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
@@ -71,17 +87,26 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 		name              string
 		handleUnavailable bool
 		uuidUnavailable   bool
-		wantLog           string
+		memoryUnavailable bool
+		wantUUID          string
+		wantLogs          []string
 	}{
 		{
 			name:              "GPU handle unavailable as reported by nvidia-smi",
 			handleUnavailable: true,
-			wantLog:           "nvmlDeviceGetHandleByIndex failed",
+			wantLogs:          []string{"nvmlDeviceGetHandleByIndex failed"},
 		},
 		{
-			name:            "driver errors while reading GPU properties",
-			uuidUnavailable: true,
-			wantLog:         "nvmlDeviceGetUUID",
+			name:              "driver errors while reading GPU properties",
+			uuidUnavailable:   true,
+			memoryUnavailable: true,
+			wantLogs:          []string{"nvmlDeviceGetUUID", "nvmlDeviceGetMemoryInfo"},
+		},
+		{
+			name:              "memory query fails while UUID remains readable",
+			memoryUnavailable: true,
+			wantUUID:          "GPU-4",
+			wantLogs:          []string{"nvmlDeviceGetMemoryInfo"},
 		},
 	}
 
@@ -106,7 +131,7 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 			devices[4] = fakeNvidiaNVMLHardwareDevice{
 				uuid: "GPU-4", index: 4, minorNumber: 4, product: "RTX 5090",
 				pciBusID: "0000:98:00.0", uuidUnavailable: tc.uuidUnavailable,
-				memoryUnavailable: tc.uuidUnavailable,
+				memoryUnavailable: tc.memoryUnavailable,
 			}
 			accel := &accelerator{provider: nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{
 				initOK: true, devices: devices, deviceUnavailable: map[int]bool{4: tc.handleUnavailable},
@@ -117,16 +142,17 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Len(t, snapshot.Accelerator.Devices, 8)
-			assert.Empty(t, snapshot.Accelerator.Devices[4].UUID)
+			assert.Equal(t, tc.wantUUID, snapshot.Accelerator.Devices[4].UUID)
 			assert.Equal(t, "4", snapshot.Accelerator.Devices[4].ID)
 			assert.False(t, snapshot.Accelerator.Devices[4].Healthy)
 			assert.Equal(t, "GPU-7", snapshot.Accelerator.Devices[7].UUID)
 			assert.Equal(t, "7", snapshot.Accelerator.Devices[7].ID)
 			assert.True(t, snapshot.Accelerator.Devices[7].Healthy)
 			klog.Flush()
-			assert.Contains(t, logs.String(), tc.wantLog)
-			if tc.uuidUnavailable {
-				assert.Contains(t, logs.String(), "nvmlDeviceGetMemoryInfo")
+			for _, message := range tc.wantLogs {
+				assert.Contains(t, logs.String(), message)
+			}
+			if !tc.handleUnavailable {
 				require.NotNil(t, snapshot.Accelerator.Devices[4].MinorNumber)
 				assert.Equal(t, 4, *snapshot.Accelerator.Devices[4].MinorNumber)
 				assert.Equal(t, "RTX 5090", snapshot.Accelerator.Devices[4].ProductName)
@@ -134,26 +160,6 @@ func TestNvidiaAdapterPreservesFailedSlotsAndLogs(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNvidiaNVMLHardwareInfoProviderKeepsIdentityWhenMemoryIsLost(t *testing.T) {
-	accel := &accelerator{provider: nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{
-		initOK: true, driver: "595.58.03", cuda: "13.1",
-		devices: []nvidiaNVMLHardwareDevice{fakeNvidiaNVMLHardwareDevice{
-			uuid: "GPU-lost", product: "RTX 5090", pciBusID: "0000:98:00.0", memoryUnavailable: true,
-		}},
-	}}}
-
-	snapshot, err := accel.DiscoverHardware(context.Background())
-
-	require.NoError(t, err)
-	require.Len(t, snapshot.Accelerator.Devices, 1)
-	device := snapshot.Accelerator.Devices[0]
-	assert.Equal(t, "GPU-lost", device.UUID)
-	assert.Equal(t, "0", device.ID)
-	require.NotNil(t, device.MinorNumber)
-	assert.Equal(t, 0, *device.MinorNumber)
-	assert.False(t, device.Healthy)
 }
 
 type fakeNvidiaNVMLHardwareClient struct {
