@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -570,6 +571,37 @@ func TestPrepareNeutreeCoreDeployConfig_DecodesEndpointName(t *testing.T) {
 	// escape aborts the remap instead of keeping the raw value.
 	assert.NotContains(t, string(vector),
 		"endpoint_name = .extracted_data.url_split[4]")
+}
+
+// A full trace buffer must drop traces, not back-pressure the shared Kong log
+// source that also feeds usage recording.
+func TestPrepareNeutreeCoreDeployConfig_TraceSinkDropsWhenBufferFull(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+
+	var config struct {
+		Sinks map[string]struct {
+			Buffer map[string]interface{} `json:"buffer"`
+		} `json:"sinks"`
+	}
+	require.NoError(t, yaml.Unmarshal(vector, &config))
+	require.Equal(t, "drop_newest", config.Sinks["ai_trace_victorialogs"].Buffer["when_full"])
+	require.NotContains(t, config.Sinks["postgrest_rpc"].Buffer, "when_full", "usage sink must keep the default blocking buffer")
 }
 
 func currentNeutreeCoreReleaseVersion() *semver.Version {

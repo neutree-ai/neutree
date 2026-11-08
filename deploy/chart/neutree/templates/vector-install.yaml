@@ -274,9 +274,11 @@ data:
         batch:
           max_events: 100
           timeout_secs: 1
+        # Drop traces when full: blocking would back-pressure parse_kong_logs and stall usage.
         buffer:
           type: disk
           max_size: 1073741824
+          when_full: drop_newest
       {{- end }}
 ---
 apiVersion: v1
