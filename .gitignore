@@ -14,6 +14,8 @@ out
 neutree-deploy
 __pycache__/
 .cache
+.coverage
+.pytest_cache/
 
 .air.toml
 *.dev.yml
