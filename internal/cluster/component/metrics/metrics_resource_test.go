@@ -15,6 +15,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -22,6 +23,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -252,8 +254,8 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	for _, obj := range objs.Items {
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
-			assert.Assert(t, strings.Contains(config, "label: app.kubernetes.io/component=hami-device-plugin"))
+			assert.Assert(t, configHasJob(t, config, "hami-vgpu-monitor"))
+			assert.Assert(t, configHasSelector(t, config, "app.kubernetes.io/component=hami-device-plugin"))
 			assert.Assert(t, strings.Contains(config, "replacement: $1:9394"))
 			assert.Assert(t, strings.Contains(config, "target_label: neutree_cluster"))
 			assert.Assert(t, strings.Contains(config, "target_label: workspace"))
@@ -290,7 +292,7 @@ func TestBuildVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
 	for _, obj := range objs.Items {
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, strings.Contains(config, "job_name: 'neutree-inference'"))
+			assert.Assert(t, configHasJob(t, config, "neutree-inference"))
 			assert.Assert(t, strings.Contains(config, "metric_relabel_configs:"))
 			assert.Assert(t, strings.Contains(config, "source_labels: [__name__]"))
 			assert.Assert(t, strings.Contains(config, "regex: 'sglang[:_](.+)'"))
@@ -344,7 +346,7 @@ func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, !strings.Contains(config, "job_name: 'neutree-kube-state-metrics'"))
+			assert.Assert(t, !configHasJob(t, config, "neutree-kube-state-metrics"))
 		}
 	}
 }
@@ -372,7 +374,7 @@ func TestBuildVMAgentConfigSkipsHAMiMonitorScrapeWhenAcceleratorVirtualizationDi
 	for _, obj := range objs.Items {
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, !strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
+			assert.Assert(t, !configHasJob(t, config, "hami-vgpu-monitor"))
 			return
 		}
 	}
@@ -430,8 +432,8 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVir
 	for _, obj := range objs.Items {
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, strings.Contains(config, "job_name: 'hami-vgpu-monitor'"))
-			assert.Assert(t, !strings.Contains(config, "job_name: 'neutree-kube-state-metrics'"))
+			assert.Assert(t, configHasJob(t, config, "hami-vgpu-monitor"))
+			assert.Assert(t, !configHasJob(t, config, "neutree-kube-state-metrics"))
 			return
 		}
 	}
@@ -620,8 +622,8 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, strings.Contains(vmagentConfig, "scrape_timeout: 30s"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
+	assert.Assert(t, configHasJob(t, vmagentConfig, "node-exporter-http"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "node-exporter-https"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
 }
@@ -683,8 +685,8 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	requireVolumeMount(t, nodeAgent, "kubelet-pod-resources", "/var/lib/kubelet/pod-resources")
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "label: neutree.ai/metrics-target=node-agent"))
+	assert.Assert(t, configHasJob(t, vmagentConfig, "neutree-node-agent"))
+	assert.Assert(t, configHasSelector(t, vmagentConfig, "neutree.ai/metrics-target=node-agent"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
 }
 
@@ -751,10 +753,10 @@ func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testin
 	}
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "node-exporter-http"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "node-exporter-https"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "neutree-node-agent"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "dcgm-exporter"))
 }
 
 func TestBuildMetricsResourcesDoesNotResolveManagedProfileTargetsBeforeV110(t *testing.T) {
@@ -772,7 +774,7 @@ func TestBuildMetricsResourcesDoesNotResolveManagedProfileTargetsBeforeV110(t *t
 	assert.NilError(t, err)
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-"))
+	assert.Assert(t, !configHasJobPrefix(t, vmagentConfig, "accelerator-exporter-"))
 }
 
 func TestBuildMetricsResourcesUsesProfileTargets(t *testing.T) {
@@ -804,14 +806,13 @@ func TestBuildMetricsResourcesUsesProfileTargets(t *testing.T) {
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, configHasJob(t, vmagentConfig, "node-exporter-http"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'"))
-	assert.Assert(t, strings.Contains(vmagentConfig,
-		"label: neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter"))
+	assert.Assert(t, configHasJob(t, vmagentConfig, "accelerator-exporter-nvidia-gpu"))
+	assert.Assert(t, configHasSelector(t, vmagentConfig, "neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19400"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, !configHasJob(t, vmagentConfig, "dcgm-exporter"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "nvidia-dcgm-exporter"))
 
 	nodeExporter := findMetricsDaemonSet(t, objs, "neutree-node-exporter")
@@ -1097,11 +1098,10 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'"))
+	assert.Assert(t, configHasJob(t, vmagentConfig, "accelerator-exporter-nvidia-gpu"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "accelerator_type"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: nvidia_gpu"))
-	assert.Assert(t, strings.Contains(vmagentConfig,
-		"label: neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter"))
+	assert.Assert(t, configHasSelector(t, vmagentConfig, "neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter"))
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.DeepEqual(t, map[string]string{
@@ -1462,7 +1462,7 @@ func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
 	assert.Assert(t, exporter.Spec.Template.Spec.Containers[0].SecurityContext == nil)
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, strings.Contains(vmagentConfig, "metrics_path: /custom/metrics"))
+	assert.Assert(t, configHasMetricsPath(t, vmagentConfig, "/custom/metrics"))
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *testing.T) {
@@ -1695,8 +1695,8 @@ func TestBuildVMAgentConfigIncludesKubeStateMetricsScrape(t *testing.T) {
 	for _, obj := range objs.Items {
 		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
 			config, _, _ := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
-			assert.Assert(t, strings.Contains(config, "job_name: 'neutree-kube-state-metrics'"))
-			assert.Assert(t, strings.Contains(config, "label: app=neutree-kube-state-metrics"))
+			assert.Assert(t, configHasJob(t, config, "neutree-kube-state-metrics"))
+			assert.Assert(t, configHasSelector(t, config, "app=neutree-kube-state-metrics"))
 			assert.Assert(t, strings.Contains(config, "target_label: monitor_namespace"))
 			assert.Assert(t, strings.Contains(config, "target_label: monitor_pod"))
 			assert.Assert(t, strings.Contains(config, "target_label: neutree_cluster"))
@@ -1885,4 +1885,74 @@ func assertValidPrometheusYAML(t *testing.T, config string) {
 	if err := yaml.Unmarshal([]byte(config), &parsed); err != nil {
 		t.Fatalf("prometheus.yml is not valid YAML: %v\n%s", err, config)
 	}
+}
+
+func parsedScrapeJobs(t *testing.T, config string) []map[string]interface{} {
+	t.Helper()
+	var document struct {
+		Jobs []map[string]interface{} `yaml:"scrape_configs"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(config), &document))
+	return document.Jobs
+}
+func configHasJob(t *testing.T, config, name string) bool {
+	t.Helper()
+	for _, job := range parsedScrapeJobs(t, config) {
+		if job["job_name"] == name {
+			return true
+		}
+	}
+	return false
+}
+func configHasJobPrefix(t *testing.T, config, prefix string) bool {
+	t.Helper()
+	for _, job := range parsedScrapeJobs(t, config) {
+		if name, ok := job["job_name"].(string); ok && strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+func configHasMetricsPath(t *testing.T, config, path string) bool {
+	t.Helper()
+	for _, job := range parsedScrapeJobs(t, config) {
+		if job["metrics_path"] == path {
+			return true
+		}
+	}
+	return false
+}
+func configHasNamespace(t *testing.T, config, namespace string) bool {
+	t.Helper()
+	for _, job := range parsedScrapeJobs(t, config) {
+		for _, sd := range job["kubernetes_sd_configs"].([]interface{}) {
+			if ns, ok := sd.(map[string]interface{})["namespaces"].(map[string]interface{}); ok {
+				for _, name := range ns["names"].([]interface{}) {
+					if name == namespace {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+func configHasSelector(t *testing.T, config, selector string) bool {
+	t.Helper()
+	expected, err := labels.Parse(selector)
+	require.NoError(t, err)
+	for _, job := range parsedScrapeJobs(t, config) {
+		for _, sd := range job["kubernetes_sd_configs"].([]interface{}) {
+			if selectors, ok := sd.(map[string]interface{})["selectors"].([]interface{}); ok {
+				for _, entry := range selectors {
+					actual, err := labels.Parse(entry.(map[string]interface{})["label"].(string))
+					require.NoError(t, err)
+					if actual.String() == expected.String() {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }

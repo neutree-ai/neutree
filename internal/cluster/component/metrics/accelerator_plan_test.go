@@ -67,7 +67,7 @@ func TestSelectClusterAcceleratorPlanExternalUsesExporterNodeSelector(t *testing
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				Namespace:   "monitoring",
 				PodSelector: map[string]string{"app": "external-exporter"},
 				Port:        9400,
@@ -101,7 +101,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsUnmatchedExporterSelector(t *t
 		Exporter: &metricsAcceleratorExporter{
 			NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 		},
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},
@@ -139,7 +139,7 @@ func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *t
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/gpu": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				PodSelector: map[string]string{"app": "nvidia-exporter"},
 				Port:        9400,
 			},
@@ -149,7 +149,7 @@ func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *t
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				PodSelector: map[string]string{"app": "vendor-exporter"},
 				Port:        9401,
 			},
@@ -178,7 +178,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporter(t *testi
 
 	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},
@@ -207,7 +207,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsEmptyExporterSelector(t *testi
 	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
 		Exporter:        &metricsAcceleratorExporter{},
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},

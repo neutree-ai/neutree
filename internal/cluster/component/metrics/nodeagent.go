@@ -5,10 +5,13 @@ import (
 	"maps"
 	"sort"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
+
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 )
 
 // metricsNodeAgent is the single NodeAgent rendered for a cluster. Its runtime
@@ -30,21 +33,14 @@ type metricsNodeAgent struct {
 func selectedMetricsNodeAgent(
 	clusterVersion string,
 	plans []metricsAcceleratorPlan,
-	targets []metricsScrapeTarget,
 ) (metricsNodeAgent, error) {
 	nodeAgent := defaultMetricsNodeAgent()
 	var selectedPlan *metricsAcceleratorPlan
-	var selectedTarget *metricsScrapeTarget
+	var selectedTarget *v1.MetricsTargetProfile
 
 	if len(plans) > 0 {
 		selectedPlan = &plans[0]
-		for index := range targets {
-			if targets[index].AcceleratorType == selectedPlan.AcceleratorType {
-				selectedTarget = &targets[index]
-
-				break
-			}
-		}
+		selectedTarget = selectedPlan.ExporterTarget
 	}
 
 	selection, err := clusterversion.SelectNodeAgent(clusterVersion)
@@ -61,7 +57,7 @@ func selectedMetricsNodeAgent(
 	}
 
 	if !nodeAgent.UseLegacyContract {
-		nodeAgent.AcceleratorType = selectedTarget.AcceleratorType
+		nodeAgent.AcceleratorType = selectedPlan.AcceleratorType
 		nodeAgent.AcceleratorExporterPort = selectedTarget.Port
 		nodeAgent.AcceleratorExporterMetricsPath = selectedTarget.MetricsPath
 	}
@@ -180,4 +176,21 @@ func defaultMetricsNodeAgent() metricsNodeAgent {
 			}},
 		}},
 	}
+}
+
+func (m *MetricsComponent) nodeAgentScrapeTargets(name string) []metricsconfig.Target {
+	if name == "" {
+		return nil
+	}
+
+	selector := map[string]string{"neutree.ai/metrics-target": "node-agent"}
+
+	rules := []promrelabel.RelabelConfig{{SourceLabels: []string{"__meta_kubernetes_pod_container_port_name"}, Action: "keep",
+		Regex: &promrelabel.MultiLineRegex{S: "metrics"}}}
+	rules = append(rules, m.podScrapeRelabelConfigs(neutreeNodeAgentMetricsPort, "namespace", "pod")...)
+
+	return []metricsconfig.Target{{
+		JobName: "neutree-node-agent", Namespace: m.namespace, Selector: selector,
+		Port: neutreeNodeAgentMetricsPort, MetricsPath: defaultMetricsPath, RelabelConfigs: rules,
+	}}
 }

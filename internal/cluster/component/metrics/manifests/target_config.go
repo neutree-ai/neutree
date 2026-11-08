@@ -1,13 +1,6 @@
-package metrics
+package manifests
 
-import (
-	"bytes"
-	"text/template"
-
-	"github.com/Masterminds/sprig/v3"
-)
-
-const kubernetesVMAgentConfigTemplateText = `global:
+const KubernetesVMAgentConfigTemplate = `global:
   scrape_interval: 30s # Set the scrape interval to every 30 seconds. Default is every 1 minute.
   scrape_timeout: 30s
 
@@ -167,116 +160,35 @@ scrape_configs:
   - target_label: workspace
     replacement: {{ .Workspace | quote }}
 {{ end }}
-{{ if .EnableNeutreeNodeAgentMetrics }}
-# Scrape Neutree normalized node and accelerator metrics.
-- job_name: 'neutree-node-agent'
-  kubernetes_sd_configs:
-  - role: pod
-    namespaces:
-      names:
-      - {{ .Namespace }}
-    selectors:
-    - role: pod
-      label: neutree.ai/metrics-target=node-agent
-  relabel_configs:
-  - source_labels: [__meta_kubernetes_pod_container_port_name]
-    action: keep
-    regex: metrics
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:{{ .NeutreeNodeAgentMetricsPort }}
-  - source_labels: [__meta_kubernetes_pod_node_name]
-    action: replace
-    target_label: node
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: namespace
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: pod
-  - target_label: neutree_cluster
-    replacement: {{ .ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ .Workspace | quote }}
+{{ range .ScrapeTargets }}
+# Scrape a registered endpoint declaration.
+- job_name: {{ .JobName | quote }}
+{{ if and .MetricsPath (ne .MetricsPath "/metrics") }}
+  metrics_path: {{ .MetricsPath | quote }}
 {{ end }}
-{{ range .AcceleratorExporterScrapeTargets }}
-# Scrape accelerator exporter metrics from detected accelerator nodes.
-- job_name: '{{ .JobName }}'
-{{ if .HasCustomMetricsPath }}
-  metrics_path: {{ .MetricsPath }}
-{{ end }}
+{{ if .StaticTargets }}
+  static_configs:
+  - targets:
+{{ .StaticTargets | toYaml | indent 4 }}
+{{ else }}
   kubernetes_sd_configs:
   - role: pod
 {{ if .Namespace }}
     namespaces:
       names:
-      - {{ .Namespace }}
+      - {{ .Namespace | quote }}
 {{ end }}
+{{ if .Selector }}
     selectors:
     - role: pod
-      label: {{ .KubernetesLabelSelector }}
+      label: {{ kubernetesLabelSelector .Selector | quote }}
+{{ end }}
+{{ end }}
+{{ if .RelabelConfigs }}
   relabel_configs:
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:{{ .Port }}
-  - source_labels: [__meta_kubernetes_pod_node_name]
-    action: replace
-    target_label: node
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: namespace
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: pod
-  - target_label: neutree_cluster
-    replacement: {{ $.ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ $.Workspace | quote }}
-  - target_label: accelerator_type
-    replacement: {{ .AcceleratorType }}
+{{ .RelabelConfigs | toYaml | indent 2 }}
 {{ end }}
-{{ range .VirtualizationMetricsScrapeTargets }}
-# Scrape the profile-owned accelerator virtualization monitor endpoint.
-- job_name: 'hami-vgpu-monitor'
-{{ if .HasCustomMetricsPath }}
-  metrics_path: {{ .MetricsPath }}
-{{ end }}
-  kubernetes_sd_configs:
-  - role: pod
-    namespaces:
-      names:
-      - {{ .Namespace }}
-    selectors:
-    - role: pod
-      label: {{ .KubernetesLabelSelector }}
-  relabel_configs:
-  # Set the __address__ to pod IP and profile-owned monitor port.
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:{{ .Port }}
-  # Preserve monitor target metadata while leaving workload labels untouched.
-  - source_labels: [__meta_kubernetes_pod_node_name]
-    action: replace
-    target_label: node
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: monitor_namespace
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: monitor_pod
-  # Add cluster and workspace labels
-  - target_label: neutree_cluster
-    replacement: {{ $.ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ $.Workspace | quote }}
-{{ end }}
-{{ if .EnableKubeStateMetrics }}
+{{ end }}{{ if .EnableKubeStateMetrics }}
 # Scrape kube-state-metrics for Neutree pod ownership labels.
 - job_name: 'neutree-kube-state-metrics'
   kubernetes_sd_configs:
@@ -307,16 +219,3 @@ scrape_configs:
   - target_label: workspace
     replacement: {{ .Workspace | quote }}
 {{ end }}`
-
-var kubernetesVMAgentConfigTemplate = template.Must(
-	template.New("kubernetes-vmagent-config").Funcs(sprig.TxtFuncMap()).Parse(kubernetesVMAgentConfigTemplateText),
-)
-
-func renderKubernetesVMAgentConfig(variables MetricsManifestVariables) (string, error) {
-	var output bytes.Buffer
-	if err := kubernetesVMAgentConfigTemplate.Execute(&output, variables); err != nil {
-		return "", err
-	}
-
-	return output.String(), nil
-}

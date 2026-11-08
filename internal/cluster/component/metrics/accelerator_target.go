@@ -1,85 +1,49 @@
 package metrics
 
 import (
-	"sort"
 	"strings"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 )
 
-// metricsScrapeTarget is the common resolved endpoint rendered into VMagent
-// and, for accelerator exporters, passed to NodeAgent. The caller determines
-// whether the target represents a managed exporter, an external exporter, or
-// a virtualization monitor.
-type metricsScrapeTarget struct {
-	AcceleratorType string
-	Namespace       string
-	PodSelector     map[string]string
-	Port            int
-	MetricsPath     string
-}
-
-func (t metricsScrapeTarget) JobName() string {
-	return acceleratorExporterJobName(t.AcceleratorType)
-}
-
-func (t metricsScrapeTarget) HasCustomMetricsPath() bool {
-	return metricsTargetPath(t.MetricsPath) != defaultMetricsPath
-}
-
-func (t metricsScrapeTarget) KubernetesLabelSelector() string {
-	return labelSelectorString(t.PodSelector)
-}
-
-func (m *MetricsComponent) acceleratorExporterScrapeTargets(
-	plans []metricsAcceleratorPlan,
-	external bool,
-) []metricsScrapeTarget {
-	targets := make([]metricsScrapeTarget, 0, len(plans))
+func (m *MetricsComponent) acceleratorExporterScrapeTargets(plans []metricsAcceleratorPlan) []metricsconfig.Target {
+	targets := make([]metricsconfig.Target, 0, len(plans))
 
 	for _, plan := range plans {
-		target := metricsScrapeTarget{AcceleratorType: plan.AcceleratorType}
-
-		if external {
-			if plan.ExternalMetricsTarget == nil {
-				continue
-			}
-
-			target.Namespace = plan.ExternalMetricsTarget.Namespace
-			target.PodSelector = cloneStringMap(plan.ExternalMetricsTarget.PodSelector)
-			target.Port = plan.ExternalMetricsTarget.Port
-			target.MetricsPath = metricsTargetPath(plan.ExternalMetricsTarget.MetricsPath)
-		} else {
-			if plan.Exporter == nil {
-				continue
-			}
-
-			target.Namespace = m.namespace
-			target.PodSelector = managedAcceleratorExporterSelector(plan.AcceleratorType)
-			target.Port = plan.Exporter.Port
-			target.MetricsPath = plan.Exporter.MetricsPath
+		endpoint := plan.ExporterTarget
+		if endpoint == nil {
+			continue
 		}
 
-		targets = append(targets, target)
+		acceleratorType := plan.AcceleratorType
+		rules := m.podScrapeRelabelConfigs(endpoint.Port, "namespace", "pod")
+		rules = append(rules, promrelabel.RelabelConfig{TargetLabel: "accelerator_type", Replacement: &acceleratorType})
+		targets = append(targets, metricsconfig.Target{
+			JobName: acceleratorExporterJobName(acceleratorType), Namespace: endpoint.Namespace,
+			Selector: cloneStringMap(endpoint.PodSelector), Port: endpoint.Port, MetricsPath: endpoint.MetricsPath,
+			RelabelConfigs: rules,
+		})
 	}
 
 	return targets
 }
 
-func virtualizationMetricsScrapeTargets(plans []metricsAcceleratorPlan) []metricsScrapeTarget {
-	targets := make([]metricsScrapeTarget, 0, len(plans))
+func (m *MetricsComponent) virtualizationMetricsScrapeTargets(plans []metricsAcceleratorPlan) []metricsconfig.Target {
+	targets := make([]metricsconfig.Target, 0, len(plans))
 
 	for _, plan := range plans {
-		if plan.VirtualizationMetricsTarget == nil {
+		endpoint := plan.VirtualizationMetricsTarget
+		if endpoint == nil {
 			continue
 		}
 
-		targets = append(targets, metricsScrapeTarget{
-			Namespace:       plan.VirtualizationMetricsTarget.Namespace,
-			PodSelector:     cloneStringMap(plan.VirtualizationMetricsTarget.PodSelector),
-			Port:            plan.VirtualizationMetricsTarget.Port,
-			MetricsPath:     metricsTargetPath(plan.VirtualizationMetricsTarget.MetricsPath),
-			AcceleratorType: plan.AcceleratorType,
+		targets = append(targets, metricsconfig.Target{
+			JobName: "hami-vgpu-monitor", Namespace: endpoint.Namespace, Selector: cloneStringMap(endpoint.PodSelector),
+			Port: endpoint.Port, MetricsPath: metricsTargetPath(endpoint.MetricsPath),
+			RelabelConfigs: m.podScrapeRelabelConfigs(endpoint.Port, "monitor_namespace", "monitor_pod"),
 		})
 	}
 
@@ -122,23 +86,6 @@ func cloneStringMap(values map[string]string) map[string]string {
 	}
 
 	return copy
-}
-
-func labelSelectorString(selector map[string]string) string {
-	keys := make([]string, 0, len(selector))
-
-	for key := range selector {
-		keys = append(keys, key)
-	}
-
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-
-	for _, key := range keys {
-		parts = append(parts, key+"="+selector[key])
-	}
-
-	return strings.Join(parts, ",")
 }
 
 func metricsTargetPath(metricsPath string) string {

@@ -108,10 +108,10 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 func TestSelectedMetricsNodeAgentUsesLegacyContractBeforeV112(t *testing.T) {
 	nodeAgent, err := selectedMetricsNodeAgent("v1.1.1", []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
-	}}, []metricsScrapeTarget{{
-		AcceleratorType: "vendor_accelerator",
-		Port:            8082,
-		MetricsPath:     "vendor-metrics",
+		ExporterTarget: &v1.MetricsTargetProfile{
+			Port:        8082,
+			MetricsPath: "vendor-metrics",
+		},
 	}})
 
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestSelectedMetricsNodeAgentUsesLegacyContractBeforeV112(t *testing.T) {
 }
 
 func TestSelectedMetricsNodeAgentUsesLegacyContractWithoutTargets(t *testing.T) {
-	nodeAgent, err := selectedMetricsNodeAgent("v1.1.1", nil, nil)
+	nodeAgent, err := selectedMetricsNodeAgent("v1.1.1", nil)
 
 	require.NoError(t, err)
 	assert.True(t, nodeAgent.UseLegacyContract)
@@ -142,10 +142,10 @@ func TestSelectedMetricsNodeAgentProjectsProfileTargetWithoutRuntime(t *testing.
 			Port:        9395,
 			MetricsPath: "/metrics",
 		},
-	}}, []metricsScrapeTarget{{
-		AcceleratorType: "vendor_accelerator",
-		Port:            8082,
-		MetricsPath:     "vendor-metrics",
+		ExporterTarget: &v1.MetricsTargetProfile{
+			Port:        8082,
+			MetricsPath: "vendor-metrics",
+		},
 	}})
 
 	require.NoError(t, err)
@@ -159,10 +159,10 @@ func TestSelectedMetricsNodeAgentProjectsProfileTargetWithoutRuntime(t *testing.
 func TestSelectedMetricsNodeAgentProjectsTargetWithoutRuntimeProfile(t *testing.T) {
 	nodeAgent, err := selectedMetricsNodeAgent("v1.1.2", []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
-	}}, []metricsScrapeTarget{{
-		AcceleratorType: "vendor_accelerator",
-		Port:            8082,
-		MetricsPath:     "vendor-metrics",
+		ExporterTarget: &v1.MetricsTargetProfile{
+			Port:        8082,
+			MetricsPath: "vendor-metrics",
+		},
 	}})
 
 	require.NoError(t, err)
