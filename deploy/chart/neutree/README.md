@@ -79,6 +79,7 @@ under failures.
 | `<component>.affinity` | `{}` | When empty, a required one-pod-per-node anti-affinity. An explicit value is used as given |
 | `db.instances` | unset: 1 | unset: 3, synchronous replication (`method: any, number: 1, dataDurability: required`), one instance per node |
 | `vmagent.replicaCount` | unset: 1 | unset: 2 |
+| `kong.globalRateLimit.enabled` | unset: off (each Kong replica counts API key rps/rpm on its own) | unset: on (Kong counts rps/rpm in PostgreSQL, shared by all replicas). An explicit value always wins |
 | `vector.persistence` | one PVC for the Vector Deployment (`Recreate`) | Vector runs as a StatefulSet; each pod gets its own PVC of the same size and storage class |
 | `victoria-metrics-cluster.*` | 1 vminsert, vmselect, vmstorage | 3 each, `replicationFactor: 2`, `dedup.minScrapeInterval: 5s` |
 | `grafana.replicas`, `grafanaDatabase.enabled` | 1, `false` (SQLite on a volume) | 2, `true` (the `grafana` database of the PostgreSQL Cluster) |

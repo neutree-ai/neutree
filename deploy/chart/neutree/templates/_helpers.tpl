@@ -381,6 +381,20 @@ An explicit replicaCount wins (0 included); otherwise 3 in HA mode, else 1.
 {{- end -}}
 
 {{/*
+"true" when Kong counts API key rps/rpm in PostgreSQL, empty otherwise. An
+explicit kong.globalRateLimit.enabled wins; otherwise on in HA mode, where
+several Kong replicas would each count on their own.
+*/}}
+{{- define "neutree.kong.globalRateLimit.enabled" -}}
+{{- $enabled := (.Values.kong.globalRateLimit | default dict).enabled -}}
+{{- if not (kindIs "invalid" $enabled) -}}
+{{- if $enabled }}true{{ end -}}
+{{- else if include "neutree.ha.enabled" . -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 Pod scheduling for a component that can run several replicas. In HA mode an
 empty affinity is replaced by a required one-pod-per-node anti-affinity on the
 component's selector label; an explicit affinity is used as given.

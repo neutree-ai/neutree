@@ -332,4 +332,14 @@ func TestKongGlobalRateLimit(t *testing.T) {
 	require.Equal(t, "200", on["NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS"])
 	require.Equal(t, "5", on["NEUTREE_GLOBAL_RATE_LIMIT_COOLDOWN_SECONDS"])
 	require.Contains(t, on["KONG_NGINX_MAIN_ENV"], "env NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS")
+
+	haDefault := env(haValues(nil))
+	require.Equal(t, "on", haDefault["NEUTREE_GLOBAL_RATE_LIMIT"])
+	require.Equal(t, "150", haDefault["NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS"])
+	require.Equal(t, "10", haDefault["NEUTREE_GLOBAL_RATE_LIMIT_COOLDOWN_SECONDS"])
+
+	haOff := env(haValues(map[string]interface{}{"kong": map[string]interface{}{
+		"globalRateLimit": map[string]interface{}{"enabled": false},
+	}}))
+	require.NotContains(t, haOff, "NEUTREE_GLOBAL_RATE_LIMIT")
 }

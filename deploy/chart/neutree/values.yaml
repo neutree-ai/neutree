@@ -400,7 +400,7 @@ kong:
   # slower than timeoutMs falls back to per-replica counting for
   # cooldownSeconds.
   globalRateLimit:
-    enabled: false
+    # enabled: unset means off, or on when ha.enabled.
     timeoutMs: 150
     cooldownSeconds: 10
   # Optional Ingress for the inference gateway (Kong proxy at

@@ -574,8 +574,8 @@ spec:
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
           value: "bundled,neutree-metrics,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota"
+        {{- if include "neutree.kong.globalRateLimit.enabled" . }}
         {{- with .Values.kong.globalRateLimit }}
-        {{- if .enabled }}
         # nginx hides the environment from Lua unless each variable is declared.
         - name: KONG_NGINX_MAIN_ENV
           value: "NEUTREE_GLOBAL_RATE_LIMIT; env NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS; env NEUTREE_GLOBAL_RATE_LIMIT_COOLDOWN_SECONDS"
