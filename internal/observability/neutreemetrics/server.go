@@ -9,6 +9,7 @@ import (
 	pprof "net/http/pprof"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -81,9 +82,11 @@ func (c Config) WithAcceleratorMetricDescriptors(descriptors []adapter.MetricDes
 }
 
 type Server struct {
-	config     Config
-	httpClient *http.Client
-	normalizer *metricsnormalizer.Normalizer
+	config      Config
+	httpClient  *http.Client
+	normalizer  *metricsnormalizer.Normalizer
+	inventoryMu sync.Mutex
+	inventory   adapter.HardwareSnapshot
 }
 
 type KubernetesAcceleratorEvidenceProvider interface {
@@ -116,6 +119,10 @@ func NewServer(config Config) (*Server, error) {
 	}
 
 	config.VirtualizationMetricsTarget = cloneMetricsTargetProfile(config.VirtualizationMetricsTarget)
+	if config.AcceleratorType != "" {
+		klog.InfoS("Accelerator inventory baseline is process-local; after a node agent restart, previously inaccessible devices may be missing until rediscovered",
+			"accelerator_type", config.AcceleratorType)
+	}
 
 	return &Server{
 		config:     config,
@@ -160,6 +167,10 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := s.validateAcceleratorStartup(ctx); err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              s.config.ListenAddress,
 		Handler:           s.Handler(),
@@ -195,6 +206,43 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+type startupHardwareValidator interface {
+	ValidateHardware(context.Context) error
+}
+
+func (s *Server) validateAcceleratorStartup(ctx context.Context) error {
+	accel := s.selectedAccelerator()
+	validator, ok := accel.(startupHardwareValidator)
+
+	if !ok {
+		return nil
+	}
+
+	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
+	defer cancel()
+
+	// shortcut: use local exporter Pod presence for mixed-node DaemonSets; remove when each node type has its own NodeAgent DaemonSet.
+	if provider, ok := s.config.ScrapeTargetProvider.(acceleratorExporterPodProvider); ok {
+		present, err := provider.hasAcceleratorExporterPod(hardwareCtx)
+		if err != nil {
+			return err
+		}
+
+		if !present {
+			klog.InfoS("Skipping accelerator startup validation without a local exporter Pod",
+				"accelerator_type", s.config.AcceleratorType, "node", s.config.Labels.Node)
+
+			return nil
+		}
+	}
+
+	if err := validator.ValidateHardware(hardwareCtx); err != nil {
+		return fmt.Errorf("accelerator startup validation failed for %s: %w", s.config.AcceleratorType, err)
+	}
+
+	return nil
+}
+
 func (s *Server) runKubernetesAnnotationWriter(ctx context.Context) {
 	interval := s.config.AnnotationSyncInterval
 	if interval <= 0 {
@@ -228,7 +276,21 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 		return
 	}
 
-	_ = s.config.KubernetesWriter.Write(ctx, snapshot)
+	// Collection may advance while allocations are built; publish the latest
+	// inventory and serialize writes with discovery so an older snapshot cannot win.
+	s.inventoryMu.Lock()
+	defer s.inventoryMu.Unlock()
+
+	if s.inventory.Accelerator.Type != "" {
+		snapshot.Accelerator = s.inventory.Clone().Accelerator
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
+	defer cancel()
+
+	if err := s.config.KubernetesWriter.Write(writeCtx, snapshot); err != nil {
+		klog.ErrorS(err, "Failed to write accelerator annotations")
+	}
 }
 
 func isEmptyCPUDeviceSnapshot(snapshot *v1.NodeDeviceSnapshot) bool {
@@ -302,14 +364,12 @@ func (s *Server) acceleratorSamples(
 	accel adapter.Accelerator,
 	acceleratorExporter *model.ScrapeResult,
 ) []metricsnormalizer.Sample {
-	hardware, err := s.discoverAdapterHardware(ctx, accel)
+	hardware, err := s.observeAdapterHardware(ctx, accel, acceleratorExporter)
 	if err != nil {
 		klog.V(2).InfoS("Accelerator adapter failed to discover hardware", "accelerator_type", s.config.AcceleratorType, "error", err)
 
 		return []metricsnormalizer.Sample{}
 	}
-
-	hardware = s.evaluateAdapterHardwareHealth(accel, hardware, acceleratorExporter)
 
 	result, err := s.adapterMetricResult(
 		ctx,
@@ -558,15 +618,8 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) *v1.NodeDeviceSnapshot {
 	}
 
 	if accel := s.selectedAccelerator(); accel != nil {
-		hardware, err := s.discoverAdapterHardware(ctx, accel)
-		if err != nil {
-			klog.V(2).InfoS("Accelerator adapter failed to discover hardware for device snapshot", "accelerator_type", s.config.AcceleratorType, "error", err)
-
-			return &v1.NodeDeviceSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}
-		}
-
 		exporter := s.scrapeAcceleratorExporters(ctx)
-		hardware = s.evaluateAdapterHardwareHealth(accel, hardware, exporter)
+		hardware, _ := s.observeAdapterHardware(ctx, accel, exporter)
 
 		result, err := s.adapterMetricResult(ctx, accel, hardware, exporter)
 		if err != nil {

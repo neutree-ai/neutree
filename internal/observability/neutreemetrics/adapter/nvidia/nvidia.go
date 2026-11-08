@@ -35,6 +35,20 @@ func (a *accelerator) Type() string {
 	return v1.AcceleratorTypeNVIDIAGPU.String()
 }
 
+// ValidateHardware performs the startup-level NVML checks. Per-device failures
+// remain best-effort and are represented in the inventory; initialization and
+// device-count failures prevent the NodeAgent from starting.
+func (a *accelerator) ValidateHardware(ctx context.Context) error {
+	provider := a.provider
+	if provider == nil {
+		provider = nvidiaNVMLHardwareInfoProvider{}
+	}
+
+	_, err := provider.GPUHardwareInfos(ctx)
+
+	return err
+}
+
 // MetricDescriptors declares the NVIDIA-only metric contract. Generic
 // accelerator metric families remain owned by the shared renderer.
 func (*accelerator) MetricDescriptors() []adapter.MetricDescriptor {
@@ -65,11 +79,6 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 	}
 
 	infos, err := provider.GPUHardwareInfos(ctx)
-	if err != nil {
-		return adapter.HardwareSnapshot{
-			Accelerator: v1.StaticNodeAcceleratorStatus{Type: a.Type()},
-		}, nil
-	}
 
 	snapshot := adapter.HardwareSnapshot{
 		Accelerator: v1.StaticNodeAcceleratorStatus{
@@ -85,7 +94,7 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 			UUID:         info.UUID,
 			ProductName:  info.Product,
 			ProductModel: info.Product,
-			Healthy:      true, // Preserve the discovery default unless DCGM health metrics can be evaluated.
+			Healthy:      !info.Unhealthy,
 		}
 
 		if info.MemoryTotalMiB != "" {
@@ -116,7 +125,7 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 		})
 	}
 
-	return snapshot, nil
+	return snapshot, err
 }
 
 func (a *accelerator) BuildKubernetesMetrics(

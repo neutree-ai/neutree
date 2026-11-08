@@ -36,6 +36,10 @@ type ScrapeTargetProvider interface {
 	Targets(ctx context.Context, targetType string) ([]ScrapeTarget, error)
 }
 
+type acceleratorExporterPodProvider interface {
+	hasAcceleratorExporterPod(context.Context) (bool, error)
+}
+
 type StaticScrapeTargetProvider struct {
 	AcceleratorType                string
 	AcceleratorExporterPort        int
@@ -89,6 +93,31 @@ type KubernetesScrapeTargetProvider struct {
 	// target contract as vmagent instead of falling back to a managed label.
 	AcceleratorExporterNamespace   string
 	AcceleratorExporterPodSelector map[string]string
+}
+
+func (p KubernetesScrapeTargetProvider) hasAcceleratorExporterPod(ctx context.Context) (bool, error) {
+	if p.Client == nil || p.NodeName == "" || p.AcceleratorType == "" {
+		return false, nil
+	}
+
+	pods := &corev1.PodList{}
+	options := []client.ListOption{client.MatchingFields{"spec.nodeName": p.NodeName}}
+
+	if p.AcceleratorExporterNamespace != "" {
+		options = append(options, client.InNamespace(p.AcceleratorExporterNamespace))
+	}
+
+	if err := p.Client.List(ctx, pods, options...); err != nil {
+		return false, fmt.Errorf("list accelerator exporter pods on node %q: %w", p.NodeName, err)
+	}
+
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName == p.NodeName && p.matchesTargetPod(metricsnormalizer.TargetAcceleratorExporter, pod.Labels) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType string) ([]ScrapeTarget, error) {

@@ -50,7 +50,7 @@ func TestNvidiaAdapterDiscoversHardware(t *testing.T) {
 
 			snapshot, err := accelerator.DiscoverHardware(context.Background())
 
-			require.NoError(t, err)
+			require.ErrorIs(t, err, testCase.err)
 			assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), snapshot.Accelerator.Type)
 			if testCase.err != nil {
 				assert.Empty(t, snapshot.Accelerator.Devices)
