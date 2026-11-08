@@ -369,14 +369,14 @@ func (s *Server) discoverAdapterHardware(
 	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
 	defer cancel()
 
-	// shortcut: infer mixed-node accelerator presence from exporter Pods until NodeAgent DaemonSets are split by node type.
-	if provider, ok := s.config.ScrapeTargetProvider.(acceleratorExporterPodProvider); ok {
-		present, err := provider.hasAcceleratorExporterPod(hardwareCtx)
+	// shortcut: infer mixed-node accelerator presence from exporter targets until NodeAgent DaemonSets are split by node type.
+	if s.config.ClusterType == v1.KubernetesClusterType && s.config.ScrapeTargetProvider != nil {
+		targets, err := s.scrapeTargets(hardwareCtx, metricsnormalizer.TargetAcceleratorExporter)
 		if err != nil {
 			return adapter.HardwareSnapshot{}, err
 		}
 
-		if !present {
+		if len(targets) == 0 {
 			return adapter.HardwareSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}, nil
 		}
 	}

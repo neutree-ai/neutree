@@ -226,13 +226,17 @@ func TestServerInventoryOnMixedNodes(t *testing.T) {
 		{name: "CPU node with exporter only on another node", wantType: v1.StaticNodeAcceleratorTypeCPU},
 		{
 			name: "GPU exporter scheduled without Pod IP", localPod: pod("metrics", "local-exporter", "node-a", "", labels),
+			wantType: v1.StaticNodeAcceleratorTypeCPU,
+		},
+		{
+			name: "GPU exporter has a local scrape target", localPod: pod("metrics", "local-exporter", "node-a", "10.244.0.30", labels),
 			wantType: "vendor", wantDevices: 8,
 		},
 		{name: "exporter Pod query fails", listErr: listErr, wantType: "vendor"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pods := []*corev1.Pod{pod("metrics", "other-exporter", "node-b", "", labels)}
+			pods := []*corev1.Pod{pod("metrics", "other-exporter", "node-b", "10.244.0.31", labels)}
 			if tc.localPod != nil {
 				pods = append(pods, tc.localPod)
 			}
