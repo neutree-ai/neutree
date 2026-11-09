@@ -22,6 +22,11 @@ func (s *Server) observeAdapterHardware(
 	defer s.inventoryMu.Unlock()
 
 	fresh, err := s.discoverAdapterHardware(ctx, accel)
+	if err != nil {
+		klog.ErrorS(err, "Accelerator discovery failed; retaining the process-local device inventory",
+			"accelerator_type", s.config.AcceleratorType, "known_devices", len(s.inventory.Accelerator.Devices))
+	}
+
 	if fresh.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU && len(s.inventory.Accelerator.Devices) == 0 {
 		return fresh, err
 	}
@@ -30,11 +35,6 @@ func (s *Server) observeAdapterHardware(
 
 	s.inventory = mergeHardwareInventory(s.inventory, fresh, s.config.AcceleratorType)
 
-	if err != nil {
-		klog.ErrorS(err, "Accelerator discovery failed; retaining the process-local device inventory",
-			"accelerator_type", s.config.AcceleratorType, "known_devices", len(s.inventory.Accelerator.Devices))
-	}
-
 	// Callers use the result after the inventory mutex is released.
 	return s.inventory.Clone(), err
 }
@@ -42,35 +42,33 @@ func (s *Server) observeAdapterHardware(
 func mergeHardwareInventory(previous, fresh adapter.HardwareSnapshot, acceleratorType string) adapter.HardwareSnapshot {
 	result := previous
 	result.Accelerator.Type = acceleratorType
-	positions := make(map[string]int, len(result.Accelerator.Devices))
+	positions := make(map[string]int, len(fresh.Accelerator.Devices))
 
-	for i := range result.Accelerator.Devices {
-		positions[result.Accelerator.Devices[i].UUID] = i
-		result.Accelerator.Devices[i].Healthy = false
+	for index, device := range fresh.Accelerator.Devices {
+		if device.UUID != "" {
+			positions[device.UUID] = index
+		}
 	}
 
-	seen := make(map[string]bool, len(fresh.Accelerator.Devices))
+	for index, device := range result.Accelerator.Devices {
+		if freshIndex, found := positions[device.UUID]; found {
+			result.Accelerator.Devices[index] = retainDeviceIdentity(device, fresh.Accelerator.Devices[freshIndex])
+			delete(positions, device.UUID)
 
-	for _, device := range fresh.Accelerator.Devices {
-		if device.UUID == "" {
 			continue
 		}
 
-		seen[device.UUID] = true
+		result.Accelerator.Devices[index].Healthy = false
 
-		if index, found := positions[device.UUID]; found {
-			result.Accelerator.Devices[index] = retainDeviceIdentity(result.Accelerator.Devices[index], device)
-			continue
-		}
-
-		positions[device.UUID] = len(result.Accelerator.Devices)
-		result.Accelerator.Devices = append(result.Accelerator.Devices, device)
+		klog.Warningf("Previously discovered accelerator is inaccessible and may be lost: type=%q UUID=%q index=%q",
+			acceleratorType, device.UUID, device.ID)
 	}
 
-	for _, device := range result.Accelerator.Devices {
-		if !seen[device.UUID] {
-			klog.Warningf("Previously discovered accelerator is inaccessible and may be lost: type=%q UUID=%q index=%q",
-				acceleratorType, device.UUID, device.ID)
+	for index, device := range fresh.Accelerator.Devices {
+		if _, found := positions[device.UUID]; found {
+			result.Accelerator.Devices = append(result.Accelerator.Devices, fresh.Accelerator.Devices[index])
+
+			delete(positions, device.UUID)
 		}
 	}
 

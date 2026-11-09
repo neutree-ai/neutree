@@ -590,7 +590,11 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) *v1.NodeDeviceSnapshot {
 
 	if accel := s.selectedAccelerator(); accel != nil {
 		exporter := s.scrapeAcceleratorExporters(ctx)
-		hardware, _ := s.observeAdapterHardware(ctx, accel, exporter)
+		hardware, err := s.observeAdapterHardware(ctx, accel, exporter)
+
+		if err != nil {
+			klog.ErrorS(err, "Accelerator adapter failed to discover hardware for device snapshot", "accelerator_type", s.config.AcceleratorType)
+		}
 
 		result, err := s.adapterMetricResult(ctx, accel, hardware, exporter)
 		if err != nil {

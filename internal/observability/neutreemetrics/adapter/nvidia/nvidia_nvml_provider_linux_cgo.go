@@ -22,12 +22,7 @@ func newNvidiaNVMLHardwareClient() nvidiaNVMLHardwareClient {
 }
 
 func (c *realNvidiaNVMLHardwareClient) Init() bool {
-	ret := c.api.Init()
-	if ret != nvml.SUCCESS {
-		panic(fmt.Errorf("nvmlInit failed: %v (ret=%d)", ret, ret))
-	}
-
-	return true
+	return nvidiaNVMLCallSucceeded("nvmlInit", c.api.Init())
 }
 
 func (c *realNvidiaNVMLHardwareClient) Shutdown() {
