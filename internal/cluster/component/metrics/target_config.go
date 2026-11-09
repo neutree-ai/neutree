@@ -49,7 +49,17 @@ func validateRelabelConfigs(data []byte) error {
 		return fmt.Errorf("parse vmagent scrape config: %w", err)
 	}
 
+	jobNames := make(map[string]struct{}, len(config.ScrapeConfigs))
+
 	for _, job := range config.ScrapeConfigs {
+		if job.JobName != "" {
+			if _, exists := jobNames[job.JobName]; exists {
+				return fmt.Errorf("duplicate scrape job name %q", job.JobName)
+			}
+
+			jobNames[job.JobName] = struct{}{}
+		}
+
 		rules, err := yaml.Marshal(&job.RelabelConfigs)
 		if err != nil {
 			return fmt.Errorf("encode relabel configs for job %q: %w", job.JobName, err)

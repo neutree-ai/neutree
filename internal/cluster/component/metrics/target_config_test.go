@@ -1,15 +1,100 @@
 package metrics
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
+
+type testMetricsTargetRegistry struct {
+	snapshot metricsconfig.Snapshot
+	err      error
+}
+
+func (r testMetricsTargetRegistry) Replace(string, []metricsconfig.Target) error { return nil }
+func (r testMetricsTargetRegistry) Remove(string)                                {}
+func (r testMetricsTargetRegistry) Snapshot() (metricsconfig.Snapshot, error) {
+	return r.snapshot, r.err
+}
+
+func TestRenderKubernetesVMAgentConfigRejectsDuplicateJobNames(t *testing.T) {
+	_, err := renderKubernetesVMAgentConfig(MetricsManifestVariables{
+		ClusterName: "cluster-a", Workspace: "workspace-a", Namespace: "metrics-system",
+		EnableVMAgent: true,
+		ScrapeTargets: []metricsconfig.Target{
+			{JobName: "duplicate-job", StaticTargets: []string{"first:9000"}},
+			{JobName: "duplicate-job", StaticTargets: []string{"second:9000"}},
+		},
+	})
+
+	require.EqualError(t, err, `duplicate scrape job name "duplicate-job"`)
+}
+
+func TestMetricsComponentRegistryTargets(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		registry metricsconfig.Registry
+		wantErr  string
+	}{
+		{
+			name: "renders registry target before kube state metrics",
+			registry: testMetricsTargetRegistry{snapshot: metricsconfig.Snapshot{Targets: []metricsconfig.Target{{
+				JobName: "enterprise-cache", StaticTargets: []string{"cache:9000"},
+			}}}},
+		},
+		{
+			name:     "returns registry snapshot error",
+			registry: testMetricsTargetRegistry{err: errors.New("snapshot failed")},
+			wantErr:  "read registered scrape targets: snapshot failed",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			component := &MetricsComponent{
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "workspace-a"},
+					Spec:     &v1.ClusterSpec{Version: "v1.2.1"},
+				},
+				namespace:             "metrics-system",
+				metricsRemoteWriteURL: "https://metrics.example.com/write",
+				ctrlClient:            fake.NewClientBuilder().Build(),
+			}
+			component.WithMetricsTargets(test.registry)
+
+			objects, err := component.GetMetricsResources(context.Background())
+			if test.wantErr != "" {
+				require.Nil(t, objects)
+				require.EqualError(t, err, test.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			config := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
+			jobs := parsedScrapeJobs(t, config)
+			enterpriseIndex, kubeStateIndex := -1, -1
+			for index, job := range jobs {
+				switch job["job_name"] {
+				case "enterprise-cache":
+					enterpriseIndex = index
+				case "neutree-kube-state-metrics":
+					kubeStateIndex = index
+				}
+			}
+
+			require.GreaterOrEqual(t, enterpriseIndex, 0)
+			require.GreaterOrEqual(t, kubeStateIndex, 0)
+			require.Less(t, enterpriseIndex, kubeStateIndex)
+		})
+	}
+}
 
 func TestScrapeConfigPreservesLegacyRendering(t *testing.T) {
 	data, err := os.ReadFile("testdata/legacy_scrape_jobs.yaml")
