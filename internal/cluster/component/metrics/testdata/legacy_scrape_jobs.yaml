@@ -143,6 +143,86 @@ jobs:
       - *rule4
       - *rule5
       - *rule6
+  neutree-kube-state-metrics:
+    job_name: neutree-kube-state-metrics
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: app=neutree-kube-state-metrics
+            role: pod
+    relabel_configs:
+      - action: keep
+        regex: http-metrics
+        source_labels:
+          - __meta_kubernetes_pod_container_port_name
+      - action: replace
+        regex: (.+)
+        replacement: $1:8080
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: monitor_namespace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: monitor_pod
+      - replacement: cluster-a
+        target_label: neutree_cluster
+      - replacement: workspace-a
+        target_label: workspace
+  neutree-router:
+    job_name: neutree-router
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: app=router
+            role: pod
+    relabel_configs:
+      - action: keep
+        regex: cluster-a
+        source_labels:
+          - __meta_kubernetes_pod_label_cluster
+      - action: keep
+        regex: workspace-a
+        source_labels:
+          - __meta_kubernetes_pod_label_workspace
+      - action: replace
+        regex: (.+)
+        replacement: $1:8000
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_cluster
+        target_label: neutree_cluster
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_workspace
+        target_label: workspace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_app
+        target_label: app
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: pod
+      - replacement: Router
+        target_label: deployment
 monitor_order:
   - neutree-router
   - neutree-inference

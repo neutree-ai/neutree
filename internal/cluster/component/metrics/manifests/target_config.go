@@ -5,49 +5,7 @@ const KubernetesVMAgentConfigTemplate = `global:
   scrape_timeout: 30s
 
 scrape_configs:
-# Scrape from Kubernetes pods using service discovery
-- job_name: 'neutree-router'
-  kubernetes_sd_configs:
-  - role: pod
-    namespaces:
-      names:
-      - {{ .Namespace }}
-    selectors:
-    - role: pod
-      label: app=router
-  relabel_configs:
-  # Only scrape pods with cluster and workspace labels matching
-  - source_labels: [__meta_kubernetes_pod_label_cluster]
-    action: keep
-    regex: {{ .ClusterName | quote }}
-  - source_labels: [__meta_kubernetes_pod_label_workspace]
-    action: keep
-    regex: {{ .Workspace | quote }}
-  # Set the __address__ to pod IP and port 8000
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:8000
-  # Add pod metadata as labels
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: namespace
-  - source_labels: [__meta_kubernetes_pod_label_cluster]
-    action: replace
-    target_label: neutree_cluster
-  - source_labels: [__meta_kubernetes_pod_label_workspace]
-    action: replace
-    target_label: workspace
-  - source_labels: [__meta_kubernetes_pod_label_app]
-    action: replace
-    target_label: app
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: pod
-  # Add fixed labels to all scraped metrics
-  - target_label: deployment
-    replacement: Router
+{{ template "scrapeTargets" .BaseScrapeTargets }}
 - job_name: 'neutree-inference'
   kubernetes_sd_configs:
   - role: pod
@@ -160,7 +118,8 @@ scrape_configs:
   - target_label: workspace
     replacement: {{ .Workspace | quote }}
 {{ end }}
-{{ range .ScrapeTargets }}
+{{ template "scrapeTargets" .ScrapeTargets }}
+{{ define "scrapeTargets" }}{{ range . }}
 # Scrape a registered endpoint declaration.
 - job_name: {{ .JobName | quote }}
 {{ if and .MetricsPath (ne .MetricsPath "/metrics") }}
@@ -188,34 +147,4 @@ scrape_configs:
   relabel_configs:
 {{ .RelabelConfigs | toYaml | indent 2 }}
 {{ end }}
-{{ end }}{{ if .EnableKubeStateMetrics }}
-# Scrape kube-state-metrics for Neutree pod ownership labels.
-- job_name: 'neutree-kube-state-metrics'
-  kubernetes_sd_configs:
-  - role: pod
-    namespaces:
-      names:
-      - {{ .Namespace }}
-    selectors:
-    - role: pod
-      label: app=neutree-kube-state-metrics
-  relabel_configs:
-  - source_labels: [__meta_kubernetes_pod_container_port_name]
-    action: keep
-    regex: http-metrics
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:8080
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: monitor_namespace
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: monitor_pod
-  - target_label: neutree_cluster
-    replacement: {{ .ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ .Workspace | quote }}
-{{ end }}`
+{{ end }}{{ end }}`

@@ -25,7 +25,9 @@ var kubernetesVMAgentConfigTemplate = template.Must(
 )
 
 func renderKubernetesVMAgentConfig(variables MetricsManifestVariables) (string, error) {
+	variables = withBuiltinScrapeTargets(variables)
 	var output bytes.Buffer
+
 	if err := kubernetesVMAgentConfigTemplate.Execute(&output, variables); err != nil {
 		return "", err
 	}

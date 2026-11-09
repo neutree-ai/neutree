@@ -39,6 +39,7 @@ type MetricsManifestVariables struct {
 	EnableNodeExporter               bool
 	AcceleratorExporters             []metricsAcceleratorExporter
 	// ScrapeTargets are declarations selected by the caller, separate from workload runtime inputs.
+	BaseScrapeTargets []metricsconfig.Target
 	ScrapeTargets     []metricsconfig.Target
 	EnableVMAgent     bool
 	VMAgentConfig     string
