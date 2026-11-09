@@ -53,7 +53,7 @@ func mergeHardwareInventory(previous, fresh adapter.HardwareSnapshot, accelerato
 
 	for index, device := range result.Accelerator.Devices {
 		if freshIndex, found := positions[device.UUID]; found {
-			result.Accelerator.Devices[index] = retainDeviceIdentity(device, fresh.Accelerator.Devices[freshIndex])
+			result.Accelerator.Devices[index] = mergeDeviceStatus(device, fresh.Accelerator.Devices[freshIndex])
 			delete(positions, device.UUID)
 
 			continue
@@ -111,7 +111,7 @@ func mergeHardwareDetails(previous, fresh []adapter.HardwareDetails) []adapter.H
 	return previous
 }
 
-func retainDeviceIdentity(previous, fresh v1.StaticNodeAcceleratorDeviceStatus) v1.StaticNodeAcceleratorDeviceStatus {
+func mergeDeviceStatus(previous, fresh v1.StaticNodeAcceleratorDeviceStatus) v1.StaticNodeAcceleratorDeviceStatus {
 	if fresh.ID == "" {
 		fresh.ID = previous.ID
 	}
