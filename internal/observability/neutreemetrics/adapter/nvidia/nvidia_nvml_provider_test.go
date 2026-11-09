@@ -56,10 +56,9 @@ func TestNvidiaNVMLHardwareInfoProviderReportsDiscoveryFailure(t *testing.T) {
 	cases := []struct {
 		name      string
 		client    fakeNvidiaNVMLHardwareClient
-		wantPanic bool
 		wantError string
 	}{
-		{name: "NVML initialization fails", wantPanic: true},
+		{name: "NVML initialization fails", wantError: "nvmlInit failed"},
 		{
 			name:      "device count query fails",
 			client:    fakeNvidiaNVMLHardwareClient{initOK: true, countUnavailable: true},
@@ -69,11 +68,6 @@ func TestNvidiaNVMLHardwareInfoProviderReportsDiscoveryFailure(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := nvidiaNVMLHardwareInfoProvider{client: tc.client}
-			if tc.wantPanic {
-				assert.Panics(t, func() { _, _ = provider.GPUHardwareInfos(context.Background()) })
-				return
-			}
-
 			infos, err := provider.GPUHardwareInfos(context.Background())
 
 			require.ErrorContains(t, err, tc.wantError)

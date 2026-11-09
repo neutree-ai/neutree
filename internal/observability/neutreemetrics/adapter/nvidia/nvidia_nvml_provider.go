@@ -60,7 +60,7 @@ func (p nvidiaNVMLHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([
 	}
 
 	if !client.Init() {
-		panic("nvmlInit failed")
+		return nil, fmt.Errorf("nvmlInit failed")
 	}
 
 	defer client.Shutdown()
