@@ -4,8 +4,8 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/component"
-	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests

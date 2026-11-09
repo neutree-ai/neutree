@@ -8,9 +8,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics/manifests"
 	"github.com/neutree-ai/neutree/internal/deploy"
-	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )

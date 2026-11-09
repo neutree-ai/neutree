@@ -6,7 +6,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/metricsconfig"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
 func (m *MetricsComponent) acceleratorExporterScrapeTargets(plans []metricsAcceleratorPlan) []metricsconfig.Target {

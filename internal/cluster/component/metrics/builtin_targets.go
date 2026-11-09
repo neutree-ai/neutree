@@ -6,7 +6,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
 	"k8s.io/utils/ptr"
 
-	"github.com/neutree-ai/neutree/internal/metricsconfig"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
 func routerScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target {

@@ -1,3 +1,4 @@
+// Package metricsconfig defines shared scrape target declarations and registries.
 package metricsconfig
 
 import (
