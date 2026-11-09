@@ -186,4 +186,10 @@ func TestIdentitySourceSpecValidate_Sync(t *testing.T) {
 	oidc.Sync = &IdentitySourceSyncSpec{Enabled: true}
 	assert.NoError(t, oidc.Validate())
 	assert.False(t, oidc.SyncEnabled(), "only LDAP sources sync")
+
+	spec.LDAP.Sync.PageSize = 0
+	assert.True(t, spec.SyncEnabled())
+	spec.Enabled = false
+	assert.NoError(t, spec.Validate())
+	assert.False(t, spec.SyncEnabled(), "a disabled source does not sync")
 }

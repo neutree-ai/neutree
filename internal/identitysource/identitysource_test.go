@@ -124,6 +124,34 @@ func TestFingerprint(t *testing.T) {
 	assert.NotEqual(t, Fingerprint(nil, secrets), base)
 }
 
+func TestSyncFingerprint(t *testing.T) {
+	secrets := &storage.IdentitySourceSecrets{LDAPBindPassword: "pw"}
+	synced := func() *v1.IdentitySourceSpec {
+		spec := ldapSpec("ldap://a:389")
+		spec.Sync = &v1.IdentitySourceSyncSpec{Enabled: true, Interval: 600, RequestedAt: "2026-10-09T12:00:00Z"}
+		spec.LDAP.Sync = &v1.IdentitySourceLDAPSyncSpec{OrgUnitBaseDN: "ou=org,dc=example,dc=org"}
+
+		return spec
+	}
+	base := SyncFingerprint(synced(), secrets)
+
+	requested := synced()
+	requested.Sync.RequestedAt = "2026-10-10T12:00:00Z"
+	assert.Equal(t, base, SyncFingerprint(requested, secrets), "sync request only")
+	assert.Equal(t, "2026-10-10T12:00:00Z", requested.Sync.RequestedAt, "the caller's spec is left alone")
+
+	interval := synced()
+	interval.Sync.Interval = 1200
+	assert.NotEqual(t, base, SyncFingerprint(interval, secrets), "sync interval change")
+
+	ldapSync := synced()
+	ldapSync.LDAP.Sync.OrgUnitBaseDN = "ou=other,dc=example,dc=org"
+	assert.NotEqual(t, base, SyncFingerprint(ldapSync, secrets), "spec.ldap.sync change")
+
+	assert.NotEqual(t, base, SyncFingerprint(synced(), &storage.IdentitySourceSecrets{LDAPBindPassword: "pw2"}), "secret change")
+	assert.NotEqual(t, base, SyncFingerprint(ldapSpec("ldap://b:389"), secrets), "connection change")
+}
+
 func TestConnectionTest_OIDC(t *testing.T) {
 	idp := oidctest.New(t, "neutree", "secret")
 

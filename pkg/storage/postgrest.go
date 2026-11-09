@@ -1178,7 +1178,7 @@ const uniqueViolationCode = "(23505)"
 func (s *postgrestStorage) GetExternalIdentity(source, externalID string) (*ExternalIdentity, error) {
 	var response []ExternalIdentity
 
-	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id", "", false).
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id,username,email", "", false).
 		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
 	if err != nil {
 		return nil, err
@@ -1204,11 +1204,19 @@ func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error 
 	return err
 }
 
-func (s *postgrestStorage) UpdateExternalIdentitySync(data *ExternalIdentity) error {
+func (s *postgrestStorage) SetExternalIdentityDeactivation(source, externalID, marker string) error {
+	update := map[string]interface{}{"sync_deactivated": nullIfEmpty(marker)}
+
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
+		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateExternalIdentityAccount(data *ExternalIdentity) error {
 	update := map[string]interface{}{
-		"username":         nullIfEmpty(data.Username),
-		"email":            nullIfEmpty(data.Email),
-		"sync_deactivated": nullIfEmpty(data.SyncDeactivated),
+		"username": nullIfEmpty(data.Username),
+		"email":    nullIfEmpty(data.Email),
 	}
 
 	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
@@ -1226,6 +1234,10 @@ func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource string) ([
 	}
 
 	return response, nil
+}
+
+func (s *postgrestStorage) RevokeUserSessions(userID string) error {
+	return s.CallDatabaseFunction("revoke_user_sessions", map[string]interface{}{"p_user_id": userID}, nil)
 }
 
 func nullIfEmpty(v string) interface{} {

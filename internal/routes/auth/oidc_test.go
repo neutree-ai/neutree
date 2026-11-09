@@ -165,6 +165,8 @@ func (e *oidcTestEnv) expectEmail(userID, email string) {
 		Metadata: &v1.Metadata{Name: "kc.alice", DisplayName: "KC Alice"},
 		Spec:     &v1.UserProfileSpec{Email: "alice@example.org"},
 	}, nil).Maybe()
+	// The links in these tests record no username or email.
+	e.storage.EXPECT().UpdateExternalIdentityAccount(mock.Anything).Return(nil).Maybe()
 }
 
 func stateCookie(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {
@@ -298,6 +300,7 @@ func TestOIDCCallback_FirstLoginCreatesUserAndLink(t *testing.T) {
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	e.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID.String(),
+		Username: "kc.alice", Email: "alice@example.org",
 	}).Return(nil).Once()
 	e.expectEmail(userID.String(), e.placeholderEmail())
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).

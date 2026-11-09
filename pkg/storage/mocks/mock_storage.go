@@ -4394,6 +4394,100 @@ func (_c *MockStorage_ListWorkspace_Call) RunAndReturn(run func(storage.ListOpti
 	return _c
 }
 
+// RevokeUserSessions provides a mock function with given fields: userID
+func (_m *MockStorage) RevokeUserSessions(userID string) error {
+	ret := _m.Called(userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RevokeUserSessions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_RevokeUserSessions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RevokeUserSessions'
+type MockStorage_RevokeUserSessions_Call struct {
+	*mock.Call
+}
+
+// RevokeUserSessions is a helper method to define mock.On call
+//   - userID string
+func (_e *MockStorage_Expecter) RevokeUserSessions(userID interface{}) *MockStorage_RevokeUserSessions_Call {
+	return &MockStorage_RevokeUserSessions_Call{Call: _e.mock.On("RevokeUserSessions", userID)}
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) Run(run func(userID string)) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) Return(_a0 error) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) RunAndReturn(run func(string) error) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetExternalIdentityDeactivation provides a mock function with given fields: source, externalID, marker
+func (_m *MockStorage) SetExternalIdentityDeactivation(source string, externalID string, marker string) error {
+	ret := _m.Called(source, externalID, marker)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetExternalIdentityDeactivation")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
+		r0 = rf(source, externalID, marker)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_SetExternalIdentityDeactivation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetExternalIdentityDeactivation'
+type MockStorage_SetExternalIdentityDeactivation_Call struct {
+	*mock.Call
+}
+
+// SetExternalIdentityDeactivation is a helper method to define mock.On call
+//   - source string
+//   - externalID string
+//   - marker string
+func (_e *MockStorage_Expecter) SetExternalIdentityDeactivation(source interface{}, externalID interface{}, marker interface{}) *MockStorage_SetExternalIdentityDeactivation_Call {
+	return &MockStorage_SetExternalIdentityDeactivation_Call{Call: _e.mock.On("SetExternalIdentityDeactivation", source, externalID, marker)}
+}
+
+func (_c *MockStorage_SetExternalIdentityDeactivation_Call) Run(run func(source string, externalID string, marker string)) *MockStorage_SetExternalIdentityDeactivation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_SetExternalIdentityDeactivation_Call) Return(_a0 error) *MockStorage_SetExternalIdentityDeactivation_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_SetExternalIdentityDeactivation_Call) RunAndReturn(run func(string, string, string) error) *MockStorage_SetExternalIdentityDeactivation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetOrgUnitMember provides a mock function with given fields: data
 func (_m *MockStorage) SetOrgUnitMember(data *storage.OrgUnitMember) error {
 	ret := _m.Called(data)
@@ -4675,12 +4769,12 @@ func (_c *MockStorage_UpdateExternalEndpoint_Call) RunAndReturn(run func(string,
 	return _c
 }
 
-// UpdateExternalIdentitySync provides a mock function with given fields: data
-func (_m *MockStorage) UpdateExternalIdentitySync(data *storage.ExternalIdentity) error {
+// UpdateExternalIdentityAccount provides a mock function with given fields: data
+func (_m *MockStorage) UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error {
 	ret := _m.Called(data)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpdateExternalIdentitySync")
+		panic("no return value specified for UpdateExternalIdentityAccount")
 	}
 
 	var r0 error
@@ -4693,30 +4787,30 @@ func (_m *MockStorage) UpdateExternalIdentitySync(data *storage.ExternalIdentity
 	return r0
 }
 
-// MockStorage_UpdateExternalIdentitySync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateExternalIdentitySync'
-type MockStorage_UpdateExternalIdentitySync_Call struct {
+// MockStorage_UpdateExternalIdentityAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateExternalIdentityAccount'
+type MockStorage_UpdateExternalIdentityAccount_Call struct {
 	*mock.Call
 }
 
-// UpdateExternalIdentitySync is a helper method to define mock.On call
+// UpdateExternalIdentityAccount is a helper method to define mock.On call
 //   - data *storage.ExternalIdentity
-func (_e *MockStorage_Expecter) UpdateExternalIdentitySync(data interface{}) *MockStorage_UpdateExternalIdentitySync_Call {
-	return &MockStorage_UpdateExternalIdentitySync_Call{Call: _e.mock.On("UpdateExternalIdentitySync", data)}
+func (_e *MockStorage_Expecter) UpdateExternalIdentityAccount(data interface{}) *MockStorage_UpdateExternalIdentityAccount_Call {
+	return &MockStorage_UpdateExternalIdentityAccount_Call{Call: _e.mock.On("UpdateExternalIdentityAccount", data)}
 }
 
-func (_c *MockStorage_UpdateExternalIdentitySync_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_UpdateExternalIdentitySync_Call {
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_UpdateExternalIdentityAccount_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(*storage.ExternalIdentity))
 	})
 	return _c
 }
 
-func (_c *MockStorage_UpdateExternalIdentitySync_Call) Return(_a0 error) *MockStorage_UpdateExternalIdentitySync_Call {
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) Return(_a0 error) *MockStorage_UpdateExternalIdentityAccount_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockStorage_UpdateExternalIdentitySync_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_UpdateExternalIdentitySync_Call {
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_UpdateExternalIdentityAccount_Call {
 	_c.Call.Return(run)
 	return _c
 }

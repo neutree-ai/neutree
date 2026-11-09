@@ -291,13 +291,21 @@ type ExternalIdentityStorage interface {
 	// CreateExternalIdentity links an external account to a user. It returns an
 	// error wrapping ErrResourceConflict when the account is already linked.
 	CreateExternalIdentity(data *ExternalIdentity) error
-	// UpdateExternalIdentitySync writes Username, Email and SyncDeactivated
-	// of the link (source, external ID); an empty value is stored as NULL.
-	UpdateExternalIdentitySync(data *ExternalIdentity) error
+	// SetExternalIdentityDeactivation writes the sync_deactivated marker of
+	// the link (source, external ID); an empty marker is stored as NULL.
+	SetExternalIdentityDeactivation(source, externalID, marker string) error
+	// UpdateExternalIdentityAccount writes Username and Email of the link
+	// (source, external ID) and leaves SyncDeactivated alone; an empty value
+	// is stored as NULL.
+	UpdateExternalIdentityAccount(data *ExternalIdentity) error
 	// ListIdentitySourceSyncUsers returns every user linked to the LDAP
 	// identity source of the given name, with the department and teams its
 	// sync gave the user.
 	ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error)
+	// RevokeUserSessions ends every GoTrue session of the user and deletes its
+	// refresh tokens. Access tokens already issued stay valid until they
+	// expire.
+	RevokeUserSessions(userID string) error
 }
 
 // IdentitySourceSecrets are the decrypted secrets of an identity source. A
