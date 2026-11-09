@@ -302,7 +302,7 @@ func userProfileEmail(t *testing.T, id string) string {
 	return email
 }
 
-// TestUserProfileExternalEmail covers how spec.email is chosen (migration 107):
+// TestUserProfileExternalEmail covers how spec.email is chosen:
 // an externally managed user (app_metadata.identity_source) gets its directory
 // mail from user_metadata.email instead of the placeholder in auth.users.email;
 // everyone else keeps auth.users.email. The GoTrue admin API sets app_metadata

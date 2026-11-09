@@ -434,3 +434,60 @@ func TestWorkspaceModelsUsesFirstServedModel(t *testing.T) {
 	require.NoError(t, rows.Err())
 	assert.Equal(t, map[string]string{"aliases": "z-client-name"}, got)
 }
+
+func TestWorkspaceModelsListsModelRoutes(t *testing.T) {
+	db := GetTestDB(t)
+	const workspace = "model-routes-options"
+
+	insert := func(name, spec string) {
+		t.Helper()
+
+		var id int
+		require.NoError(t, db.QueryRow(`
+			INSERT INTO api.external_endpoints (api_version, kind, metadata, spec)
+			VALUES ('v1', 'ExternalEndpoint',
+				jsonb_populate_record(NULL::api.metadata, jsonb_build_object('name', $1::text, 'workspace', $2::text)),
+				jsonb_populate_record(NULL::api.external_endpoint_spec, $3::jsonb))
+			RETURNING id`, name, workspace, spec).Scan(&id))
+		t.Cleanup(func() {
+			_, _ = db.Exec("DELETE FROM api.external_endpoints WHERE id = $1", id)
+		})
+	}
+
+	// Routes supersede the mapping, so its "legacy" key is not listed.
+	insert("routes", `{
+		"upstreams": [
+			{"name": "public", "upstream": {"url": "https://upstream.example.com"}, "model_mapping": {"legacy": "x"}},
+			{"name": "local", "endpoint_ref": "some-endpoint", "model_mapping": {}}
+		],
+		"model_routes": [
+			{"model": "routed", "targets": [{"upstream": "public", "upstream_model": "u"}]},
+			{"model": "routed-local", "targets": [{"upstream": "local", "upstream_model": "u"}]},
+			{"model": "routed-labelled", "targets": [{"upstream": "local", "upstream_model": "u"}]}
+		],
+		"model_sources": {"routed-labelled": "private-access"}
+	}`)
+	insert("mapping", `{
+		"upstreams": [{"name": "public", "upstream": {"url": "https://upstream.example.com"}, "model_mapping": {"mapped": "x"}}]
+	}`)
+
+	rows, err := db.Query(`SELECT model, source, endpoint_name, source_label FROM api.get_workspace_models($1)`, workspace)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	got := map[string]string{}
+	for rows.Next() {
+		var model, source, endpoint string
+		var label sql.NullString
+		require.NoError(t, rows.Scan(&model, &source, &endpoint, &label))
+		assert.Equal(t, "external_endpoint", source)
+		got[endpoint+"|"+model] = label.String
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, map[string]string{
+		"routes|routed":          "",
+		"routes|routed-local":    "self-hosted",
+		"routes|routed-labelled": "private-access",
+		"mapping|mapped":         "",
+	}, got)
+}

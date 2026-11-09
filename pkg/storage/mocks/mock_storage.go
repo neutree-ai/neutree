@@ -68,6 +68,62 @@ func (_c *MockStorage_AddTeamMember_Call) RunAndReturn(run func(*storage.TeamMem
 	return _c
 }
 
+// ApiKeyOwnerActive provides a mock function with given fields: id
+func (_m *MockStorage) ApiKeyOwnerActive(id string) (bool, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ApiKeyOwnerActive")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (bool, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ApiKeyOwnerActive_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApiKeyOwnerActive'
+type MockStorage_ApiKeyOwnerActive_Call struct {
+	*mock.Call
+}
+
+// ApiKeyOwnerActive is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) ApiKeyOwnerActive(id interface{}) *MockStorage_ApiKeyOwnerActive_Call {
+	return &MockStorage_ApiKeyOwnerActive_Call{Call: _e.mock.On("ApiKeyOwnerActive", id)}
+}
+
+func (_c *MockStorage_ApiKeyOwnerActive_Call) Run(run func(id string)) *MockStorage_ApiKeyOwnerActive_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ApiKeyOwnerActive_Call) Return(_a0 bool, _a1 error) *MockStorage_ApiKeyOwnerActive_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ApiKeyOwnerActive_Call) RunAndReturn(run func(string) (bool, error)) *MockStorage_ApiKeyOwnerActive_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CallDatabaseFunction provides a mock function with given fields: name, params, result
 func (_m *MockStorage) CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error {
 	ret := _m.Called(name, params, result)

@@ -13,6 +13,10 @@
 --                        collection response is filtered with these same rules.
 --                        Disabled keys receive key_disabled from access() or,
 --                        when an EE list was already synthesized, response filters.
+--   * denied_models  -> 403 model_not_permitted when the request model is in
+--                        it. Plain model names (group deny rules); every other
+--                        model, on any endpoint, is left to the rules above.
+--                        Model lists drop the denied models too.
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- Every key gets its own consumer-scoped instance, including an unrestricted
@@ -141,11 +145,23 @@ local function allow_match(list, model, ep_type, ep_name)
     return false
 end
 
+local function in_list(list, model)
+    if type(list) ~= "table" then
+        return false
+    end
+    for _, m in ipairs(list) do
+        if m == model then
+            return true
+        end
+    end
+    return false
+end
+
 local function json_array()
     return setmetatable({}, cjson.array_mt)
 end
 
-local function filter_model_list_response(body, allowed_models, ep_type, ep_name)
+local function filter_model_list_response(body, allowed_models, denied_models, ep_type, ep_name)
     local response = cjson.decode(body)
     if type(response) ~= "table" or type(response.data) ~= "table" then
         return body
@@ -161,7 +177,8 @@ local function filter_model_list_response(body, allowed_models, ep_type, ep_name
     local visible = json_array()
     for _, model in ipairs(response.data) do
         if type(model) == "table" and type(model.id) == "string"
-            and allow_match(allowed_models, model.id, ep_type, ep_name) then
+            and (type(allowed_models) ~= "table" or allow_match(allowed_models, model.id, ep_type, ep_name))
+            and not in_list(denied_models, model.id) then
             visible[#visible + 1] = model
         end
     end
@@ -184,7 +201,9 @@ local function is_successful_model_list_response()
 end
 
 local function should_filter_model_list_response(conf)
-    return type(conf.allowed_models) == "table" and is_successful_model_list_response()
+    local restricted = type(conf.allowed_models) == "table"
+        or (type(conf.denied_models) == "table" and #conf.denied_models > 0)
+    return restricted and is_successful_model_list_response()
 end
 
 local function counter_dict()
@@ -238,18 +257,30 @@ function AccessHandler:access(conf)
         return deny403("key_disabled", "This API key is disabled")
     end
 
-    -- 2) Model allowlist: an absent field (nil / JSON null = cjson.null) means
-    --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
-    --    request model must be present and in it. An explicit empty [] therefore
-    --    denies every model (deny-all). Guard on the value being a table so null
-    --    stays unrestricted while [] enforces. A model list is not one model
-    --    call, so it reaches the endpoint here; body_filter narrows its response
-    --    to the models visible through this key, including an empty [] deny-all.
-    if type(conf.allowed_models) == "table" and not is_model_list_request() then
+    local has_allowlist = type(conf.allowed_models) == "table"
+    local has_denylist = type(conf.denied_models) == "table" and #conf.denied_models > 0
+
+    if (has_allowlist or has_denylist) and not is_model_list_request() then
         local model = request_model()
-        local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
-        local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name
-        if not model or not allow_match(conf.allowed_models, model, ep_type, ep_name) then
+
+        -- 2) Model allowlist: an absent field (nil / JSON null = cjson.null) means
+        --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
+        --    request model must be present and in it. An explicit empty [] therefore
+        --    denies every model (deny-all). Guard on the value being a table so null
+        --    stays unrestricted while [] enforces. A model list is not one model
+        --    call, so it reaches the endpoint here; body_filter narrows its response
+        --    to the models visible through this key, including an empty [] deny-all.
+        if has_allowlist then
+            local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
+            local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name
+            if not model or not allow_match(conf.allowed_models, model, ep_type, ep_name) then
+                return deny403("model_not_permitted", "Model not permitted for this API key")
+            end
+        end
+
+        -- 2b) Model denylist: same answer as the allowlist, so a client cannot tell
+        --     which rule refused it. A request without a model names nothing to deny.
+        if has_denylist and model and in_list(conf.denied_models, model) then
             return deny403("model_not_permitted", "Model not permitted for this API key")
         end
     end
@@ -391,6 +422,7 @@ function AccessHandler:body_filter(conf)
     kong.response.set_raw_body(filter_model_list_response(
         body,
         conf.allowed_models,
+        conf.denied_models,
         shared.neutree_endpoint_type,
         shared.neutree_endpoint_name
     ))

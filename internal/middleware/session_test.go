@@ -105,6 +105,7 @@ func TestAuth_APIKeyIsNotSessionChecked(t *testing.T) {
 
 	store := storagemocks.NewMockStorage(t)
 	store.EXPECT().GetApiKey(keyID).Return(&v1.ApiKey{ID: keyID, Metadata: &v1.Metadata{Name: "k"}, Spec: &v1.ApiKeySpec{}}, nil).Once()
+	expectOwnerActive(store, keyID, true, nil)
 
 	key, err := createTestAPIKey(sessionTestUserID, keyID, sessionTestSecret, 0)
 	require.NoError(t, err)

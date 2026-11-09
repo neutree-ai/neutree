@@ -683,6 +683,14 @@ func (s *postgrestStorage) UpdateApiKey(id string, data *v1.ApiKey) error {
 	return nil
 }
 
+func (s *postgrestStorage) ApiKeyOwnerActive(id string) (bool, error) {
+	var active bool
+
+	err := s.CallDatabaseFunction("api_key_owner_active", map[string]interface{}{"p_key_id": id}, &active)
+
+	return active, err
+}
+
 func (s *postgrestStorage) GetApiKey(id string) (*v1.ApiKey, error) {
 	var (
 		response []v1.ApiKey

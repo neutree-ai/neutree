@@ -3,18 +3,19 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// Tests for 125_org_scoped_role_assignments with the default hooks:
-//   - writing an OrgUnit scope is rejected and never turned into a global
-//     assignment,
+// Tests for OrgUnit-scoped role assignments and their bindings:
+//   - an OrgUnit scope is stored as is; a workspace scope is still rejected,
 //   - api.has_permission_on_subject / api.has_permission_on_org_unit follow
-//     global assignments only (the subtree hook never grants),
+//     global assignments and the subtree of OrgUnit-scoped ones,
 //   - the department-admin preset role exists and is protected.
+// Delegation and Inactive OrgUnits: org_subtree_*_test.go.
 
 func TestOrgScopedRoleAssignment_EntryPointsExist(t *testing.T) {
 	db := GetTestDB(t)
@@ -51,66 +52,129 @@ func TestOrgScopedRoleAssignment_EntryPointsExist(t *testing.T) {
 	}
 }
 
-func TestOrgScopedRoleAssignment_DefaultRejectsScope(t *testing.T) {
+func TestOrgScopedRoleAssignment_Scopes(t *testing.T) {
 	f := newOrgFixture(t)
 	unit := f.createOrgUnit("")
-	user := createGoTrueTestUser(t, "osra-reject", "password123")
+	user := createGoTrueTestUser(t, "osra-scope", "password123")
 	db := GetTestDB(t)
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id = $1::uuid`, user.ID)
 	})
 
-	for _, global := range []string{"FALSE", "TRUE", "NULL"} {
-		t.Run("global="+global, func(t *testing.T) {
-			_, err := db.Exec(`
-				INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
-				VALUES ('v1', 'RoleAssignment',
-					ROW($1, NULL, NULL, NULL, NULL, NULL, '{}'::json, '{}'::json)::api.metadata,
-					ROW($2::uuid, NULL, `+global+`, 'workspace-user', $3)::api.role_assignment_spec)
-			`, newOrgName("osra"), user.ID, unit.Metadata.Name)
-			assertErrCode(t, "an OrgUnit-scoped assignment", err, "10280")
-		})
-	}
-
-	t.Run("an update cannot add a scope", func(t *testing.T) {
+	insert := func(tx *sql.Tx, workspace, global, orgUnit any) (string, error) {
 		name := newOrgName("osra")
-		if _, err := db.Exec(`
+		_, err := tx.Exec(`
 			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 			VALUES ('v1', 'RoleAssignment',
 				ROW($1, NULL, NULL, NULL, NULL, NULL, '{}'::json, '{}'::json)::api.metadata,
-				ROW($2::uuid, NULL, TRUE, 'workspace-user', NULL)::api.role_assignment_spec)
-		`, name, user.ID); err != nil {
-			t.Fatalf("global assignment failed: %v", err)
-		}
+				ROW($2::uuid, $3, $4, 'workspace-user', $5, NULL, NULL, NULL)::api.role_assignment_spec)
+		`, name, user.ID, workspace, global, orgUnit)
+		return name, err
+	}
 
-		_, err := db.Exec(`
-			UPDATE api.role_assignments
-			SET spec = ROW((spec).user_id, NULL, FALSE, (spec).role, $2)::api.role_assignment_spec
-			WHERE (metadata).name = $1
-		`, name, unit.Metadata.Name)
-		assertErrCode(t, "adding an OrgUnit scope", err, "10280")
+	inTx := func(t *testing.T, fn func(tx *sql.Tx)) {
+		t.Helper()
+
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		fn(tx)
+	}
+
+	scopeOf := func(t *testing.T, tx *sql.Tx, name string) (bool, string) {
+		t.Helper()
+
+		var global sql.NullBool
+		var ou string
+		if err := tx.QueryRow(`SELECT (spec).global, COALESCE((spec).org_unit, '') FROM api.role_assignments WHERE (metadata).name = $1`,
+			name).Scan(&global, &ou); err != nil {
+			t.Fatal(err)
+		}
+		return global.Bool, ou
+	}
+
+	for _, global := range []any{false, nil} {
+		t.Run(fmt.Sprintf("an OrgUnit scope with global=%v is stored", global), func(t *testing.T) {
+			inTx(t, func(tx *sql.Tx) {
+				name, err := insert(tx, nil, global, unit.Metadata.Name)
+				if err != nil {
+					t.Fatalf("insert failed: %v", err)
+				}
+				if g, ou := scopeOf(t, tx, name); g || ou != unit.Metadata.Name {
+					t.Errorf("stored global=%v org_unit=%q", g, ou)
+				}
+			})
+		})
+	}
+
+	t.Run("an OrgUnit scope cannot be global", func(t *testing.T) {
+		inTx(t, func(tx *sql.Tx) {
+			_, err := insert(tx, nil, true, unit.Metadata.Name)
+			assertErrCode(t, "global with an OrgUnit", err, "10281")
+		})
 	})
 
-	var scoped int
-	if err := db.QueryRow(`SELECT count(*) FROM api.role_assignments WHERE (spec).user_id = $1::uuid AND ((spec).org_unit IS NOT NULL OR (spec).role <> 'workspace-user')`,
-		user.ID).Scan(&scoped); err != nil {
-		t.Fatal(err)
-	}
-	if scoped != 0 {
-		t.Fatalf("%d scoped assignments were stored", scoped)
-	}
+	t.Run("a workspace scope is still rejected", func(t *testing.T) {
+		inTx(t, func(tx *sql.Tx) {
+			_, err := insert(tx, "default", false, nil)
+			assertErrCode(t, "a workspace scope", err, "10041")
+		})
+	})
 
-	var globals int
-	if err := db.QueryRow(`SELECT count(*) FROM api.role_assignments WHERE (spec).user_id = $1::uuid`, user.ID).Scan(&globals); err != nil {
-		t.Fatal(err)
-	}
-	if globals != 1 {
-		t.Fatalf("user has %d assignments, want only the one global assignment", globals)
-	}
+	t.Run("a soft-deleted OrgUnit-scoped assignment does not block creating it again", func(t *testing.T) {
+		inTx(t, func(tx *sql.Tx) {
+			if _, err := insert(tx, nil, false, unit.Metadata.Name); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := insert(tx, nil, false, unit.Metadata.Name); err == nil {
+				t.Fatal("a live duplicate was accepted")
+			}
+		})
+
+		inTx(t, func(tx *sql.Tx) {
+			name, err := insert(tx, nil, false, unit.Metadata.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(`UPDATE api.role_assignments SET metadata.deletion_timestamp = now() WHERE (metadata).name = $1`, name); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := insert(tx, nil, false, unit.Metadata.Name); err != nil {
+				t.Errorf("creating it again after a soft delete failed: %v", err)
+			}
+		})
+	})
+
+	// PostgREST writes spec as a whole; a role-only PATCH must not widen an
+	// OrgUnit scope to global.
+	t.Run("a role-only update keeps the stored scope", func(t *testing.T) {
+		for _, c := range []struct {
+			global  any
+			orgUnit any
+		}{{false, unit.Metadata.Name}, {true, nil}} {
+			inTx(t, func(tx *sql.Tx) {
+				name, err := insert(tx, nil, c.global, c.orgUnit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(`UPDATE api.role_assignments SET spec = ROW(NULL, NULL, NULL, 'admin', NULL, NULL, NULL, NULL)::api.role_assignment_spec
+					WHERE (metadata).name = $1`, name); err != nil {
+					t.Fatalf("role-only update failed: %v", err)
+				}
+				wantOU, _ := c.orgUnit.(string)
+				if g, ou := scopeOf(t, tx, name); g != (c.global == true) || ou != wantOU {
+					t.Errorf("after a role-only update of global=%v org_unit=%v: global=%v org_unit=%q", c.global, c.orgUnit, g, ou)
+				}
+			})
+		}
+	})
 }
 
-func TestOrgScopedRoleAssignment_DefaultNeverGrantsBySubtree(t *testing.T) {
+func TestOrgScopedRoleAssignment_GrantsBySubtree(t *testing.T) {
 	ctx := context.Background()
 	f := newOrgFixture(t)
 	root := f.createOrgUnit("")
@@ -133,7 +197,7 @@ func TestOrgScopedRoleAssignment_DefaultNeverGrantsBySubtree(t *testing.T) {
 
 	// A subtree-scoped department-admin assignment.
 	scoped := createGoTrueTestUser(t, "osra-scoped", "password123")
-	seedOrgScopedAssignment(t, db, scoped.ID, "department-admin", root.Metadata.Name)
+	seedRoleAssignment(t, db, roleAssignment{UserID: scoped.ID, Role: "department-admin", OrgUnit: root.Metadata.Name, Replica: true})
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid)`, globalID, scoped.ID)
@@ -163,16 +227,17 @@ func TestOrgScopedRoleAssignment_DefaultNeverGrantsBySubtree(t *testing.T) {
 		check(t, onOrgUnit, []any{globalID, "role:read", nil}, true)
 	})
 
-	t.Run("subtree assignment grants nothing", func(t *testing.T) {
-		check(t, `SELECT api.check_org_role_binding($1::uuid, 'user_profile:read', $2)`, []any{scoped.ID, child.ID}, false)
-		check(t, onSubject, []any{scoped.ID, "user_profile:read", target.ID}, false)
-		check(t, onSubject, []any{scoped.ID, "role_assignment:create", target.ID}, false)
-		check(t, onOrgUnit, []any{scoped.ID, "org_unit:read", root.ID}, false)
-		check(t, onOrgUnit, []any{scoped.ID, "role:read", nil}, false)
+	t.Run("subtree assignment grants in the subtree", func(t *testing.T) {
+		check(t, `SELECT api.check_org_role_binding($1::uuid, 'user_profile:read', $2)`, []any{scoped.ID, child.ID}, true)
+		check(t, onSubject, []any{scoped.ID, "user_profile:read", target.ID}, true)
+		check(t, onSubject, []any{scoped.ID, "role_assignment:create", target.ID}, true)
+		check(t, onSubject, []any{scoped.ID, "user_profile:delete", target.ID}, false)
+		check(t, onOrgUnit, []any{scoped.ID, "org_unit:read", root.ID}, true)
+		check(t, onOrgUnit, []any{scoped.ID, "role:read", nil}, true)
 		check(t, `SELECT api.has_permission($1::uuid, 'user_profile:read', NULL)`, []any{scoped.ID}, false)
 	})
 
-	t.Run("RLS follows global assignments only", func(t *testing.T) {
+	t.Run("RLS follows global and subtree assignments", func(t *testing.T) {
 		count := func(userID, query string, args ...any) int {
 			t.Helper()
 
@@ -186,14 +251,17 @@ func TestOrgScopedRoleAssignment_DefaultNeverGrantsBySubtree(t *testing.T) {
 			return n
 		}
 
-		if n := count(scoped.ID, `SELECT count(*) FROM api.user_profiles WHERE id = $1::uuid`, target.ID); n != 0 {
-			t.Errorf("subtree assignment sees the target profile")
+		if n := count(scoped.ID, `SELECT count(*) FROM api.user_profiles WHERE id = $1::uuid`, target.ID); n != 1 {
+			t.Errorf("subtree assignment does not see the target profile")
 		}
-		if n := count(scoped.ID, `SELECT count(*) FROM api.org_units WHERE id = $1`, child.ID); n != 0 {
-			t.Errorf("subtree assignment sees the OrgUnit")
+		if n := count(scoped.ID, `SELECT count(*) FROM api.org_units WHERE id = $1`, child.ID); n != 1 {
+			t.Errorf("subtree assignment does not see the OrgUnit")
 		}
-		if n := count(scoped.ID, `SELECT count(*) FROM api.roles`); n != 0 {
-			t.Errorf("subtree assignment sees roles")
+		if n := count(scoped.ID, `SELECT count(*) FROM api.roles`); n == 0 {
+			t.Errorf("subtree assignment sees no roles")
+		}
+		if n := count(scoped.ID, `SELECT count(*) FROM api.user_profiles WHERE id = $1::uuid`, globalID); n != 0 {
+			t.Errorf("subtree assignment sees a user outside the subtree")
 		}
 		if n := count(globalID, `SELECT count(*) FROM api.user_profiles WHERE id = $1::uuid`, target.ID); n != 1 {
 			t.Errorf("global assignment does not see the target profile")
@@ -218,6 +286,7 @@ func TestOrgScopedRoleAssignment_DepartmentAdminPreset(t *testing.T) {
 		"user_profile:read", "user_profile:update",
 		"role_assignment:read", "role_assignment:create", "role_assignment:update", "role_assignment:delete",
 		"role:read", "org_unit:read", "org_unit:assign-member",
+		"org_unit:usage-read", "group_policy:read",
 	}
 	got := strings.Split(strings.Trim(perms, "{}"), ",")
 	if len(got) != len(want) {

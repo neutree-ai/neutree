@@ -100,7 +100,7 @@ func tokenWithPresetRole(t *testing.T, prefix, role string) string {
 		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 		VALUES ('v1', 'RoleAssignment',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, NULL, TRUE, $3, NULL)::api.role_assignment_spec)`, name, user.ID, role); err != nil {
+			ROW($2::uuid, NULL, TRUE, $3, NULL, NULL, NULL, NULL)::api.role_assignment_spec)`, name, user.ID, role); err != nil {
 		t.Fatalf("assigning %s failed: %v", role, err)
 	}
 

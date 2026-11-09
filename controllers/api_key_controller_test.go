@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/gateway"
 	gatewaymocks "github.com/neutree-ai/neutree/internal/gateway/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -362,4 +365,37 @@ func TestApiKeyController_Reconcile(t *testing.T) {
 			mockStorage.AssertExpectations(t)
 		})
 	}
+}
+
+// The guarantee of group policies: a round that cannot read them sends nothing
+// to Kong and leaves the key as it is, so the gateway keeps its last config.
+func TestApiKeyController_Sync_GroupPolicyUnavailable(t *testing.T) {
+	var kongRequests int
+
+	kongServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		kongRequests++
+
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer kongServer.Close()
+
+	s := storagemocks.NewMockStorage(t)
+	s.On("ApiKeyOwnerActive", mock.Anything).Return(true, nil).Once()
+	s.On("CallDatabaseFunction", "get_api_key_model_rules", mock.Anything, mock.Anything).
+		Return(errors.New("connection refused")).Once()
+
+	gw, err := gateway.GetGateway("kong", gateway.GatewayOptions{AdminUrl: kongServer.URL, Storage: s})
+	assert.NoError(t, err)
+
+	c, _ := NewApiKeyController(&ApiKeyControllerOption{Storage: s, Gw: gw})
+
+	apiKey := testApiKey("key-1", "")
+	apiKey.UserID = "user-1"
+	apiKey.Metadata.Workspace = "default"
+	apiKey.Status = &v1.ApiKeyStatus{Phase: v1.ApiKeyPhaseCREATED, SkValue: "sk-1"}
+
+	err = c.sync(apiKey)
+
+	assert.Error(t, err)
+	assert.Zero(t, kongRequests)
 }

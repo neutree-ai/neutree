@@ -8,10 +8,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// Tests for 127_department_admin_assign_member with the default hooks:
-// global assigners keep full access to hand-written memberships, and an
-// OrgUnit-scoped department-admin gets nothing, since the default subtree
-// hook never grants.
+// Tests for org_unit:assign-member: global assigners keep full
+// access to hand-written memberships. The subtree side is in
+// TestOrgUnitMemberWrite_Subtree.
 
 func TestOrgUnitMemberWrite_Global(t *testing.T) {
 	ctx := context.Background()
@@ -39,10 +38,10 @@ func TestOrgUnitMemberWrite_Global(t *testing.T) {
 	}
 
 	scoped := createGoTrueTestUser(t, "oumw-scoped", "password123")
-	seedOrgScopedAssignment(t, db, scoped.ID, "department-admin", root.Metadata.Name)
+	seedRoleAssignment(t, db, roleAssignment{UserID: scoped.ID, Role: "department-admin", OrgUnit: root.Metadata.Name, Replica: true})
 
 	t.Cleanup(func() {
-		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid)`, globalID, scoped.ID)
+		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id = $1::uuid`, globalID)
 		_, _ = db.Exec(`DELETE FROM api.roles WHERE (metadata).name = 'oumw-global-role'`)
 	})
 
@@ -113,22 +112,4 @@ func TestOrgUnitMemberWrite_Global(t *testing.T) {
 		_, err := exec(globalID, move, local.ID, inactive.ID)
 		assertErrCode(t, "moving into an Inactive OrgUnit", err, "10277")
 	})
-
-	t.Run("an OrgUnit-scoped department-admin writes nothing", func(t *testing.T) {
-		_, err := exec(scoped.ID, insert, other.ID, rnd.ID)
-		assertErrCode(t, "insert", err, "row-level security")
-
-		if n, err := exec(scoped.ID, move, local.ID, ml.ID); err != nil || n != 0 {
-			t.Errorf("move = %d, %v; want no row", n, err)
-		}
-
-		if n, err := exec(scoped.ID, remove, local.ID); err != nil || n != 0 {
-			t.Errorf("remove = %d, %v; want no row", n, err)
-		}
-
-		if got := orgUnitOf(local.ID); got != rnd.ID {
-			t.Errorf("membership = %d, want %d", got, rnd.ID)
-		}
-	})
-
 }

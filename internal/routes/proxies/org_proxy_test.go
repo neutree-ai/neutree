@@ -31,6 +31,9 @@ func TestOrgRoutes(t *testing.T) {
 	RegisterTeamRoutes(group, nil, deps)
 	RegisterTeamMemberRoutes(group, nil, deps)
 	RegisterOrgUnitMemberRoutes(group, nil, deps)
+	RegisterGroupPolicyRoutes(group, nil, deps)
+	RegisterServiceAccountRoutes(group, nil, deps)
+	RegisterTeamApplicationPermissionRoutes(group, nil, deps)
 
 	cases := []struct {
 		method    string
@@ -54,6 +57,20 @@ func TestOrgRoutes(t *testing.T) {
 		{http.MethodPost, "org_unit_members", true},
 		{http.MethodPatch, "org_unit_members", true},
 		{http.MethodDelete, "org_unit_members", true},
+		{http.MethodGet, "group_policies", true},
+		{http.MethodPost, "group_policies", true},
+		{http.MethodPatch, "group_policies", true},
+		{http.MethodDelete, "group_policies", true},
+		{http.MethodPut, "group_policies", false},
+		{http.MethodGet, "service_accounts", true},
+		{http.MethodPost, "service_accounts", true},
+		{http.MethodPatch, "service_accounts", true},
+		{http.MethodDelete, "service_accounts", true},
+		{http.MethodPut, "service_accounts", false},
+		{http.MethodGet, "team_application_permissions", true},
+		{http.MethodPost, "team_application_permissions", true},
+		{http.MethodPatch, "team_application_permissions", true},
+		{http.MethodDelete, "team_application_permissions", true},
 	}
 
 	for _, c := range cases {

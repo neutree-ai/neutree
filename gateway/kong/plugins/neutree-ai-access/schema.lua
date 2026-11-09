@@ -40,6 +40,15 @@ return {
               },
             },
           },
+          {
+            -- Client-facing model names refused on any endpoint (group deny
+            -- rules). Empty or unset = none.
+            denied_models = {
+              type = "array",
+              required = false,
+              elements = { type = "string" },
+            },
+          },
           { concurrency = { type = "integer", required = false } },
           {
             rate_limits = {

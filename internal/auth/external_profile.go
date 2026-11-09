@@ -86,7 +86,7 @@ type ExternalUserUpdate struct {
 // differs. The organization sync and every LDAP or OIDC login use it.
 //
 // The profile email can only be changed to what the database derives for the
-// user (migration 108): user_metadata.email, or the GoTrue email when there is
+// user (trigger user_profile_identity_source): user_metadata.email, or the GoTrue email when there is
 // none. So user_metadata is written first, and the profile follows it.
 func UpdateExternalUser(client Client, store ExternalUserStore, u ExternalUserUpdate) error {
 	userID := u.Link.UserID

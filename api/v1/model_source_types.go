@@ -9,7 +9,7 @@ package v1
 // allowed_models, and quotas by ApiKeyLimits.
 //
 // Granularity: per MODEL. One external endpoint routinely fronts models of
-// different origin, and 095's model routes let a single model have targets on
+// different origin, and external endpoint model routes let a single model have targets on
 // several upstreams, so neither the endpoint nor the upstream resolves to one
 // source per model. The source is an assertion an admin makes about a model.
 //

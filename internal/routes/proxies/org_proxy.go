@@ -64,3 +64,52 @@ func RegisterOrgUnitMemberRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	proxyGroup.PATCH("", handler)
 	proxyGroup.DELETE("", handler)
 }
+
+// RegisterGroupPolicyRoutes registers group policy routes. A policy has no
+// controller, so DELETE removes it at once.
+//
+// Allowed methods: GET, POST, PATCH, DELETE
+func RegisterGroupPolicyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/group_policies")
+	proxyGroup.Use(middlewares...)
+
+	handler := CreateStructProxyHandler[v1.GroupPolicy](deps, storage.GROUP_POLICY_TABLE)
+
+	proxyGroup.GET("", handler)
+	proxyGroup.POST("", handler)
+	proxyGroup.PATCH("", handler)
+	proxyGroup.DELETE("", handler)
+}
+
+// RegisterServiceAccountRoutes registers ServiceAccount routes. A
+// ServiceAccount has no controller, so DELETE removes it at once; the
+// database refuses while it has API keys.
+//
+// Allowed methods: GET, POST, PATCH, DELETE
+func RegisterServiceAccountRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/service_accounts")
+	proxyGroup.Use(middlewares...)
+
+	handler := CreateStructProxyHandler[v1.ServiceAccount](deps, storage.SERVICE_ACCOUNT_TABLE)
+
+	proxyGroup.GET("", handler)
+	proxyGroup.POST("", handler)
+	proxyGroup.PATCH("", handler)
+	proxyGroup.DELETE("", handler)
+}
+
+// RegisterTeamApplicationPermissionRoutes registers the routes of Team
+// application permissions; DELETE puts a Team back on the default.
+//
+// Allowed methods: GET, POST, PATCH, DELETE
+func RegisterTeamApplicationPermissionRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+	proxyGroup := group.Group("/team_application_permissions")
+	proxyGroup.Use(middlewares...)
+
+	handler := CreateStructProxyHandler[v1.TeamApplicationPermissions](deps, storage.TEAM_APP_PERMISSION_TABLE)
+
+	proxyGroup.GET("", handler)
+	proxyGroup.POST("", handler)
+	proxyGroup.PATCH("", handler)
+	proxyGroup.DELETE("", handler)
+}

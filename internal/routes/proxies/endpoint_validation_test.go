@@ -2408,8 +2408,8 @@ func TestValidateEndpointModelSource(t *testing.T) {
 	t.Run("accepts an empty version from an engine Neutree downloads for", func(t *testing.T) {
 		// An empty version is not a missing field, it is the way to say "the
 		// registry's default": Hugging Face and ModelScope resolve it to the
-		// repository's default branch and BentoML to its latest version. Migration
-		// 045 dropped the presence trigger for this reason, so versionless
+		// repository's default branch and BentoML to its latest version. The
+		// remove_model_version_validation migration dropped the presence trigger for this reason, so versionless
 		// endpoints exist in the wild and have always deployed.
 		for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
 			store := &fakeModelRegistryStorage{registries: visible}
@@ -2585,7 +2585,7 @@ func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 }
 
 // The reported bug: a vLLM endpoint recorded without a model version --
-// legal since migration 045, and the shape endpoints created between then and
+// legal since remove_model_version_validation, and the shape endpoints created between then and
 // the NEU-633 validation move carry -- was refused on the way back up from a
 // pause. Nothing about it is invalid, so every direction has to pass.
 func TestValidateEndpointPatchModelSourceEmptyVersion(t *testing.T) {
