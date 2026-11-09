@@ -65,6 +65,31 @@ func TestNvidiaBuildMetricSamplesUsesAdapterEndpointUsage(t *testing.T) {
 	})
 }
 
+func TestNvidiaBuildMetricSamplesNormalizesLowPercentUtilization(t *testing.T) {
+	raw := nvidiaDCGMFixture("GPU-a", "A100", "0", 0.99, 2048, 81920)
+	allocations := []model.EndpointAllocation{nvidiaTestAllocation("chat", "replica-a", "GPU-a", "A100", 81920)}
+
+	samples := nvidiaBuildMetricSamples(
+		adapter.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		raw,
+		nil,
+		allocations,
+		nil,
+	)
+
+	physical := requireNvidiaSample(t, samples, "neutree_accelerator_utilization_ratio", map[string]string{
+		"accelerator_uuid": "GPU-a",
+	})
+	endpoint := requireNvidiaSample(t, samples, "neutree_endpoint_replica_accelerator_utilization_ratio", map[string]string{
+		"accelerator_uuid": "GPU-a",
+		"endpoint":         "chat",
+		"replica":          "replica-a",
+	})
+
+	assert.InDelta(t, 0.0099, physical.Value, 1e-12)
+	assert.InDelta(t, 0.0099, endpoint.Value, 1e-12)
+}
+
 func TestNvidiaBuildMetricSamplesEmitsPCIeThroughputAsRateSamples(t *testing.T) {
 	raw := nvidiaDCGMFixture("GPU-a", "A100", "0", 62, 2048, 81920) +
 		"DCGM_FI_PROF_PCIE_TX_BYTES{gpu=\"0\",UUID=\"GPU-a\",modelName=\"A100\"} 4096\n" +
