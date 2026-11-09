@@ -102,7 +102,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if !variables.EnableVMAgent && !variables.EnableKubeStateMetrics && !variables.EnableNodeExporter &&
-		len(variables.AcceleratorExporters) == 0 && len(variables.ScrapeTargets) == 0 {
+		!variables.EnableNeutreeNodeAgentMetrics && len(variables.AcceleratorExporters) == 0 {
 		return &unstructured.UnstructuredList{}, nil
 	}
 

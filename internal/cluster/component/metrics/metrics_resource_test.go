@@ -10,10 +10,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
-	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -26,6 +22,11 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 func metricsTestNode(name string, labels map[string]string) *corev1.Node {
@@ -159,19 +160,34 @@ func TestBuildMetricsResourcesWithoutValidRemoteWriteOmitsVMAgentAndKeepsLocalCo
 }
 
 func TestBuildMetricsResourcesWithoutRequiredCollectorsReturnsEmptyList(t *testing.T) {
-	for _, remoteWriteURL := range []string{"", "invalid-url"} {
-		t.Run("remote write URL="+remoteWriteURL, func(t *testing.T) {
+	for _, test := range []struct {
+		name, remoteWriteURL string
+		external             bool
+	}{
+		{name: "remote write disabled"},
+		{name: "invalid remote write URL", remoteWriteURL: "invalid-url"},
+		{name: "external target without managed collectors", external: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			metricsCmpt := &MetricsComponent{
 				cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
 					Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
 				},
-				metricsRemoteWriteURL: remoteWriteURL,
+				metricsRemoteWriteURL: test.remoteWriteURL,
 			}
-
+			if test.external {
+				metricsCmpt.cluster.Spec.Config = &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: v1.ClusterAcceleratorExporterModeExternal},
+				}}
+				metricsCmpt.acceleratorMgr = accelerator.NewManager()
+				metricsCmpt.ctrlClient = fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+					"nvidia.com/gpu.present": "true",
+				})).Build()
+			}
 			objs, err := metricsCmpt.GetMetricsResources(context.Background())
-			assert.NilError(t, err)
-			assert.Equal(t, 0, len(objs.Items))
+			require.NoError(t, err)
+			require.Empty(t, objs.Items)
 		})
 	}
 }

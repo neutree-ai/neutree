@@ -37,13 +37,14 @@ type Registry interface {
 }
 
 // TargetRegistry is reconstructed for each reconcile and is not persisted.
+// Its zero value is ready for use.
 type TargetRegistry struct {
 	mu     sync.RWMutex
 	owners map[string][]Target
 }
 
 func NewRegistry() *TargetRegistry {
-	return &TargetRegistry{owners: map[string][]Target{}}
+	return &TargetRegistry{}
 }
 
 func (r *TargetRegistry) Replace(owner string, targets []Target) error {
@@ -71,6 +72,10 @@ func (r *TargetRegistry) Replace(owner string, targets []Target) error {
 	if len(copied) == 0 {
 		delete(r.owners, owner)
 	} else {
+		if r.owners == nil {
+			r.owners = make(map[string][]Target)
+		}
+
 		r.owners[owner] = copied
 	}
 
