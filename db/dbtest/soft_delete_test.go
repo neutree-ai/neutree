@@ -63,7 +63,7 @@ func createUserWithPermissions(t *testing.T, tx *sql.Tx, username, email string,
 			'v1',
 			'RoleAssignment',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
+			ROW($2::uuid, NULL, TRUE, $3, NULL)::api.role_assignment_spec
 		)
 	`, username+"-role-assignment", user.ID, roleName)
 	if err != nil {
@@ -71,6 +71,32 @@ func createUserWithPermissions(t *testing.T, tx *sql.Tx, username, email string,
 	}
 
 	return user.ID
+}
+
+// seedOrgScopedAssignment assigns role to userID on the OrgUnit subtree
+// orgUnit and returns the assignment name. The default write checks reject an
+// OrgUnit scope, so they are bypassed for the seed.
+func seedOrgScopedAssignment(t *testing.T, db *sql.DB, userID, role, orgUnit string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	name := newOrgName("scoped-ra")
+	if err := execWithContext(t, db, nil, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
+			VALUES ('v1', 'RoleAssignment',
+				ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+				ROW($2::uuid, NULL, FALSE, $3, $4)::api.role_assignment_spec)
+		`, name, userID, role, orgUnit)
+		return err
+	}); err != nil {
+		t.Fatalf("seeding the OrgUnit-scoped assignment failed: %v", err)
+	}
+
+	return name
 }
 
 // executeAsUser executes a function within a transaction as the specified user
