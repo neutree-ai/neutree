@@ -27,14 +27,17 @@ func (r testMetricsTargetRegistry) Snapshot() (metricsconfig.Snapshot, error) {
 }
 
 func TestRenderKubernetesVMAgentConfigRejectsDuplicateJobNames(t *testing.T) {
-	_, err := renderKubernetesVMAgentConfig(MetricsManifestVariables{
-		ClusterName: "cluster-a", Workspace: "workspace-a", Namespace: "metrics-system",
-		EnableVMAgent: true,
-		ScrapeTargets: []metricsconfig.Target{
-			{JobName: "duplicate-job", StaticTargets: []string{"first:9000"}},
-			{JobName: "duplicate-job", StaticTargets: []string{"second:9000"}},
-		},
-	})
+	variables := MetricsManifestVariables{}
+	variables.ClusterName = "cluster-a"
+	variables.Workspace = "workspace-a"
+	variables.Namespace = "metrics-system"
+	variables.EnableVMAgent = true
+	variables.ScrapeTargets = []metricsconfig.Target{
+		{JobName: "duplicate-job", StaticTargets: []string{"first:9000"}},
+		{JobName: "duplicate-job", StaticTargets: []string{"second:9000"}},
+	}
+
+	_, err := renderKubernetesVMAgentConfig(variables)
 
 	require.EqualError(t, err, `duplicate scrape job name "duplicate-job"`)
 }
