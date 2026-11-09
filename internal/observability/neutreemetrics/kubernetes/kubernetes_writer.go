@@ -25,6 +25,11 @@ func (w *AnnotationWriter) Write(ctx context.Context, snapshot *v1.NodeDeviceSna
 		return nil
 	}
 
+	// An empty inventory is not authoritative for either Node devices or Pod allocations.
+	if len(kubernetesDeviceAnnotations(snapshot.Accelerator.Devices)) == 0 {
+		return nil
+	}
+
 	if err := w.writeNodeDevices(ctx, snapshot.Accelerator.Devices); err != nil {
 		return err
 	}
@@ -36,12 +41,6 @@ func (w *AnnotationWriter) writeNodeDevices(
 	ctx context.Context,
 	devices []v1.StaticNodeAcceleratorDeviceStatus,
 ) error {
-	// An empty snapshot must not erase a previously discovered inventory from
-	// the Node annotation. The next nonempty observation will reconcile it.
-	if len(kubernetesDeviceAnnotations(devices)) == 0 {
-		return nil
-	}
-
 	node := &corev1.Node{}
 	if err := w.Client.Get(ctx, client.ObjectKey{Name: w.NodeName}, node); err != nil {
 		if apierrors.IsNotFound(err) {

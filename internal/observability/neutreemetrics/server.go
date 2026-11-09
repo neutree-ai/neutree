@@ -224,25 +224,35 @@ func (s *Server) runKubernetesAnnotationWriter(ctx context.Context) {
 }
 
 func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "/v1/node/device-snapshot", nil)
+	accel := s.selectedAccelerator()
+	if accel == nil {
+		return
+	}
+
+	exporter := s.scrapeAcceleratorExporters(ctx)
+
+	hardware, err := s.observeAdapterHardware(ctx, accel, exporter)
 	if err != nil {
+		klog.ErrorS(err, "Accelerator adapter failed to discover hardware for annotations", "accelerator_type", s.config.AcceleratorType)
+	}
+
+	if hardware.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU && len(hardware.Accelerator.Devices) == 0 {
 		return
 	}
 
-	snapshot := s.nodeDeviceSnapshot(request)
-
-	if isEmptyCPUDeviceSnapshot(snapshot) {
-		return
-	}
-
-	// Collection may advance while allocations are built; publish the latest
-	// inventory and serialize writes with discovery so an older snapshot cannot win.
+	// Build allocations and publish devices from the same inventory while discovery is serialized.
 	s.inventoryMu.Lock()
 	defer s.inventoryMu.Unlock()
 
-	if s.inventory.Accelerator.Type != "" {
-		snapshot.Accelerator = s.inventory.Accelerator
+	hardware = s.inventory
+
+	result, err := s.adapterMetricResult(ctx, accel, hardware, exporter)
+	if err != nil {
+		klog.ErrorS(err, "Accelerator adapter failed to build annotation allocations", "accelerator_type", s.config.AcceleratorType)
+		return
 	}
+
+	snapshot := &v1.NodeDeviceSnapshot{Accelerator: hardware.Accelerator, Allocations: result.Allocations}
 
 	writeCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
 	defer cancel()
@@ -250,15 +260,6 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 	if err := s.config.KubernetesWriter.Write(writeCtx, snapshot); err != nil {
 		klog.ErrorS(err, "Failed to write accelerator annotations")
 	}
-}
-
-func isEmptyCPUDeviceSnapshot(snapshot *v1.NodeDeviceSnapshot) bool {
-	if snapshot == nil {
-		return false
-	}
-
-	return snapshot.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
-		len(snapshot.Accelerator.Devices) == 0
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

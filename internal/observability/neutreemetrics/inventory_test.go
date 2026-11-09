@@ -23,7 +23,7 @@ func TestMergeHardwareInventory(t *testing.T) {
 	short.Details = append(short.Details[:4], short.Details[5:]...)
 	partial := inventoryTestHardware(8)
 	partial.Accelerator.Devices[4] = v1.StaticNodeAcceleratorDeviceStatus{ID: "4", UUID: "GPU-4", Healthy: false}
-	partial.Details = nil
+	partial.Details[4] = adapter.HardwareDetails{UUID: "GPU-4", PCIEBusID: "4"}
 	cases := []struct {
 		name     string
 		previous adapter.HardwareSnapshot
@@ -54,7 +54,11 @@ func inventoryTestHardware(count int) adapter.HardwareSnapshot {
 			UUID: fmt.Sprintf("GPU-%d", i), ID: fmt.Sprint(i), MinorNumber: &minor, Healthy: true,
 			ProductName: "RTX 5090", ProductModel: "RTX-5090", MemoryMiB: 32768,
 		})
-		result.Details = append(result.Details, adapter.HardwareDetails{UUID: fmt.Sprintf("GPU-%d", i), PCIEBusID: fmt.Sprint(i)})
+		result.Details = append(result.Details, adapter.HardwareDetails{
+			UUID: fmt.Sprintf("GPU-%d", i), DeviceAliases: []string{fmt.Sprintf("vendor-%d", i)},
+			Architecture: "Blackwell", CUDACapability: "12.0", DriverVersion: "595.58.03", CUDADriverVersion: "13.1",
+			PCIEBusID: fmt.Sprint(i), PCIEGeneration: "5", PCIEWidth: "16", NUMANode: "0",
+		})
 	}
 	return result
 }

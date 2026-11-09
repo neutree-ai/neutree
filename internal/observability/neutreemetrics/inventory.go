@@ -1,6 +1,7 @@
 package neutreemetrics
 
 import (
+	"cmp"
 	"context"
 
 	"k8s.io/klog/v2"
@@ -85,7 +86,21 @@ func mergeHardwareDetails(previous, fresh []adapter.HardwareDetails) []adapter.H
 
 	for _, detail := range fresh {
 		if index, found := positions[detail.UUID]; found {
+			known := previous[index]
+			if len(detail.DeviceAliases) == 0 {
+				detail.DeviceAliases = known.DeviceAliases
+			}
+
+			detail.Architecture = cmp.Or(detail.Architecture, known.Architecture)
+			detail.CUDACapability = cmp.Or(detail.CUDACapability, known.CUDACapability)
+			detail.DriverVersion = cmp.Or(detail.DriverVersion, known.DriverVersion)
+			detail.CUDADriverVersion = cmp.Or(detail.CUDADriverVersion, known.CUDADriverVersion)
+			detail.PCIEBusID = cmp.Or(detail.PCIEBusID, known.PCIEBusID)
+			detail.PCIEGeneration = cmp.Or(detail.PCIEGeneration, known.PCIEGeneration)
+			detail.PCIEWidth = cmp.Or(detail.PCIEWidth, known.PCIEWidth)
+			detail.NUMANode = cmp.Or(detail.NUMANode, known.NUMANode)
 			previous[index] = detail
+
 			continue
 		}
 
