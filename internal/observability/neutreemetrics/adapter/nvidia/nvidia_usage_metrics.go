@@ -206,10 +206,7 @@ func nvidiaGPUUsageSnapshotByUUID(samples prommodel.Vector) map[string]nvidiaGPU
 			value := promtext.Value(sample) * 1024 * 1024
 			snapshot.memoryUsedBytes = &value
 		case nvidiaDCGMDeviceGPUUtilMetric:
-			value := promtext.Value(sample)
-			if value > 1 {
-				value /= 100
-			}
+			value := promtext.Value(sample) / 100
 
 			snapshot.utilizationRatio = &value
 		}

@@ -11,7 +11,7 @@ func TestNvidiaHAMiEndpointReplicaUsagesFromMetrics(t *testing.T) {
 	raw := `
 hami_vgpu_memory_limit_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 8589934592
 hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 4294967296
-hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 0.75
+hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 0.99
 hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",device_uuid="GPU-ignored",vdevice_index="0",node="node-a"} 1024
 `
 	pods := map[podKey]podIdentity{
@@ -36,7 +36,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 	require.NotNil(t, usages[0].MemoryUsedBytes)
 	assert.Equal(t, 4294967296.0, *usages[0].MemoryUsedBytes)
 	require.NotNil(t, usages[0].UtilizationRatio)
-	assert.Equal(t, 0.75, *usages[0].UtilizationRatio)
+	assert.InDelta(t, 0.0099, *usages[0].UtilizationRatio, 1e-12)
 }
 
 func TestNvidiaHAMiEndpointReplicaUsagesAggregatesUsageAndNormalizesPercentages(t *testing.T) {

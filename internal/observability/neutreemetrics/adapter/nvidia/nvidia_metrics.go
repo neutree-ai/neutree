@@ -81,10 +81,7 @@ func nvidiaNormalizeAcceleratorSamples(labels adapter.CanonicalLabels, raw strin
 
 		switch promtext.MetricName(sample) {
 		case nvidiaDCGMDeviceGPUUtilMetric:
-			value := promtext.Value(sample)
-			if value > 1 {
-				value /= 100
-			}
+			value := promtext.Value(sample) / 100
 
 			result = append(result, adapter.Sample{
 				Name:   "neutree_accelerator_utilization_ratio",
