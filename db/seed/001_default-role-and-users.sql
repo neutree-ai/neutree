@@ -136,7 +136,10 @@ BEGIN
                 NULL,        -- No specific workspace (global assignment)
                 TRUE,        -- Global flag set to true
                 'admin',     -- Role name
-                NULL         -- No OrgUnit scope
+                NULL,        -- No OrgUnit scope
+                'User',      -- Subject kind
+                NULL,        -- No group subject
+                NULL         -- No Team scope
             )::api.role_assignment_spec
         );
 
