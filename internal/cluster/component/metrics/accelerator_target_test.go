@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
 
@@ -69,10 +70,10 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 	assert.False(t, hasMetricsDaemonSet(objects, "vendor-accelerator-vendor-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "label: app=vendor-exporter")
-	assert.Contains(t, vmagentConfig, "names:\n      - vendor-system")
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=vendor-exporter"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "vendor-system"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:19401")
-	assert.Contains(t, vmagentConfig, "metrics_path: /custom-metrics")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/custom-metrics"))
 	assert.NotContains(t, vmagentConfig, "neutree.ai/metrics-target=accelerator-exporter")
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
@@ -155,9 +156,9 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 	assert.False(t, hasMetricsDaemonSet(objects, "other-accelerator-other-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'")
-	assert.Contains(t, vmagentConfig, "label: app=nvidia-dcgm-exporter")
-	assert.NotContains(t, vmagentConfig, "job_name: 'accelerator-exporter-other-accelerator'")
+	assert.True(t, configHasJob(t, vmagentConfig, "accelerator-exporter-nvidia-gpu"))
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=nvidia-dcgm-exporter"))
+	assert.False(t, configHasJob(t, vmagentConfig, "accelerator-exporter-other-accelerator"))
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
@@ -214,10 +215,10 @@ func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T
 	assert.False(t, hasMetricsDaemonSet(objects, "vendor-accelerator-external"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "label: app=upstream-exporter")
-	assert.Contains(t, vmagentConfig, "names:\n      - upstream-system")
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=upstream-exporter"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "upstream-system"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:19402")
-	assert.Contains(t, vmagentConfig, "metrics_path: /metrics/custom")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/metrics/custom"))
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
@@ -290,16 +291,15 @@ func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmp
 func metricsScrapeJobConfig(t *testing.T, config string, jobName string) string {
 	t.Helper()
 
-	start := "- job_name: '" + jobName + "'"
-	startIndex := strings.Index(config, start)
-	require.NotEqual(t, -1, startIndex, "job %q was not rendered", jobName)
-
-	jobConfig := config[startIndex:]
-	if nextJob := strings.Index(jobConfig[len(start):], "\n- job_name:"); nextJob >= 0 {
-		jobConfig = jobConfig[:len(start)+nextJob]
+	for _, job := range parsedScrapeJobs(t, config) {
+		if job["job_name"] == jobName {
+			data, err := yaml.Marshal(job)
+			require.NoError(t, err)
+			return string(data)
+		}
 	}
-
-	return jobConfig
+	t.Fatalf("job %q was not rendered", jobName)
+	return ""
 }
 
 func containsEnv(env []corev1.EnvVar, name string) bool {
@@ -349,10 +349,10 @@ func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) 
 	objects, err := component.GetMetricsResources(context.Background())
 	require.NoError(t, err)
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "job_name: 'hami-vgpu-monitor'")
-	assert.Contains(t, vmagentConfig, "names:\n      - vendor-system")
-	assert.Contains(t, vmagentConfig, "label: app.kubernetes.io/component=vendor-device-plugin")
+	assert.True(t, configHasJob(t, vmagentConfig, "hami-vgpu-monitor"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "vendor-system"))
+	assert.True(t, configHasSelector(t, vmagentConfig, "app.kubernetes.io/component=vendor-device-plugin"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:9395")
-	assert.Contains(t, vmagentConfig, "metrics_path: /monitor-metrics")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/monitor-metrics"))
 	assert.NotContains(t, vmagentConfig, "replacement: $1:9394")
 }

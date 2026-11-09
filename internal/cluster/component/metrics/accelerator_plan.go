@@ -19,7 +19,7 @@ type metricsAcceleratorPlan struct {
 	Exporter                    *metricsAcceleratorExporter
 	NodeAgentRuntime            *v1.NodeAgentRuntimeProfile
 	VirtualizationMetricsTarget *v1.MetricsTargetProfile
-	ExternalMetricsTarget       *v1.MetricsTargetProfile
+	ExporterTarget              *v1.MetricsTargetProfile
 }
 
 func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metricsAcceleratorPlan, error) {
@@ -60,12 +60,18 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		AcceleratorType:             acceleratorType,
 		NodeAgentRuntime:            profile.NodeAgentRuntime,
 		VirtualizationMetricsTarget: resolveVirtualizationMetricsTargetNamespace(profile.VirtualizationMetricsTarget, m.namespace),
-		ExternalMetricsTarget:       cloneMetricsTarget(profile.ExternalMetricsTarget),
+	}
+	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+
+	if external {
+		plan.ExporterTarget = cloneMetricsTarget(profile.ExternalMetricsTarget)
+		if plan.ExporterTarget != nil {
+			plan.ExporterTarget.MetricsPath = metricsTargetPath(plan.ExporterTarget.MetricsPath)
+		}
 	}
 
 	if profile.MetricsExporter == nil {
-		if m.acceleratorExporterMode() != v1.ClusterAcceleratorExporterModeExternal ||
-			plan.ExternalMetricsTarget == nil {
+		if !external || plan.ExporterTarget == nil {
 			return metricsAcceleratorPlan{}, false
 		}
 
@@ -77,6 +83,13 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		profile.MetricsExporter,
 		m.imagePrefix,
 	)
+
+	if !external {
+		plan.ExporterTarget = &v1.MetricsTargetProfile{
+			Namespace: m.namespace, PodSelector: managedAcceleratorExporterSelector(acceleratorType),
+			Port: plan.Exporter.Port, MetricsPath: plan.Exporter.MetricsPath,
+		}
+	}
 
 	return plan, true
 }
@@ -98,7 +111,7 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	for _, plan := range candidates {
-		if external && plan.ExternalMetricsTarget == nil {
+		if external && plan.ExporterTarget == nil {
 			continue
 		}
 

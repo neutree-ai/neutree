@@ -14,8 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-// metricsAcceleratorExporter describes only the managed exporter workload.
-// NodeAgent and scrape-target settings belong to metricsAcceleratorPlan.
+// metricsAcceleratorExporter contains an already-selected managed exporter workload.
 type metricsAcceleratorExporter struct {
 	Name            string
 	AcceleratorType string
@@ -47,16 +46,8 @@ func (e metricsAcceleratorExporter) ContainerName() string {
 	return e.Name
 }
 
-func (e metricsAcceleratorExporter) JobName() string {
-	return acceleratorExporterJobName(e.AcceleratorType)
-}
-
 func (e metricsAcceleratorExporter) ConfigMapName() string {
 	return e.Name + "-config"
-}
-
-func (e metricsAcceleratorExporter) HasCustomMetricsPath() bool {
-	return e.MetricsPath != defaultMetricsPath
 }
 
 func buildManagedAcceleratorExporter(
