@@ -2,11 +2,12 @@ package metricsconfig
 
 import (
 	"fmt"
-	"maps"
+	"slices"
 	"sort"
 	"sync"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promscrape/discovery/kubernetes"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,7 +17,7 @@ type Target struct {
 	Owner          string
 	JobName        string
 	Namespace      string
-	Selector       map[string]string
+	Selectors      []kubernetes.Selector
 	StaticTargets  []string
 	KubernetesRole string
 	Scheme         string
@@ -126,7 +127,7 @@ func (r *TargetRegistry) Snapshot() (Snapshot, error) {
 }
 
 func cloneTarget(target Target) (Target, error) {
-	target.Selector = maps.Clone(target.Selector)
+	target.Selectors = slices.Clone(target.Selectors)
 	target.StaticTargets = append([]string(nil), target.StaticTargets...)
 
 	if len(target.RelabelConfigs) == 0 {

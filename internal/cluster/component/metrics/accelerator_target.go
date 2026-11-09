@@ -23,7 +23,7 @@ func (m *MetricsComponent) acceleratorExporterScrapeTargets(plans []metricsAccel
 		rules = append(rules, promrelabel.RelabelConfig{TargetLabel: "accelerator_type", Replacement: &acceleratorType})
 		targets = append(targets, metricsconfig.Target{
 			JobName: acceleratorExporterJobName(acceleratorType), Namespace: endpoint.Namespace,
-			Selector: cloneStringMap(endpoint.PodSelector), Port: endpoint.Port, MetricsPath: endpoint.MetricsPath,
+			Selectors: metricsconfig.PodSelectors(endpoint.PodSelector), Port: endpoint.Port, MetricsPath: endpoint.MetricsPath,
 			RelabelConfigs: rules,
 		})
 	}
@@ -41,7 +41,7 @@ func (m *MetricsComponent) virtualizationMetricsScrapeTargets(plans []metricsAcc
 		}
 
 		targets = append(targets, metricsconfig.Target{
-			JobName: "hami-vgpu-monitor", Namespace: endpoint.Namespace, Selector: cloneStringMap(endpoint.PodSelector),
+			JobName: "hami-vgpu-monitor", Namespace: endpoint.Namespace, Selectors: metricsconfig.PodSelectors(endpoint.PodSelector),
 			Port: endpoint.Port, MetricsPath: metricsTargetPath(endpoint.MetricsPath),
 			RelabelConfigs: m.podScrapeRelabelConfigs(endpoint.Port, "monitor_namespace", "monitor_pod"),
 		})

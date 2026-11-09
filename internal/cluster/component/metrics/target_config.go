@@ -9,14 +9,12 @@ import (
 	"github.com/Masterminds/sprig/v3"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
 	"gopkg.in/yaml.v3"
-	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics/manifests"
 )
 
 var kubernetesVMAgentConfigTemplate = template.Must(
 	template.New("kubernetes-vmagent-config").Funcs(sprig.TxtFuncMap()).Funcs(template.FuncMap{
-		"kubernetesLabelSelector": func(selector map[string]string) string { return labels.SelectorFromSet(labels.Set(selector)).String() },
 		"toYaml": func(value interface{}) (string, error) {
 			data, err := yaml.Marshal(value)
 			return strings.TrimSuffix(string(data), "\n"), err

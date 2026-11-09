@@ -11,7 +11,7 @@ import (
 
 func routerScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target {
 	return metricsconfig.Target{
-		JobName: "neutree-router", Namespace: variables.Namespace, Selector: map[string]string{"app": "router"}, Port: 8000,
+		JobName: "neutree-router", Namespace: variables.Namespace, Selectors: metricsconfig.PodSelectors(map[string]string{"app": "router"}), Port: 8000,
 		RelabelConfigs: []promrelabel.RelabelConfig{
 			{SourceLabels: []string{"__meta_kubernetes_pod_label_cluster"}, Action: "keep", Regex: &promrelabel.MultiLineRegex{S: variables.ClusterName}},
 			{SourceLabels: []string{"__meta_kubernetes_pod_label_workspace"}, Action: "keep", Regex: &promrelabel.MultiLineRegex{S: variables.Workspace}},
@@ -44,7 +44,7 @@ func nodeExporterScrapeTarget(variables MetricsManifestVariables) metricsconfig.
 func stateMetricsScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target {
 	return metricsconfig.Target{
 		JobName: "neutree-kube-state-metrics", Namespace: variables.Namespace,
-		Selector: map[string]string{"app": "neutree-kube-state-metrics"}, Port: 8080,
+		Selectors: metricsconfig.PodSelectors(map[string]string{"app": "neutree-kube-state-metrics"}), Port: 8080,
 		RelabelConfigs: []promrelabel.RelabelConfig{
 			{SourceLabels: []string{"__meta_kubernetes_pod_container_port_name"}, Action: "keep", Regex: &promrelabel.MultiLineRegex{S: "http-metrics"}},
 			{SourceLabels: []string{"__meta_kubernetes_pod_ip"}, Action: "replace", TargetLabel: "__address__",
@@ -60,7 +60,7 @@ func stateMetricsScrapeTarget(variables MetricsManifestVariables) metricsconfig.
 func withBuiltinScrapeTargets(variables MetricsManifestVariables) MetricsManifestVariables {
 	// Keep router before inference and kube-state-metrics after the selected component targets.
 	variables.BaseScrapeTargets = []metricsconfig.Target{routerScrapeTarget(variables)}
-	targets := make([]metricsconfig.Target, 0, len(variables.ScrapeTargets)+2)
+	var targets []metricsconfig.Target
 
 	if variables.EnableNodeExporter {
 		targets = append(targets, nodeExporterScrapeTarget(variables))

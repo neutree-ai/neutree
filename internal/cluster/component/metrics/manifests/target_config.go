@@ -109,10 +109,17 @@ scrape_configs:
       names:
       - {{ .Namespace | quote }}
 {{ end }}
-{{ if .Selector }}
+{{ if .Selectors }}
     selectors:
-    - role: {{ .KubernetesRole | default "pod" }}
-      label: {{ kubernetesLabelSelector .Selector | quote }}
+{{ range .Selectors }}
+    - role: {{ .Role | quote }}
+{{ if .Label }}
+      label: {{ .Label | quote }}
+{{ end }}
+{{ if .Field }}
+      field: {{ .Field | quote }}
+{{ end }}
+{{ end }}
 {{ end }}
 {{ end }}
 {{ if .Scheme }}

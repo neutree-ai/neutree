@@ -190,7 +190,7 @@ func (m *MetricsComponent) nodeAgentScrapeTargets(name string) []metricsconfig.T
 	rules = append(rules, m.podScrapeRelabelConfigs(neutreeNodeAgentMetricsPort, "namespace", "pod")...)
 
 	return []metricsconfig.Target{{
-		JobName: "neutree-node-agent", Namespace: m.namespace, Selector: selector,
+		JobName: "neutree-node-agent", Namespace: m.namespace, Selectors: metricsconfig.PodSelectors(selector),
 		Port: neutreeNodeAgentMetricsPort, MetricsPath: defaultMetricsPath, RelabelConfigs: rules,
 	}}
 }
