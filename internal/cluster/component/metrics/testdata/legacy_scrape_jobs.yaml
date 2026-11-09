@@ -223,6 +223,30 @@ jobs:
         target_label: pod
       - replacement: Router
         target_label: deployment
+  node-exporter-http:
+    job_name: node-exporter-http
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:19100
+        source_labels:
+          - __address__
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_node_name
+        target_label: instance
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_node_name
+        target_label: node
+      - replacement: cluster-a
+        target_label: neutree_cluster
+      - replacement: workspace-a
+        target_label: workspace
+    scheme: http
 monitor_order:
   - neutree-router
   - neutree-inference

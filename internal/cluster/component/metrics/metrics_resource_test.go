@@ -640,8 +640,8 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(vmagentConfig, "scrape_timeout: 30s"))
 	assert.Assert(t, configHasJob(t, vmagentConfig, "node-exporter-http"))
 	assert.Assert(t, !configHasJob(t, vmagentConfig, "node-exporter-https"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
+	require.Contains(t, relabelReplacements(t, findScrapeJob(t, vmagentConfig, "node-exporter-http")), "$1:19100")
+	require.NotContains(t, relabelReplacements(t, findScrapeJob(t, vmagentConfig, "node-exporter-http")), "$1:9100")
 }
 
 func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
@@ -823,8 +823,8 @@ func TestBuildMetricsResourcesUsesProfileTargets(t *testing.T) {
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
 	assert.Assert(t, configHasJob(t, vmagentConfig, "node-exporter-http"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
+	require.Contains(t, relabelReplacements(t, findScrapeJob(t, vmagentConfig, "node-exporter-http")), "$1:19100")
+	require.NotContains(t, relabelReplacements(t, findScrapeJob(t, vmagentConfig, "node-exporter-http")), "$1:9100")
 	assert.Assert(t, configHasJob(t, vmagentConfig, "accelerator-exporter-nvidia-gpu"))
 	assert.Assert(t, configHasSelector(t, vmagentConfig, "neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19400"))
@@ -1971,4 +1971,15 @@ func configHasSelector(t *testing.T, config, selector string) bool {
 		}
 	}
 	return false
+}
+
+func findScrapeJob(t *testing.T, config, name string) map[string]interface{} {
+	t.Helper()
+	for _, job := range parsedScrapeJobs(t, config) {
+		if job["job_name"] == name {
+			return job
+		}
+	}
+	t.Fatalf("scrape job %s not found", name)
+	return nil
 }

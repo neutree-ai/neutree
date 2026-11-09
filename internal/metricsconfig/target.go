@@ -18,6 +18,8 @@ type Target struct {
 	Namespace      string
 	Selector       map[string]string
 	StaticTargets  []string
+	KubernetesRole string
+	Scheme         string
 	Port           int
 	MetricsPath    string
 	RelabelConfigs []promrelabel.RelabelConfig

@@ -62,6 +62,7 @@ func TestScrapeConfigPreservesLegacyRendering(t *testing.T) {
 			require.Equal(t, baseline.Global, config.Global)
 			expected := map[string]map[string]interface{}{
 				"neutree-router":             baseline.Jobs["neutree-router"],
+				"node-exporter-http":         baseline.Jobs["node-exporter-http"],
 				"neutree-kube-state-metrics": baseline.Jobs["neutree-kube-state-metrics"],
 				"neutree-node-agent":         baseline.Jobs["node_agent"], "accelerator-exporter-nvidia-gpu": baseline.Jobs[test.expected],
 			}

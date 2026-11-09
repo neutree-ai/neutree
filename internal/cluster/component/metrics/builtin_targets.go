@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
 	"k8s.io/utils/ptr"
 
@@ -25,6 +27,20 @@ func routerScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target
 	}
 }
 
+func nodeExporterScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target {
+	return metricsconfig.Target{
+		JobName: "node-exporter-http", KubernetesRole: "node", Scheme: "http", Port: variables.NodeExporterPort,
+		RelabelConfigs: []promrelabel.RelabelConfig{
+			{SourceLabels: []string{"__address__"}, Action: "replace", TargetLabel: "__address__",
+				Regex: &promrelabel.MultiLineRegex{S: `([^:]+)(?::\d+)?`}, Replacement: ptr.To(fmt.Sprintf("$1:%d", variables.NodeExporterPort))},
+			{SourceLabels: []string{"__meta_kubernetes_node_name"}, Action: "replace", TargetLabel: "instance"},
+			{SourceLabels: []string{"__meta_kubernetes_node_name"}, Action: "replace", TargetLabel: "node"},
+			{TargetLabel: "neutree_cluster", Replacement: ptr.To(variables.ClusterName)},
+			{TargetLabel: "workspace", Replacement: ptr.To(variables.Workspace)},
+		},
+	}
+}
+
 func stateMetricsScrapeTarget(variables MetricsManifestVariables) metricsconfig.Target {
 	return metricsconfig.Target{
 		JobName: "neutree-kube-state-metrics", Namespace: variables.Namespace,
@@ -44,7 +60,12 @@ func stateMetricsScrapeTarget(variables MetricsManifestVariables) metricsconfig.
 func withBuiltinScrapeTargets(variables MetricsManifestVariables) MetricsManifestVariables {
 	// Keep router before inference and kube-state-metrics after the selected component targets.
 	variables.BaseScrapeTargets = []metricsconfig.Target{routerScrapeTarget(variables)}
-	targets := make([]metricsconfig.Target, 0, len(variables.ScrapeTargets)+1)
+	targets := make([]metricsconfig.Target, 0, len(variables.ScrapeTargets)+2)
+
+	if variables.EnableNodeExporter {
+		targets = append(targets, nodeExporterScrapeTarget(variables))
+	}
+
 	targets = append(targets, variables.ScrapeTargets...)
 
 	if variables.EnableKubeStateMetrics {

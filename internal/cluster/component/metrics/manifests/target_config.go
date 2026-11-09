@@ -90,34 +90,6 @@ scrape_configs:
     target_label: __name__
     replacement: 'sglang:$1'
 {{ .CacheScrapeConfig }}
-{{ if .EnableNodeExporter }}
-# Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
-- job_name: 'node-exporter-http'
-  kubernetes_sd_configs:
-  - role: node
-  # Use HTTP scheme for direct node-exporter access
-  scheme: http
-  relabel_configs:
-  # Set the __address__ to node IP and node-exporter port.
-  - source_labels: [__address__]
-    action: replace
-    target_label: __address__
-    regex: '([^:]+)(?::\d+)?'
-    replacement: '$1:{{ .NodeExporterPort }}'
-  # Use node name as instance label
-  - source_labels: [__meta_kubernetes_node_name]
-    action: replace
-    target_label: instance
-  # Add node name as additional label
-  - source_labels: [__meta_kubernetes_node_name]
-    action: replace
-    target_label: node
-  # Add cluster and workspace labels
-  - target_label: neutree_cluster
-    replacement: {{ .ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ .Workspace | quote }}
-{{ end }}
 {{ template "scrapeTargets" .ScrapeTargets }}
 {{ define "scrapeTargets" }}{{ range . }}
 # Scrape a registered endpoint declaration.
@@ -131,7 +103,7 @@ scrape_configs:
 {{ .StaticTargets | toYaml | indent 4 }}
 {{ else }}
   kubernetes_sd_configs:
-  - role: pod
+  - role: {{ .KubernetesRole | default "pod" }}
 {{ if .Namespace }}
     namespaces:
       names:
@@ -139,9 +111,12 @@ scrape_configs:
 {{ end }}
 {{ if .Selector }}
     selectors:
-    - role: pod
+    - role: {{ .KubernetesRole | default "pod" }}
       label: {{ kubernetesLabelSelector .Selector | quote }}
 {{ end }}
+{{ end }}
+{{ if .Scheme }}
+  scheme: {{ .Scheme | quote }}
 {{ end }}
 {{ if .RelabelConfigs }}
   relabel_configs:
