@@ -66,7 +66,7 @@ CREATE TRIGGER api_keys_check_owner
     EXECUTE FUNCTION api.api_keys_check_owner();
 
 -- Soft-deleted keys count too: the controller still has to revoke them at
--- the gateway. role_assignments has no foreign key to its subject.
+-- the gateway.
 CREATE OR REPLACE FUNCTION api.service_accounts_before_delete()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -84,10 +84,6 @@ BEGIN
                 (OLD.metadata).name, v_keys),
             detail = '{"status": 409, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-
-    DELETE FROM api.role_assignments ra
-    WHERE (ra.spec).subject_kind = 'ServiceAccount'
-      AND (ra.spec).user_id = OLD.id;
 
     RETURN OLD;
 END;
