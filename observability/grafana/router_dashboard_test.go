@@ -127,11 +127,11 @@ func TestRouterDashboardPanelColumns(t *testing.T) {
 		require.NotContains(t, panel.Title, "Router")
 		positions[panel.ID] = [4]int{panel.GridPos.X, panel.GridPos.Y, panel.GridPos.W, panel.GridPos.H}
 	}
-	require.Equal(t, [4]int{0, 1, 8, 8}, positions[1])
-	require.Equal(t, [4]int{8, 1, 8, 8}, positions[3])
-	require.Equal(t, [4]int{16, 1, 8, 8}, positions[19])
-	require.Equal(t, [4]int{0, 9, 12, 8}, positions[20])
-	require.Equal(t, [4]int{12, 9, 12, 8}, positions[21])
+	require.Equal(t, [4]int{0, 0, 8, 4}, positions[1])
+	require.Equal(t, [4]int{8, 0, 8, 4}, positions[3])
+	require.Equal(t, [4]int{16, 0, 8, 4}, positions[19])
+	require.Equal(t, [4]int{0, 4, 12, 8}, positions[20])
+	require.Equal(t, [4]int{12, 4, 12, 8}, positions[21])
 }
 
 func TestRouterDashboardRequestQueries(t *testing.T) {

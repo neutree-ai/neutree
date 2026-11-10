@@ -63,28 +63,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 4,
         "w": 8,
         "x": 0,
-        "y": 1
+        "y": 0
       },
       "id": 1,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+          ]
+        }
       },
       "pluginVersion": "11.5.3",
       "targets": [
@@ -118,28 +108,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 4,
         "w": 8,
         "x": 8,
-        "y": 1
+        "y": 0
       },
       "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+          ]
+        }
       },
       "pluginVersion": "11.5.3",
       "targets": [
@@ -175,28 +155,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 4,
         "w": 8,
         "x": 16,
-        "y": 1
+        "y": 0
       },
       "id": 19,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+          ]
+        }
       },
       "pluginVersion": "11.5.3",
       "targets": [
@@ -276,7 +246,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 4
       },
       "id": 20,
       "options": {
@@ -370,7 +340,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 4
       },
       "id": 21,
       "options": {
