@@ -231,10 +231,7 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 
 	exporter := s.scrapeAcceleratorExporters(ctx)
 
-	hardware, err := s.observeAdapterHardware(ctx, accel, exporter)
-	if err != nil {
-		klog.ErrorS(err, "Accelerator adapter failed to discover hardware for annotations", "accelerator_type", s.config.AcceleratorType)
-	}
+	hardware, _ := s.observeAdapterHardware(ctx, accel, exporter)
 
 	if hardware.Accelerator.Type == v1.StaticNodeAcceleratorTypeCPU && len(hardware.Accelerator.Devices) == 0 {
 		return
@@ -326,8 +323,6 @@ func (s *Server) acceleratorSamples(
 ) []metricsnormalizer.Sample {
 	hardware, err := s.observeAdapterHardware(ctx, accel, acceleratorExporter)
 	if err != nil {
-		klog.V(2).InfoS("Accelerator adapter failed to discover hardware", "accelerator_type", s.config.AcceleratorType, "error", err)
-
 		return []metricsnormalizer.Sample{}
 	}
 
@@ -591,11 +586,7 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) *v1.NodeDeviceSnapshot {
 
 	if accel := s.selectedAccelerator(); accel != nil {
 		exporter := s.scrapeAcceleratorExporters(ctx)
-		hardware, err := s.observeAdapterHardware(ctx, accel, exporter)
-
-		if err != nil {
-			klog.ErrorS(err, "Accelerator adapter failed to discover hardware for device snapshot", "accelerator_type", s.config.AcceleratorType)
-		}
+		hardware, _ := s.observeAdapterHardware(ctx, accel, exporter)
 
 		result, err := s.adapterMetricResult(ctx, accel, hardware, exporter)
 		if err != nil {
