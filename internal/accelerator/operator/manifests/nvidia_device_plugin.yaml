@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hami-device-plugin
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/component: hami-device-plugin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hami-device-plugin-monitor
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "create", "watch", "list", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "update", "list", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hami-device-plugin
+  labels:
+    app.kubernetes.io/component: hami-device-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hami-device-plugin-monitor
+subjects:
+  - kind: ServiceAccount
+    name: hami-device-plugin
+    namespace: {{ .Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hami-device-plugin
+  namespace: {{ .Namespace }}
+  labels:
+    app.kubernetes.io/component: hami-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-device-plugin
+      hami.io/webhook: ignore
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: hami-device-plugin
+        hami.io/webhook: ignore
+    spec:
+      serviceAccountName: hami-device-plugin
+      priorityClassName: system-node-critical
+      hostPID: true
+      {{ if .ImagePullSecret }}
+      imagePullSecrets:
+        - name: {{ .ImagePullSecret }}
+      {{ end }}
+      containers:
+        - name: device-plugin
+          image: {{ if .ImagePrefix }}{{ .ImagePrefix }}/{{ end }}projecthami/hami:{{ .Version }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - nvidia-device-plugin
+            - --config-file=/device-config.yaml
+            - --mig-strategy=none
+            - --disable-core-limit=false
+            - -v=4
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NVIDIA_MIG_MONITOR_DEVICES
+              value: all
+            - name: DEVICE_LIST_STRATEGY
+              value: envvar
+            {{ if .DriverRoot }}
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .DriverRoot | quote }}
+            {{ end }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop: [ALL]
+              add: [SYS_ADMIN]
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: lib
+              mountPath: /usr/local/vgpu
+            - name: device-config
+              mountPath: /device-config.yaml
+              subPath: device-config.yaml
+            - name: cdi-root
+              mountPath: /var/run/cdi
+            {{ if .DriverRoot }}
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+            {{ end }}
+        - name: vgpu-monitor
+          image: {{ if .ImagePrefix }}{{ .ImagePrefix }}/{{ end }}projecthami/hami:{{ .Version }}
+          imagePullPolicy: IfNotPresent
+          command: ["vGPUmonitor", "-v=4"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [SYS_ADMIN]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_MIG_MONITOR_DEVICES
+              value: all
+            - name: HAMI_RESYNC_INTERVAL
+              value: 5m
+          ports:
+            - name: metrics
+              containerPort: 9394
+              protocol: TCP
+          volumeMounts:
+            - name: ctrs
+              mountPath: /usr/local/vgpu/containers
+            - name: containerds
+              mountPath: /run/containerd
+            - name: sysinfo
+              mountPath: /sysinfo
+            - name: hostvar
+              mountPath: /hostvar
+      volumes:
+        - name: ctrs
+          hostPath:
+            path: /usr/local/vgpu/containers
+        - name: containerds
+          hostPath:
+            path: /run/containerd
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: lib
+          hostPath:
+            path: /usr/local/vgpu
+        - name: cdi-root
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
+        - name: sysinfo
+          hostPath:
+            path: /sys
+        - name: hostvar
+          hostPath:
+            path: /var
+        - name: device-config
+          configMap:
+            name: hami-scheduler-device
+        {{ if .DriverRoot }}
+        - name: driver-root
+          hostPath:
+            path: {{ .DriverRoot }}
+            type: Directory
+        {{ end }}
+      nodeSelector:
+        {{ .NodeSelector | toYaml | nindent 8 }}

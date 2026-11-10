@@ -68,7 +68,6 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 		"devicePlugin": map[string]interface{}{
 			"enabled":          true,
 			"migStrategy":      "none",
-			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
 			"nvidiaDriverRoot": NvidiaGPUOperatorDriverRoot,
 			"nvidiaNodeSelector": map[string]interface{}{
 				"gpu":                           nil,

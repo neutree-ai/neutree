@@ -73,9 +73,8 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 ) (*accelerator.VirtualizationConfig, error) {
 	configPatch := map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
-			"enabled":          true,
-			"migStrategy":      "none",
-			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
+			"enabled":     true,
+			"migStrategy": "none",
 			"nvidiaNodeSelector": map[string]interface{}{
 				"gpu":                           nil,
 				NvidiaGPUVirtualizationLabelKey: "true",
