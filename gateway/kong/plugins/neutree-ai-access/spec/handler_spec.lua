@@ -437,6 +437,58 @@ describe("neutree-ai-access model allowlist: model-list responses", function()
     end)
 end)
 
+describe("neutree-ai-access model denylist", function()
+    local CHAT = WORKSPACE_PREFIX .. "/v1/chat/completions"
+
+    it("denies a denied model with the allowlist's answer", function()
+        assert_denied(run(conf_with(nil, { denied_models = { "deepseek-v4-flash" } }), {
+            path = CHAT,
+            model = "deepseek-v4-flash",
+            endpoint_type = "external",
+        }), "model_not_permitted")
+    end)
+
+    it("lets any other model through, known to the workspace or not", function()
+        local conf = conf_with(nil, { denied_models = { "deepseek-v4-flash" } })
+        for _, model in ipairs({ "deepseek-v4-pro", "brand-new-model" }) do
+            assert.is_nil(run(conf, { path = CHAT, model = model, endpoint_type = "external" }))
+        end
+    end)
+
+    it("wins over the allowlist", function()
+        local conf = conf_with({ { model = "a" }, { model = "b" } }, { denied_models = { "a" } })
+        assert_denied(run(conf, { path = CHAT, model = "a" }), "model_not_permitted")
+        assert.is_nil(run(conf, { path = CHAT, model = "b" }))
+    end)
+
+    it("reads the model from the body when no model was stashed", function()
+        assert_denied(run(conf_with(nil, { denied_models = { "a" } }), {
+            path = CHAT,
+            body = '{"model":"a"}',
+        }), "model_not_permitted")
+    end)
+
+    it("does not judge a request that names no model, nor the model list", function()
+        local conf = conf_with(nil, { denied_models = { "a" } })
+        assert.is_nil(run(conf, { path = CHAT, body = "{}" }))
+        assert.is_nil(run(conf, { method = "GET", path = WORKSPACE_PREFIX .. "/v1/models" }))
+    end)
+
+    it("an empty list denies nothing", function()
+        assert.is_nil(run(conf_with(nil, { denied_models = {} }), { path = CHAT, model = "a" }))
+    end)
+
+    it("drops denied models from a model list", function()
+        local body = filter_response(conf_with(nil, { denied_models = { "a" } }), {
+            path = WORKSPACE_PREFIX .. "/v1/models",
+        }, { [[{"object":"list","data":[{"id":"a"},{"id":"b"}]}]] })
+
+        local decoded = assert(cjson.decode(body))
+        assert.are.same({ "b" }, { decoded.data[1].id })
+        assert.are.equal(1, #decoded.data)
+    end)
+end)
+
 -- The global fallback instance runs only for a consumer whose own instance Kong
 -- has not loaded yet. A consumer created with the rules tag must have its own
 -- instance, so the fallback rejects it; an untagged (older) consumer passes.

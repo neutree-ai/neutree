@@ -13,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestIsManagedAPIKeyLimitPlugin(t *testing.T) {
@@ -36,13 +37,14 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 		{ID: "k", Spec: &v1.ApiKeySpec{}},
 		{ID: "k", Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 100}}}},
 	} {
-		p := k.generateAPIKeyAccessPlugin(cid, key)
+		p := k.generateAPIKeyAccessPlugin(cid, key, modelRules{})
 		require.NotNil(t, p)
 		assert.Equal(t, "neutree-ai-access-"+util.HashString("k"), *p.InstanceName)
 		assert.Equal(t, cid, p.Consumer.ID)
 		assert.Equal(t, kong.Configuration{
 			"disabled":       false,
 			"allowed_models": nil,
+			"denied_models":  []string{},
 			"concurrency":    0,
 			"rate_limits":    []map[string]interface{}{},
 		}, p.Config)
@@ -59,7 +61,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 			RPM:           600,
 		}},
 	}
-	p := k.generateAPIKeyAccessPlugin(cid, apiKey)
+	p := k.generateAPIKeyAccessPlugin(cid, apiKey, modelRules{Allowed: apiKey.Spec.Limits.AllowedModels})
 	require.NotNil(t, p)
 	assert.Equal(t, "neutree-ai-access", *p.Name)
 	assert.Equal(t, "neutree-ai-access-"+util.HashString("key-1"), *p.InstanceName)
@@ -83,7 +85,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	p2 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
 		ID:   "k2",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{Disabled: true}},
-	})
+	}, modelRules{})
 	require.NotNil(t, p2)
 	assert.Equal(t, true, p2.Config["disabled"])
 	// Cleared numeric/list fields are emitted as explicit empties (not nil) so
@@ -91,6 +93,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	// allowlist is sent as nil (JSON null) so it reads as unrestricted and []
 	// stays free to mean deny-all.
 	assert.Nil(t, p2.Config["allowed_models"])
+	assert.Equal(t, []string{}, p2.Config["denied_models"])
 	assert.Equal(t, 0, p2.Config["concurrency"])
 	assert.Equal(t, []map[string]interface{}{}, p2.Config["rate_limits"])
 
@@ -99,7 +102,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	p2d := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
 		ID:   "k2d",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{AllowedModels: []v1.AllowedModel{}}},
-	})
+	}, modelRules{Allowed: []v1.AllowedModel{}})
 	require.NotNil(t, p2d)
 	assert.Equal(t, []map[string]interface{}{}, p2d.Config["allowed_models"])
 
@@ -107,7 +110,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	p3 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
 		ID:   "k3",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{RPS: 5}},
-	})
+	}, modelRules{})
 	require.NotNil(t, p3)
 	assert.Equal(t, false, p3.Config["disabled"])
 	rl3, ok := p3.Config["rate_limits"].([]map[string]interface{})
@@ -125,23 +128,23 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	assert.Nil(t, withAPI.generateAPIKeyQuotaPlugin(cid, &v1.ApiKey{
 		ID:   "k",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{RPS: 5}},
-	}))
+	}, modelRules{}))
 	// non-positive limit -> no plugin
 	assert.Nil(t, withAPI.generateAPIKeyQuotaPlugin(cid, &v1.ApiKey{
 		ID:   "k",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 0}}},
-	}))
+	}, modelRules{}))
 
 	apiKey := &v1.ApiKey{
 		ID:   "key-1",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{TokenQuota: &v1.ApiKeyTokenQuota{Limit: 100, Period: "monthly"}}},
 	}
 	// missing api url / token -> no plugin (degrade rather than mis-enforce)
-	assert.Nil(t, (&Kong{}).generateAPIKeyQuotaPlugin(cid, apiKey))
-	assert.Nil(t, (&Kong{quotaAPIURL: "x"}).generateAPIKeyQuotaPlugin(cid, apiKey))
-	assert.Nil(t, (&Kong{serviceToken: "y"}).generateAPIKeyQuotaPlugin(cid, apiKey))
+	assert.Nil(t, (&Kong{}).generateAPIKeyQuotaPlugin(cid, apiKey, modelRules{}))
+	assert.Nil(t, (&Kong{quotaAPIURL: "x"}).generateAPIKeyQuotaPlugin(cid, apiKey, modelRules{}))
+	assert.Nil(t, (&Kong{serviceToken: "y"}).generateAPIKeyQuotaPlugin(cid, apiKey, modelRules{}))
 
-	p := withAPI.generateAPIKeyQuotaPlugin(cid, apiKey)
+	p := withAPI.generateAPIKeyQuotaPlugin(cid, apiKey, modelRules{})
 	require.NotNil(t, p)
 	assert.Equal(t, "neutree-ai-quota", *p.Name)
 	assert.Equal(t, "neutree-ai-quota-"+util.HashString("key-1"), *p.InstanceName)
@@ -153,7 +156,7 @@ func TestGenerateAPIKeyQuotaPlugin(t *testing.T) {
 	// A trailing slash on the configured URL is trimmed so the plugin builds
 	// "<url>/rpc/..." rather than "<url>//rpc/...".
 	kSlash := &Kong{quotaAPIURL: "http://postgrest:6432/", serviceToken: "tok"}
-	ps := kSlash.generateAPIKeyQuotaPlugin(cid, apiKey)
+	ps := kSlash.generateAPIKeyQuotaPlugin(cid, apiKey, modelRules{})
 	require.NotNil(t, ps)
 	assert.Equal(t, "http://postgrest:6432", ps.Config["api_url"])
 }
@@ -173,7 +176,7 @@ func TestGenerateAccessFallbackPlugin(t *testing.T) {
 // TestSyncAPIKeyTagsNewConsumer verifies that a new consumer carries the tag
 // the fallback instance uses to reject a key whose rules are not loaded yet.
 func TestSyncAPIKeyTagsNewConsumer(t *testing.T) {
-	apiKey := &v1.ApiKey{ID: "key-1", Status: &v1.ApiKeyStatus{SkValue: "sk-1"}}
+	apiKey := groupPolicyKey(nil)
 
 	var createdConsumer kong.Consumer
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +206,9 @@ func TestSyncAPIKeyTagsNewConsumer(t *testing.T) {
 
 	client, err := kong.NewClient(pointy.String(server.URL), server.Client())
 	require.NoError(t, err)
-	k := &Kong{kongClient: client}
+	s := storagemocks.NewMockStorage(t)
+	expectSyncReads(s, nil, `{"allowed_models":null,"denied_models":[],"group_token_pool":false}`)
+	k := &Kong{kongClient: client, storage: s}
 
 	require.NoError(t, k.SyncAPIKey(apiKey))
 	require.Len(t, createdConsumer.Tags, 1)
@@ -254,7 +259,7 @@ func TestSyncAPIKeyLimitPlugins(t *testing.T) {
 	require.NoError(t, err)
 	k := &Kong{kongClient: client, quotaAPIURL: "http://postgrest:6432", serviceToken: "tok"}
 
-	err = k.syncAPIKeyLimitPlugins(pointy.String("consumer-1"), apiKey)
+	err = k.syncAPIKeyLimitPlugins(pointy.String("consumer-1"), apiKey, modelRules{Allowed: apiKey.Spec.Limits.AllowedModels})
 	require.NoError(t, err)
 
 	assert.ElementsMatch(t, []string{quotaInstance, accessInstance}, created) // desired plugins upserted
@@ -304,7 +309,7 @@ func TestGenerateAPIKeyQuotaPluginPerModelOnly(t *testing.T) {
 				{Model: "paid-model", Type: "external", TokenLimit: pointy.Int64(1_000_000)},
 			},
 		}},
-	})
+	}, modelRules{})
 	require.NotNil(t, p)
 	assert.Equal(t, "neutree-ai-quota", *p.Name)
 
@@ -314,5 +319,5 @@ func TestGenerateAPIKeyQuotaPluginPerModelOnly(t *testing.T) {
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{
 			AllowedModels: []v1.AllowedModel{{Model: "free-model"}},
 		}},
-	}))
+	}, modelRules{}))
 }

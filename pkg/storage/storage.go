@@ -40,6 +40,9 @@ const (
 	ORG_UNIT_MEMBER_TABLE     = "org_unit_members"
 	TEAM_TABLE                = "teams"
 	TEAM_MEMBER_TABLE         = "team_members"
+	GROUP_POLICY_TABLE        = "group_policies"
+	SERVICE_ACCOUNT_TABLE     = "service_accounts"
+	TEAM_APP_PERMISSION_TABLE = "team_application_permissions"
 )
 
 type ImageRegistryStorage interface {
@@ -159,6 +162,8 @@ type ApiKeyStorage interface {
 	UpdateApiKey(id string, data *v1.ApiKey) error
 	// GetApiKey retrieves a api_key by its ID.
 	GetApiKey(id string) (*v1.ApiKey, error)
+	// ApiKeyOwnerActive reports whether the owner of an api_key is active.
+	ApiKeyOwnerActive(id string) (bool, error)
 	// ListApiKey retrieves a list of api_keys with optional filters.
 	ListApiKey(option ListOption) ([]v1.ApiKey, error)
 }

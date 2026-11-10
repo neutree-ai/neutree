@@ -117,8 +117,9 @@ func TestAuth(t *testing.T) {
 	}
 
 	const (
-		testUserID = "12345678-1234-1234-1234-123456789abc"
-		testKeyID  = "87654321-4321-4321-4321-abcdef123456"
+		testUserID           = "12345678-1234-1234-1234-123456789abc"
+		testKeyID            = "87654321-4321-4321-4321-abcdef123456"
+		testServiceAccountID = "abcdef12-3456-7890-abcd-ef1234567890"
 	)
 
 	// liveKey is the stored row of a key that has not been revoked.
@@ -129,6 +130,7 @@ func TestAuth(t *testing.T) {
 			Metadata: &v1.Metadata{Name: "live"},
 			Spec:     &v1.ApiKeySpec{},
 		}, nil)
+		expectOwnerActive(s, testKeyID, true, nil)
 
 		return s
 	}
@@ -175,6 +177,50 @@ func TestAuth(t *testing.T) {
 			expectedStatus:       http.StatusOK,
 			expectUserID:         testUserID,
 			expectPostgrestToken: true, // API keys should generate postgrest_token
+		},
+		{
+			// A ServiceAccount key acts as the ServiceAccount; what it may do
+			// is left to its role assignments.
+			name: "ServiceAccount API key is accepted as the ServiceAccount",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testServiceAccountID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+					ID:               testKeyID,
+					ServiceAccountID: testServiceAccountID,
+					Metadata:         &v1.Metadata{Name: "sa-key"},
+					Spec:             &v1.ApiKeySpec{},
+				}, nil)
+				expectOwnerActive(s, testKeyID, true, nil)
+
+				return s
+			},
+			expectedStatus:       http.StatusOK,
+			expectUserID:         testServiceAccountID,
+			expectPostgrestToken: true,
+		},
+		{
+			name: "ServiceAccount API key of a disabled ServiceAccount is rejected",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testServiceAccountID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+					ID:               testKeyID,
+					ServiceAccountID: testServiceAccountID,
+					Metadata:         &v1.Metadata{Name: "sa-key"},
+					Spec:             &v1.ApiKeySpec{},
+				}, nil)
+				expectOwnerActive(s, testKeyID, false, nil)
+
+				return s
+			},
+			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			// NEU-600: a cryptographically valid key whose row is gone must not
@@ -226,6 +272,25 @@ func TestAuth(t *testing.T) {
 					Metadata: &v1.Metadata{Name: "disabled"},
 					Spec:     &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{Disabled: true}},
 				}, nil)
+
+				return s
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "API key of a deactivated owner is rejected",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testUserID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+					ID:       testKeyID,
+					Metadata: &v1.Metadata{Name: "deactivated-owner"},
+					Spec:     &v1.ApiKeySpec{},
+				}, nil)
+				expectOwnerActive(s, testKeyID, false, nil)
 
 				return s
 			},
@@ -401,6 +466,7 @@ func TestVerifyAPIKeyNotRevoked(t *testing.T) {
 			setupStorage: func() *storagemocks.MockStorage {
 				s := &storagemocks.MockStorage{}
 				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID, Spec: &v1.ApiKeySpec{}}, nil)
+				expectOwnerActive(s, keyID, true, nil)
 
 				return s
 			},
@@ -410,9 +476,33 @@ func TestVerifyAPIKeyNotRevoked(t *testing.T) {
 			setupStorage: func() *storagemocks.MockStorage {
 				s := &storagemocks.MockStorage{}
 				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID}, nil)
+				expectOwnerActive(s, keyID, true, nil)
 
 				return s
 			},
+		},
+		{
+			name: "deactivated owner is a revocation",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID, Spec: &v1.ApiKeySpec{}}, nil)
+				expectOwnerActive(s, keyID, false, nil)
+
+				return s
+			},
+			wantErr: true,
+		},
+		{
+			name: "owner check failure is reported as unknown",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID, Spec: &v1.ApiKeySpec{}}, nil)
+				expectOwnerActive(s, keyID, false, assert.AnError)
+
+				return s
+			},
+			wantErr:     true,
+			wantUnknown: true,
 		},
 		{
 			name: "missing row is a revocation",
@@ -476,6 +566,10 @@ func TestVerifyAPIKeyNotRevoked(t *testing.T) {
 			assert.Equal(t, tt.wantUnknown, errors.Is(err, errAPIKeyStateUnknown))
 		})
 	}
+}
+
+func expectOwnerActive(s *storagemocks.MockStorage, keyID string, active bool, err error) {
+	s.On("ApiKeyOwnerActive", keyID).Return(active, err)
 }
 
 // A missing storage dependency must deny rather than skip the check.

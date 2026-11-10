@@ -86,8 +86,8 @@ Every step is required — a missed wiring step usually produces a resource that
    - Table schema with workspace column.
    - Workspace-isolation RLS policies — see [`database.md#rls`](database.md).
    - Validation triggers if the resource has invariants.
-   - **If the resource needs reconciliation:** consider the `observed_spec_hash` pattern (see migration `055`).
-   - **If listings need stable ordering:** consider the `status_sort_priority` pattern (see migration `056`).
+   - **If the resource needs reconciliation:** consider the `observed_spec_hash` pattern (see the `cluster_status_observed_spec_hash` migration).
+   - **If listings need stable ordering:** consider the `status_sort_priority` pattern (see the `endpoint_status_sort_priority` migration).
 
 5. **RBAC seed migration:** a separate migration granting workspace roles permission on the new table. Without this, the resource exists but default workspace members cannot see or create rows. See migrations `057` and `059` for the pattern. Skipping this step produces a "creates from admin, invisible to users" bug class.
 

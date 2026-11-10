@@ -8,8 +8,8 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// Tests for 126_has_permission_in_any_scope with the default hooks: only a
-// global assignment counts; an OrgUnit-scoped one never does.
+// Tests for api.has_permission_in_any_scope: a global assignment counts, and
+// so does one scoped to an Active OrgUnit.
 
 func TestHasPermissionInAnyScope(t *testing.T) {
 	ctx := context.Background()
@@ -34,8 +34,8 @@ func TestHasPermissionInAnyScope(t *testing.T) {
 	onActive := createGoTrueTestUser(t, "hpias-active", "password123")
 	onInactive := createGoTrueTestUser(t, "hpias-inactive", "password123")
 
-	seedOrgScopedAssignment(t, db, onActive.ID, "department-admin", active.Metadata.Name)
-	seedOrgScopedAssignment(t, db, onInactive.ID, "department-admin", inactive.Metadata.Name)
+	seedRoleAssignment(t, db, roleAssignment{UserID: onActive.ID, Role: "department-admin", OrgUnit: active.Metadata.Name, Replica: true})
+	seedRoleAssignment(t, db, roleAssignment{UserID: onInactive.ID, Role: "department-admin", OrgUnit: inactive.Metadata.Name, Replica: true})
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid, $3::uuid)`,
@@ -52,7 +52,8 @@ func TestHasPermissionInAnyScope(t *testing.T) {
 		{"global assignment with the permission", globalID, "org_unit:read", true},
 		{"global assignment without the permission", globalID, "user_profile:read", false},
 		{"no assignment", none.ID, "org_unit:read", false},
-		{"subtree assignment on an Active OrgUnit", onActive.ID, "org_unit:read", false},
+		{"subtree assignment on an Active OrgUnit", onActive.ID, "org_unit:read", true},
+		{"subtree assignment without the permission", onActive.ID, "endpoint:read", false},
 		{"subtree assignment on an Inactive OrgUnit", onInactive.ID, "org_unit:read", false},
 	}
 

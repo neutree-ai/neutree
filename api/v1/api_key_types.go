@@ -97,7 +97,21 @@ type ApiKey struct {
 	Metadata   *Metadata     `json:"metadata,omitempty"`
 	Spec       *ApiKeySpec   `json:"spec,omitempty"`
 	Status     *ApiKeyStatus `json:"status,omitempty"`
-	UserID     string        `json:"user_id,omitempty"`
+	// UserID owns a personal key; ServiceAccountID owns a ServiceAccount's
+	// key. Exactly one is set.
+	UserID           string `json:"user_id,omitempty"`
+	ServiceAccountID string `json:"service_account_id,omitempty"`
+	// CreatedBy is the user who created the key; empty once that user is gone.
+	CreatedBy string `json:"created_by,omitempty"`
+}
+
+// OwnerID is the principal the key acts for: its user or its ServiceAccount.
+func (obj *ApiKey) OwnerID() string {
+	if obj.UserID != "" {
+		return obj.UserID
+	}
+
+	return obj.ServiceAccountID
 }
 
 func (obj *ApiKey) GetName() string {

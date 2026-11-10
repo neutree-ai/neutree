@@ -13,7 +13,7 @@ import (
 // endpoint names are unique only within a workspace (unique index is
 // workspace+name), so the name-only join (1) bled usage from same-named
 // endpoints across workspaces and (2) dropped historical usage once an endpoint
-// was deleted. Migration 063 sources the workspace from the daily-usage row's
+// was deleted. get_usage_by_dimension now sources the workspace from the daily-usage row's
 // metadata.workspace instead, removing the endpoint joins.
 //
 // The scenario below reproduces the exact repro from the ticket: one user owns
