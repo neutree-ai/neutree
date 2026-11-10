@@ -59,7 +59,16 @@ func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 		return nil, err
 	}
 
+	runtimeClass := ""
+	if len(NvidiaVirtualizationCandidateNodes(nodes)) > 0 {
+		runtimeClass, err = accelerator.SelectRuntimeClass(ctx, ctrlClient, cluster, clusterPolicies)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return p.ResolveVirtualizationConfig(ctx, VirtualizationConfigInput{
+		RuntimeClassName:           runtimeClass,
 		Nodes:                      nodes,
 		GPUOperatorClusterPolicies: clusterPolicies,
 	})
@@ -80,16 +89,18 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	}
 	configPatch := map[string]interface{}{"devicePlugin": devicePlugin}
 
-	managed, runtimeClass, err := accelerator.NvidiaOperatorRuntime(input.GPUOperatorClusterPolicies)
+	managed, _, err := accelerator.NvidiaOperatorRuntime(input.GPUOperatorClusterPolicies)
 	if err != nil {
 		return nil, err
+	}
+
+	if input.RuntimeClassName != "" {
+		devicePlugin["runtimeClassName"] = input.RuntimeClassName
 	}
 
 	if managed {
 		// Hami keeps ownership of the device-plugin and virtualization label;
 		// only pass GPU Operator runtime compatibility through chart values.
-		devicePlugin["runtimeClassName"] = runtimeClass
-
 		if err := unstructured.SetNestedField(configPatch, accelerator.NvidiaGPUDiscoveryLabelValue,
 			"devicePlugin", "nvidiaNodeSelector", accelerator.NvidiaGPUClientLabel); err != nil {
 			return nil, err
@@ -133,6 +144,12 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	if len(candidateNodes) == 0 {
 		blockingReasons = append(blockingReasons,
 			"No NVIDIA GPU nodes available for vGPU virtualization")
+	}
+
+	if len(candidateNodes) > 0 && input.RuntimeClassName == "" {
+		// Keep scope available so deletion can remove virtualization labels without a RuntimeClass.
+		blockingReasons = append(blockingReasons,
+			"NVIDIA RuntimeClass is unavailable; reconcile the NVIDIA accelerator operator before generating virtualization config")
 	}
 
 	return &accelerator.VirtualizationConfig{

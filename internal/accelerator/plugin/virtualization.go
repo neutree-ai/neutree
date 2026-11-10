@@ -12,6 +12,7 @@ import (
 type GPUOperatorClusterPolicy = accelerator.GPUOperatorClusterPolicy
 
 type VirtualizationConfigInput struct {
+	RuntimeClassName           string
 	Nodes                      []corev1.Node
 	GPUOperatorClusterPolicies []GPUOperatorClusterPolicy
 }

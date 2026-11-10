@@ -8,6 +8,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -35,6 +36,7 @@ func TestGetClientFromCluster(t *testing.T) {
 		{name: "admission", gvk: admissionregistrationv1.SchemeGroupVersion.WithKind("MutatingWebhookConfiguration")},
 		{name: "apps", gvk: appsv1.SchemeGroupVersion.WithKind("Deployment")},
 		{name: "core", gvk: corev1.SchemeGroupVersion.WithKind("Pod")},
+		{name: "node", gvk: nodev1.SchemeGroupVersion.WithKind("RuntimeClass")},
 		{name: "RBAC", gvk: rbacv1.SchemeGroupVersion.WithKind("Role")},
 	}
 

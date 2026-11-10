@@ -17,6 +17,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	gpuPlugin := &GPUAcceleratorPlugin{}
 
 	config, err := gpuPlugin.ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{
+		RuntimeClassName: "nvidia",
 		Nodes: []corev1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -87,6 +88,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfigWithNoGPUNodes(t *testing.T) {
 	gpuPlugin := &GPUAcceleratorPlugin{}
 
 	config, err := gpuPlugin.ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{
+		RuntimeClassName: "nvidia",
 		Nodes: []corev1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -112,6 +114,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfigIgnoresGlobalMIGStrategy(t *testin
 	gpuPlugin := &GPUAcceleratorPlugin{}
 
 	config, err := gpuPlugin.ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{
+		RuntimeClassName: "nvidia",
 		Nodes: []corev1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -175,4 +178,36 @@ func TestResolveClusterVirtualizationConfigRejectsTemplateMode(t *testing.T) {
 	require.NotNil(t, config)
 	assert.False(t, config.Supported)
 	assert.NotEmpty(t, config.BlockingReasons)
+}
+
+func TestNVIDIAGPU_ResolveVirtualizationRuntimeClass(t *testing.T) {
+	for _, tc := range []struct {
+		name, selectedClass string
+		wantBlocked         bool
+	}{
+		{name: "unmanaged default", selectedClass: "nvidia"},
+		{name: "unmanaged owned fallback", selectedClass: "neutree-nvidia"},
+		{name: "missing class", wantBlocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := (&GPUAcceleratorPlugin{}).ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{
+				RuntimeClassName: tc.selectedClass,
+				Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node", Labels: map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
+				}}},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, NvidiaGPUVirtualizationLabelKey, config.NodeScopeLabel.Key)
+			if tc.wantBlocked {
+				require.Len(t, config.BlockingReasons, 1)
+				assert.Contains(t, config.BlockingReasons[0], "NVIDIA RuntimeClass is unavailable")
+				return
+			}
+			assert.Empty(t, config.BlockingReasons)
+			devicePlugin, ok := config.ConfigPatch["devicePlugin"].(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, tc.selectedClass, devicePlugin["runtimeClassName"])
+			assert.NotContains(t, devicePlugin, "gpuOperatorToolkitReady")
+		})
+	}
 }

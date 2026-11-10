@@ -358,7 +358,8 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 	err := reconcileCtx.ctrClient.Get(reconcileCtx.Ctx, client.ObjectKey{Name: ns.Name}, ns)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			// Namespace deletion does not remove cluster-scoped Operator dependencies.
+			return c.deleteAcceleratorOperators(reconcileCtx)
 		}
 
 		return errors.Wrap(err, "failed to get namespace")
@@ -387,6 +388,41 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 	reconcileCtx *ReconcileContext,
 ) error {
+	var errs []error
+
+	if shouldDeleteAcceleratorVirtualizationComponent(reconcileCtx.Cluster) {
+		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+
+		if err := hamiComp.Delete(); err != nil {
+			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization component"))
+		}
+	}
+
+	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+	if err := metricsComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete metrics component"))
+	}
+
+	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
+		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
+		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+	if err := routerComp.Delete(); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to delete router component"))
+	}
+
+	if len(errs) > 0 {
+		return utilerrors.NewAggregate(errs)
+	}
+
+	// Operators may own cluster-scoped dependencies still needed while workloads delete.
+	return c.deleteAcceleratorOperators(reconcileCtx)
+}
+
+func (c *NativeKubernetesClusterReconciler) deleteAcceleratorOperators(reconcileCtx *ReconcileContext) error {
 	var errs []error
 
 	if c.acceleratorMgr != nil {
@@ -419,30 +455,6 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 				errs = append(errs, errors.Wrapf(err, "failed to delete accelerator operator %s state", acceleratorType))
 			}
 		}
-	}
-
-	if shouldDeleteAcceleratorVirtualizationComponent(reconcileCtx.Cluster) {
-		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
-			reconcileCtx.clusterNamespace, "", ImagePullSecretName,
-			*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
-
-		if err := hamiComp.Delete(); err != nil {
-			errs = append(errs, errors.Wrap(err, "failed to delete accelerator virtualization component"))
-		}
-	}
-
-	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
-	if err := metricsComp.Delete(); err != nil {
-		errs = append(errs, errors.Wrap(err, "failed to delete metrics component"))
-	}
-
-	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, "", ImagePullSecretName,
-		*reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
-	if err := routerComp.Delete(); err != nil {
-		errs = append(errs, errors.Wrap(err, "failed to delete router component"))
 	}
 
 	return utilerrors.NewAggregate(errs)

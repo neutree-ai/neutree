@@ -14,6 +14,7 @@ const (
 	NvidiaValidationPath         = "/run/nvidia/validations"
 	NvidiaGPUOperatorDriverRoot  = "/run/nvidia/driver"
 	NvidiaDefaultRuntimeClass    = "nvidia"
+	NeutreeNvidiaRuntimeClass    = "neutree-nvidia"
 	NeutreeOwnerAnnotation       = "neutree.ai/gpu.deploy.client.managed"
 	NeutreeOwnerValue            = "true"
 )

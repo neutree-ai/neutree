@@ -312,7 +312,7 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context, input 
 		return nil, err
 	}
 
-	if err := enrichNvidiaKubernetesProfile(ctx, ctrlClient, profile); err != nil {
+	if err := enrichNvidiaKubernetesProfile(ctx, ctrlClient, input.Cluster, profile); err != nil {
 		return nil, err
 	}
 

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -12,18 +13,7 @@ import (
 
 const nvidiaValidationPath = accelerator.NvidiaValidationPath
 
-func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, profile *v1.AcceleratorProfile) error {
-	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, reader)
-	if err != nil {
-		return err
-	}
-
-	managed, runtimeClass, err := accelerator.NvidiaOperatorRuntime(policies)
-	if err != nil {
-		return err
-	}
-
-	// Kubernetes RuntimeClass comes from ClusterPolicy, not the StaticNode runtime default.
+func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, cluster *v1.Cluster, profile *v1.AcceleratorProfile) error {
 	profile.NodeAgentRuntime.Runtime = ""
 	profile.MetricsExporter.Runtime.Runtime = ""
 	agent := profile.NodeAgentRuntime
@@ -31,16 +21,48 @@ func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, pr
 		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
 	}
 
+	nodes := &corev1.NodeList{}
+	if err := reader.List(ctx, nodes, client.MatchingLabels{
+		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
+	}); err != nil {
+		return err
+	}
+
+	// Metrics enumerates every plugin before it selects the cluster accelerator.
+	if len(nodes.Items) == 0 {
+		return nil
+	}
+
+	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, reader)
+	if err != nil {
+		return err
+	}
+
+	managed, _, err := accelerator.NvidiaOperatorRuntime(policies)
+	if err != nil {
+		return err
+	}
+
+	runtimeClass, err := accelerator.SelectRuntimeClass(ctx, reader, cluster, policies)
+	if err != nil {
+		return err
+	}
+
+	profile.NodeAgentRuntime.Runtime = runtimeClass
+	profile.MetricsExporter.Runtime.Runtime = runtimeClass
+
+	if runtimeClass == "" {
+		return fmt.Errorf("NVIDIA RuntimeClass is unavailable; reconcile the NVIDIA accelerator operator before generating the profile")
+	}
+
 	if !managed {
 		return nil
 	}
 
-	agent.Runtime = runtimeClass
 	agent.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
 	appendToolkitValidation(&agent.InitContainers, &agent.Volumes, &agent.VolumeMounts, "")
 
 	exporter := profile.MetricsExporter.Runtime
-	exporter.Runtime = runtimeClass
 	exporter.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
 	appendToolkitValidation(&exporter.InitContainers, &exporter.Volumes, &exporter.VolumeMounts, profile.MetricsExporter.Image)
 

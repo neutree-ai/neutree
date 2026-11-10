@@ -17,20 +17,19 @@ import (
 
 func TestHAMiGPUOperatorChartValues(t *testing.T) {
 	for _, tc := range []struct {
-		name, clusterVersion, runtime string
-		managed                       bool
-		wantClass                     string
+		name, clusterVersion string
+		managed              bool
+		wantClass            string
 	}{
-		{name: "2.9 managed containerd", clusterVersion: "v1.2.0", runtime: "containerd://1.7.28", managed: true, wantClass: "custom-nvidia"},
-		{name: "2.10 managed containerd", clusterVersion: "v1.3.0", runtime: "containerd://1.7.28", managed: true, wantClass: "custom-nvidia"},
-		{name: "managed CRI-O", clusterVersion: "v1.3.0", runtime: "cri-o://1.29", managed: true, wantClass: "custom-nvidia"},
-		{name: "managed Docker", clusterVersion: "v1.3.0", runtime: "docker://26.1.4", managed: true, wantClass: "custom-nvidia"},
-		{name: "OS driver", clusterVersion: "v1.3.0", runtime: "containerd://1.7.28"},
+		{name: "2.9 managed", clusterVersion: "v1.2.0", managed: true, wantClass: "custom-nvidia"},
+		{name: "2.10 managed", clusterVersion: "v1.3.0", managed: true, wantClass: "custom-nvidia"},
+		{name: "2.9 OS driver fallback", clusterVersion: "v1.2.0", wantClass: "neutree-nvidia"},
+		{name: "2.10 OS driver fallback", clusterVersion: "v1.3.0", wantClass: "neutree-nvidia"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			input := plugin.VirtualizationConfigInput{Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{
+			input := plugin.VirtualizationConfigInput{RuntimeClassName: tc.wantClass, Nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{
 				Name: "gpu", Labels: map[string]string{accelerator.NvidiaGPUDiscoveryLabelKey: "true"},
-			}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{ContainerRuntimeVersion: tc.runtime}}}}}
+			}}}}
 			if tc.managed {
 				input.GPUOperatorClusterPolicies = []plugin.GPUOperatorClusterPolicy{{Name: "policy", Spec: map[string]interface{}{
 					"driver": map[string]interface{}{"enabled": true}, "toolkit": map[string]interface{}{"enabled": true},
@@ -47,12 +46,8 @@ func TestHAMiGPUOperatorChartValues(t *testing.T) {
 			ds := &appsv1.DaemonSet{}
 			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(findObject(t, resources.Items, "DaemonSet", DevicePluginDaemonSetName).Object, ds))
 			pod := ds.Spec.Template.Spec
-			if tc.wantClass == "" {
-				require.Nil(t, pod.RuntimeClassName)
-			} else {
-				require.NotNil(t, pod.RuntimeClassName)
-				require.Equal(t, tc.wantClass, *pod.RuntimeClassName)
-			}
+			require.NotNil(t, pod.RuntimeClassName)
+			require.Equal(t, tc.wantClass, *pod.RuntimeClassName)
 			require.Equal(t, "true", pod.NodeSelector[plugin.NvidiaGPUVirtualizationLabelKey])
 			if tc.managed {
 				require.Equal(t, "true", pod.NodeSelector[accelerator.NvidiaGPUClientLabel])

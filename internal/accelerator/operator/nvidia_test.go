@@ -2,10 +2,12 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -13,6 +15,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
@@ -24,8 +27,11 @@ func TestNvidiaOperatorReconcileNodeState(t *testing.T) {
 		label, annotation         *string
 		version                   string
 		running                   bool
+		noPolicy, createDenied    bool
 		wantLabel, wantAnnotation *string
 	}{
+		{name: "no policy still creates RuntimeClass", noPolicy: true},
+		{name: "RuntimeClass API failure stops node updates", createDenied: true},
 		{name: "initialize pending driver", wantLabel: ptr.To("false"), wantAnnotation: ptr.To("true")},
 		{name: "Running driver does not require Ready", running: true, wantLabel: ptr.To("true"), wantAnnotation: ptr.To("true")},
 		{name: "external label is not adopted", label: ptr.To("false"), running: true, wantLabel: ptr.To("false")},
@@ -52,9 +58,25 @@ func TestNvidiaOperatorReconcileNodeState(t *testing.T) {
 			if tc.running {
 				pod.Status.Phase = corev1.PodRunning
 			}
-			ctrlClient := driverTestClient(t, node, policy, pod)
+			objects := []client.Object{node, pod}
+			if !tc.noPolicy {
+				objects = append(objects, policy)
+			}
+			ctrlClient := driverTestClient(t, objects...)
+			if tc.createDenied {
+				ctrlClient = interceptor.NewClient(ctrlClient, interceptor.Funcs{
+					Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+						return fmt.Errorf("RuntimeClass create forbidden")
+					},
+				})
+			}
 			err := NewNvidiaAcceleratorOperator().Reconcile(context.Background(), driverTestContext(ctrlClient))
-			require.NoError(t, err)
+			if tc.createDenied {
+				require.ErrorContains(t, err, "RuntimeClass create forbidden")
+			} else {
+				require.NoError(t, err)
+				require.NoError(t, ctrlClient.Get(context.Background(), client.ObjectKey{Name: accelerator.NeutreeNvidiaRuntimeClass}, &nodev1.RuntimeClass{}))
+			}
 			got := &corev1.Node{}
 			require.NoError(t, ctrlClient.Get(context.Background(), client.ObjectKeyFromObject(node), got))
 			label, labelled := got.Labels[accelerator.NvidiaGPUClientLabel]
@@ -177,10 +199,11 @@ func TestNvidiaOperatorVersionPolicy(t *testing.T) {
 	}
 }
 
-func driverTestClient(t *testing.T, objects ...client.Object) client.Client {
+func driverTestClient(t *testing.T, objects ...client.Object) client.WithWatch {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, nodev1.AddToScheme(scheme))
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicy"}, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicyList"}, &unstructured.UnstructuredList{})
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()

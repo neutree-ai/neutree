@@ -28,6 +28,10 @@ func (n *NvidiaAcceleratorOperator) Reconcile(ctx context.Context, opCtx *Operat
 	if err != nil {
 		return err
 	}
+	// RuntimeClass is required independently of GPU Operator dependency management.
+	if err := accelerator.EnsureRuntimeClass(ctx, opCtx.Client, opCtx.Cluster, policies); err != nil {
+		return err
+	}
 
 	managed, _, err := accelerator.NvidiaOperatorRuntime(policies)
 	if err != nil || !managed {
@@ -138,7 +142,7 @@ func (n *NvidiaAcceleratorOperator) Delete(ctx context.Context, opCtx *OperatorC
 		}
 	}
 
-	return nil
+	return accelerator.DeleteRuntimeClass(ctx, opCtx.Client, opCtx.Cluster)
 }
 
 func validateContext(opCtx *OperatorContext) error {
