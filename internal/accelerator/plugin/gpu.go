@@ -12,7 +12,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	accelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -91,9 +93,13 @@ DCGM_FI_DRIVER_VERSION, label, Driver Version.
 )
 
 func init() { //nolint:gochecknoinits
-	registerAcceleratorPlugin(&GPUAcceleratorPlugin{
+	gpuPlugin := &GPUAcceleratorPlugin{
 		executor: &command.OSExecutor{},
-	})
+	}
+	registerAcceleratorPlugin(gpuPlugin)
+	_ = RegisterPlugin(PluginRegistration{Plugin: gpuPlugin, KubernetesOperatorFactory: func(_ *v1.Cluster, _ accelerator.PluginProvider) (operator.AcceleratorOperator, error) {
+		return operator.NewNvidiaAcceleratorOperator(), nil
+	}})
 }
 
 type GPUAcceleratorPlugin struct {
@@ -315,6 +321,13 @@ func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 
 func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
+}
+
+func (p *GPUAcceleratorPlugin) MatchCluster(cluster *v1.Cluster) bool {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.Config == nil || cluster.Spec.Config.AcceleratorType == nil || *cluster.Spec.Config.AcceleratorType == "" {
+		return true
+	}
+	return *cluster.Spec.Config.AcceleratorType == p.Resource()
 }
 
 func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {

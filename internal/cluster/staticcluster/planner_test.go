@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -1921,11 +1922,11 @@ func (p staticNodeRuntimeConfigProfileProvider) GetStaticNodeRuntimeConfig(conte
 
 func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
 	_ context.Context,
-	acceleratorType string,
+	input accelerator.AcceleratorProfileInput,
 ) (*v1.AcceleratorProfile, error) {
-	profile, ok := f.profiles[acceleratorType]
+	profile, ok := f.profiles[input.AcceleratorType]
 	if !ok {
-		return nil, fmt.Errorf("accelerator profile %s not found", acceleratorType)
+		return nil, fmt.Errorf("accelerator profile %s not found", input.AcceleratorType)
 	}
 
 	return profile, nil

@@ -26,12 +26,14 @@ type metricsAcceleratorExporter struct {
 	Port            int
 	MetricsPath     string
 
-	SecurityContext *corev1.SecurityContext
-	NodeSelector    map[string]string
-	ConfigFileData  map[string]string
-	ConfigChecksum  string
-	VolumeMounts    []corev1.VolumeMount
-	Volumes         []corev1.Volume
+	SecurityContext  *corev1.SecurityContext
+	RuntimeClassName string
+	InitContainers   []corev1.Container
+	NodeSelector     map[string]string
+	ConfigFileData   map[string]string
+	ConfigChecksum   string
+	VolumeMounts     []corev1.VolumeMount
+	Volumes          []corev1.Volume
 }
 
 func (e metricsAcceleratorExporter) AppLabel() string {
@@ -71,22 +73,38 @@ func buildManagedAcceleratorExporter(
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
 	return &metricsAcceleratorExporter{
-		Name:            name,
-		AcceleratorType: acceleratorType,
-		ExporterName:    profile.Name,
-		Image:           util.RewriteImageRef(imagePrefix, profile.Image),
-		Command:         append([]string{}, profile.Command...),
-		Args:            append([]string{}, profile.Args...),
-		Env:             buildEnvironmentVariables(profile.Env),
-		Port:            profile.Port,
-		MetricsPath:     metricsTargetPath(profile.MetricsPath),
-		SecurityContext: exporterRuntimeSecurityContext(runtime),
-		NodeSelector:    exporterRuntimeNodeSelector(runtime),
-		ConfigFileData:  configFileData,
-		ConfigChecksum:  configChecksum,
-		VolumeMounts:    volumeMounts,
-		Volumes:         volumes,
+		Name:             name,
+		AcceleratorType:  acceleratorType,
+		ExporterName:     profile.Name,
+		Image:            util.RewriteImageRef(imagePrefix, profile.Image),
+		Command:          append([]string{}, profile.Command...),
+		Args:             append([]string{}, profile.Args...),
+		Env:              buildEnvironmentVariables(profile.Env),
+		Port:             profile.Port,
+		MetricsPath:      metricsTargetPath(profile.MetricsPath),
+		SecurityContext:  exporterRuntimeSecurityContext(runtime),
+		RuntimeClassName: exporterRuntimeClass(runtime),
+		InitContainers:   append([]corev1.Container(nil), exporterInitContainers(runtime)...),
+		NodeSelector:     exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:   configFileData,
+		ConfigChecksum:   configChecksum,
+		VolumeMounts:     volumeMounts,
+		Volumes:          volumes,
 	}
+}
+
+func exporterRuntimeClass(runtime *v1.AcceleratorExporterRuntimeProfile) string {
+	if runtime == nil {
+		return ""
+	}
+	return runtime.Runtime
+}
+
+func exporterInitContainers(runtime *v1.AcceleratorExporterRuntimeProfile) []corev1.Container {
+	if runtime == nil {
+		return nil
+	}
+	return runtime.InitContainers
 }
 
 func managedAcceleratorExporters(plans []metricsAcceleratorPlan) []metricsAcceleratorExporter {

@@ -74,6 +74,9 @@ spec:
         workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
+{{ if .NodeAgent.RuntimeClassName }}
+      runtimeClassName: {{ .NodeAgent.RuntimeClassName }}
+{{ end }}
 {{ if .NodeAgent.NodeSelector }}
       nodeSelector:
 {{ .NodeAgent.NodeSelector | toYaml | indent 8 }}
@@ -81,6 +84,10 @@ spec:
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
+{{ if .NodeAgent.InitContainers }}
+      initContainers:
+{{ .NodeAgent.InitContainers | toYaml | indent 6 }}
+{{ end }}
       containers:
       - name: neutree-node-agent
         image: {{ .NeutreeNodeAgentMetricsImage }}

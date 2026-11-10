@@ -8,6 +8,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 		plugin:   &plugin.GPUAcceleratorPlugin{},
 	})
 
-	profile, err := m.GetAcceleratorProfile(context.Background(), v1.AcceleratorTypeNVIDIAGPU.String())
+	profile, err := m.GetAcceleratorProfile(context.Background(), publicaccelerator.AcceleratorProfileInput{AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String()})
 
 	require.NoError(t, err)
 	require.NotNil(t, profile)
@@ -306,7 +307,7 @@ func TestManagerAddInternalPluginsFailsAtomically(t *testing.T) {
 func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 	m := &manager{}
 
-	profile, err := m.GetAcceleratorProfile(context.Background(), "missing")
+	profile, err := m.GetAcceleratorProfile(context.Background(), publicaccelerator.AcceleratorProfileInput{AcceleratorType: "missing"})
 
 	require.Error(t, err)
 	assert.Nil(t, profile)

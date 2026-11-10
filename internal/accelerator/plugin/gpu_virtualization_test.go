@@ -66,10 +66,12 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	}, config.NodeScopeLabel)
 	assert.Equal(t, map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
-			"enabled":          true,
-			"migStrategy":      "none",
-			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
-			"nvidiaDriverRoot": NvidiaGPUOperatorDriverRoot,
+			"enabled":                 true,
+			"migStrategy":             "none",
+			"deviceSplitCount":        NvidiaGPUDefaultDeviceSplitCount,
+			"nvidiaDriverRoot":        NvidiaGPUOperatorDriverRoot,
+			"runtimeClassName":        "nvidia",
+			"gpuOperatorToolkitReady": map[string]interface{}{"enabled": true, "hostPath": "/run/nvidia/validations"},
 			"nvidiaNodeSelector": map[string]interface{}{
 				"gpu":                           nil,
 				NvidiaGPUVirtualizationLabelKey: "true",

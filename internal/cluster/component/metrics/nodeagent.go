@@ -26,6 +26,8 @@ type metricsNodeAgent struct {
 	Env                            []corev1.EnvVar
 	NodeSelector                   map[string]string
 	SecurityContext                *corev1.SecurityContext
+	RuntimeClassName               string
+	InitContainers                 []corev1.Container
 	VolumeMounts                   []corev1.VolumeMount
 	Volumes                        []corev1.Volume
 }
@@ -52,24 +54,27 @@ func selectedMetricsNodeAgent(
 	nodeAgent.Image = selection.Image
 	nodeAgent.UseLegacyContract = selection.Contract == clusterversion.NodeAgentContractLegacy
 
-	if selectedPlan == nil || selectedTarget == nil {
-		return nodeAgent, nil
-	}
-
-	if !nodeAgent.UseLegacyContract {
+	if selectedPlan != nil && selectedTarget != nil && !nodeAgent.UseLegacyContract {
 		nodeAgent.AcceleratorType = selectedPlan.AcceleratorType
 		nodeAgent.AcceleratorExporterPort = selectedTarget.Port
 		nodeAgent.AcceleratorExporterMetricsPath = selectedTarget.MetricsPath
 	}
 
 	var runtimeEnv map[string]string
-	if selectedPlan.NodeAgentRuntime != nil {
+	if selectedPlan != nil && selectedPlan.NodeAgentRuntime != nil {
 		runtimeEnv = selectedPlan.NodeAgentRuntime.Env
 	}
 
-	virtualizationMetricsTarget := selectedPlan.VirtualizationMetricsTarget
-	acceleratorExporterPodSelector := selectedTarget.PodSelector
-	acceleratorExporterNamespace := selectedTarget.Namespace
+	var virtualizationMetricsTarget *v1.MetricsTargetProfile
+	var acceleratorExporterPodSelector map[string]string
+	var acceleratorExporterNamespace string
+	if selectedPlan != nil {
+		virtualizationMetricsTarget = selectedPlan.VirtualizationMetricsTarget
+	}
+	if selectedTarget != nil {
+		acceleratorExporterPodSelector = selectedTarget.PodSelector
+		acceleratorExporterNamespace = selectedTarget.Namespace
+	}
 
 	if nodeAgent.UseLegacyContract {
 		virtualizationMetricsTarget = nil
@@ -88,6 +93,9 @@ func selectedMetricsNodeAgent(
 	}
 
 	nodeAgent.Env = env
+	if selectedPlan == nil {
+		return nodeAgent, nil
+	}
 
 	runtime := selectedPlan.NodeAgentRuntime
 	if runtime == nil {
@@ -96,6 +104,8 @@ func selectedMetricsNodeAgent(
 
 	nodeAgent.NodeSelector = maps.Clone(runtime.NodeSelector)
 	nodeAgent.SecurityContext = nodeAgentRuntimeSecurityContext(runtime)
+	nodeAgent.RuntimeClassName = runtime.Runtime
+	nodeAgent.InitContainers = append([]corev1.Container(nil), runtime.InitContainers...)
 
 	runtimeMounts, runtimeVolumes := buildComponentVolumes(runtime.Volumes, runtime.VolumeMounts)
 	nodeAgent.VolumeMounts = append(nodeAgent.VolumeMounts, runtimeMounts...)

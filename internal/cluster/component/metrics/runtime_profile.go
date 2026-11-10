@@ -55,6 +55,8 @@ func componentHostPath(source *v1.ComponentHostPathVolumeSource) *corev1.HostPat
 	switch source.Type {
 	case v1.ComponentHostPathTypeDirectory:
 		hostPathType = corev1.HostPathDirectory
+	case v1.ComponentHostPathTypeDirectoryOrCreate:
+		hostPathType = corev1.HostPathDirectoryOrCreate
 	case v1.ComponentHostPathTypeSocket:
 		hostPathType = corev1.HostPathSocket
 	case v1.ComponentHostPathTypeFile:

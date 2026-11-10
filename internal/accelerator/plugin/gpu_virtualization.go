@@ -82,6 +82,17 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 			},
 		},
 	}
+	managed, runtimeClass := nvidiaKubernetesRuntime(input.GPUOperatorClusterPolicies)
+	if managed {
+		// Hami keeps ownership of the device-plugin and virtualization label;
+		// only pass GPU Operator runtime compatibility through chart values.
+		devicePlugin := configPatch["devicePlugin"].(map[string]interface{})
+		devicePlugin["runtimeClassName"] = runtimeClass
+		devicePlugin["gpuOperatorToolkitReady"] = map[string]interface{}{
+			"enabled":  true,
+			"hostPath": "/run/nvidia/validations",
+		}
+	}
 	blockingReasons := make([]string, 0)
 
 	for _, policy := range input.GPUOperatorClusterPolicies {

@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
@@ -20,7 +21,8 @@ type Manager interface {
 	plugin.AcceleratorPluginProvider
 
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
-	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
+	GetAcceleratorProfile(ctx context.Context, input publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
+	OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (acceleratoroperator.AcceleratorOperator, error)
 	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -52,6 +54,14 @@ type Manager interface {
 	// internal type: the health sync loop removes any plugin whose Type() is
 	// not InternalPluginType. The batch is validated atomically.
 	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
+}
+
+func (a *manager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (acceleratoroperator.AcceleratorOperator, error) {
+	registration, ok := plugin.GetPluginRegistration(acceleratorType)
+	if !ok || registration.KubernetesOperatorFactory == nil {
+		return nil, errors.Errorf("kubernetes operator factory for accelerator %s is not registered", acceleratorType)
+	}
+	return registration.KubernetesOperatorFactory(cluster, a)
 }
 
 type registerPlugin struct {
@@ -276,15 +286,15 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 
 func (a *manager) GetAcceleratorProfile(
 	ctx context.Context,
-	acceleratorType string,
+	input publicaccelerator.AcceleratorProfileInput,
 ) (*v1.AcceleratorProfile, error) {
-	if acceleratorType == "" {
+	if input.AcceleratorType == "" {
 		return nil, errors.New("accelerator type is required")
 	}
 
-	p, ok := a.GetPlugin(acceleratorType)
+	p, ok := a.GetPlugin(input.AcceleratorType)
 	if !ok {
-		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+		return nil, errors.Errorf("accelerator plugin %s not found", input.AcceleratorType)
 	}
 
 	profile, err := p.Handle().GetAcceleratorProfile(ctx)
@@ -292,7 +302,21 @@ func (a *manager) GetAcceleratorProfile(
 		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
 	}
 
+	if input.Cluster != nil && hasKubernetesClusterConfig(input.Cluster) {
+		if resolver, ok := p.Handle().(publicaccelerator.KubernetesProfileResolver); ok {
+			profile, err = resolver.ResolveKubernetesProfile(ctx, input.Cluster, profile)
+			if err != nil {
+				return nil, errors.Wrapf(err, "resolve Kubernetes accelerator profile from plugin %s failed", p.Resource())
+			}
+		}
+	}
+
 	return profile, nil
+}
+
+func hasKubernetesClusterConfig(cluster *v1.Cluster) bool {
+	return cluster != nil && cluster.Spec != nil && cluster.Spec.Config != nil &&
+		cluster.Spec.Config.KubernetesConfig != nil && cluster.Spec.Config.KubernetesConfig.Kubeconfig != ""
 }
 
 func (a *manager) GetStaticNodeRuntimeConfig(

@@ -20,6 +20,33 @@ type Plugin interface {
 	Handle() PluginHandle
 }
 
+type PluginProvider interface {
+	SupportPlugins() []string
+	GetPlugin(string) (Plugin, bool)
+}
+
+type Matcher interface {
+	MatchCluster(*v1.Cluster) bool
+}
+
+func PluginMatchesCluster(plugin Plugin, cluster *v1.Cluster) bool {
+	if plugin == nil {
+		return false
+	}
+	matcher, ok := plugin.(Matcher)
+	if !ok {
+		return true
+	}
+	return matcher.MatchCluster(cluster)
+}
+
+// AcceleratorProfileInput identifies the accelerator profile and optional
+// Kubernetes cluster context used to resolve backend-specific runtime fields.
+type AcceleratorProfileInput struct {
+	AcceleratorType string
+	Cluster         *v1.Cluster
+}
+
 type PluginHandle interface {
 	GetNodeAccelerator(context.Context, *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
@@ -28,6 +55,12 @@ type PluginHandle interface {
 	GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error)
 	GetResourceConverter() ResourceConverter
 	GetResourceParser() ResourceParser
+}
+
+// KubernetesProfileResolver optionally enriches a base profile with
+// Kubernetes-only runtime fields. StaticNode callers never invoke it.
+type KubernetesProfileResolver interface {
+	ResolveKubernetesProfile(context.Context, *v1.Cluster, *v1.AcceleratorProfile) (*v1.AcceleratorProfile, error)
 }
 
 // StaticNodeRuntimeConfigResolver optionally resolves a cluster runtime

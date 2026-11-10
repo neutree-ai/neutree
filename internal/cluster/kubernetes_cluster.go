@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
@@ -19,6 +20,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -168,6 +170,10 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
+	if err := c.reconcileAcceleratorOperators(reconcileCtx); err != nil {
+		return err
+	}
+
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
@@ -211,6 +217,57 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	return nil
 }
 
+// reconcileAcceleratorOperators invokes registered operators by default. The
+// operator owns node labels and annotations; Legacy components still own all
+// workload deployment and deletion.
+func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconcileCtx *ReconcileContext) error {
+	reconcileCtx.acceleratorOperators = map[string]acceleratoroperator.AcceleratorOperator{}
+	if c.acceleratorMgr == nil {
+		return nil
+	}
+
+	candidates := map[string]acceleratoroperator.AcceleratorOperator{}
+	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
+		plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
+		if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
+			continue
+		}
+
+		acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
+		if err != nil {
+			continue // Plugins without an Operator retain the Legacy path.
+		}
+		candidates[acceleratorType] = acceleratorOperator
+	}
+	if len(candidates) > 1 {
+		return errors.Errorf("multiple accelerator operators match cluster: %d", len(candidates))
+	}
+
+	var errs []error
+	for acceleratorType, acceleratorOperator := range candidates {
+		reconcileCtx.acceleratorOperators[acceleratorType] = acceleratorOperator
+		operatorContext := &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}
+		if _, err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {
+			errs = append(errs, errors.Wrapf(err, "reconcile accelerator operator %s", acceleratorType))
+			continue
+		}
+		status, err := acceleratorOperator.Status(reconcileCtx.Ctx, operatorContext)
+		if err != nil {
+			errs = append(errs, errors.Wrapf(err, "status accelerator operator %s", acceleratorType))
+			continue
+		}
+		if reconcileCtx.Cluster.Status == nil {
+			reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
+		}
+		if reconcileCtx.Cluster.Status.ComponentStatus == nil {
+			reconcileCtx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
+		}
+		reconcileCtx.Cluster.Status.ComponentStatus["accelerator-operator/"+acceleratorType] = status
+	}
+
+	return utilerrors.NewAggregate(errs)
+}
+
 // inferenceScrapeRules derives the metrics-scrape adjustments for this cluster
 // from the engines registered in its workspace.
 //
@@ -247,6 +304,8 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
+	// Accelerator Operators only synchronize GPU Operator compatibility state;
+	// Metrics and HAMi remain the workload owners on this path.
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
@@ -320,6 +379,18 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 	reconcileCtx *ReconcileContext,
 ) error {
 	var errs []error
+
+	if c.acceleratorMgr != nil {
+		for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
+			acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
+			if err != nil {
+				continue
+			}
+			if err := acceleratorOperator.Delete(reconcileCtx.Ctx, &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}); err != nil {
+				errs = append(errs, errors.Wrapf(err, "failed to delete accelerator operator %s state", acceleratorType))
+			}
+		}
+	}
 
 	if shouldDeleteAcceleratorVirtualizationComponent(reconcileCtx.Cluster) {
 		hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,

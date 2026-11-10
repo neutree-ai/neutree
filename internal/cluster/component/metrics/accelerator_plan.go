@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 // metricsAcceleratorPlan keeps profile-level decisions separate from a
@@ -46,7 +47,7 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 	ctx context.Context,
 	acceleratorType string,
 ) (metricsAcceleratorPlan, bool) {
-	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
+	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType, Cluster: m.cluster})
 	if err != nil {
 		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
 		return metricsAcceleratorPlan{}, false

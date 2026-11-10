@@ -8,6 +8,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 const (
@@ -66,7 +67,7 @@ func (r *Planner) runtimeProfile(
 		return nil, errors.New("accelerator profile provider is required")
 	}
 
-	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
+	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: accelerator.Type})
 	if err != nil || profile == nil {
 		return nil, err
 	}
