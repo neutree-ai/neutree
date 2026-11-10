@@ -74,14 +74,7 @@ func (p nvidiaNVMLHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([
 	}
 
 	driverVersion, driverOK := client.DriverVersion()
-	if !driverOK {
-		klog.Warning("Unable to read NVIDIA driver version: nvmlSystemGetDriverVersion failed")
-	}
-
 	cudaDriverVersion, cudaOK := client.CUDADriverVersion()
-	if !cudaOK {
-		klog.Warning("Unable to read CUDA driver version: nvmlSystemGetCudaDriverVersion failed")
-	}
 
 	infos := make([]nvidiaHardwareInfo, count)
 	for index := range infos {
@@ -131,13 +124,17 @@ func nvidiaApplyNVMLDeviceHardwareInfo(info *nvidiaHardwareInfo, device nvidiaNV
 	}
 
 	if value, ok := device.Index(); ok {
-		info.Index = strconv.Itoa(value)
+		if value >= 0 {
+			info.Index = strconv.Itoa(value)
+		}
 	} else {
 		failures = append(failures, "nvmlDeviceGetIndex")
 	}
 
 	if value, ok := device.MinorNumber(); ok {
-		info.MinorNumber = strconv.Itoa(value)
+		if value >= 0 {
+			info.MinorNumber = strconv.Itoa(value)
+		}
 	} else {
 		failures = append(failures, "nvmlDeviceGetMinorNumber")
 	}
@@ -155,7 +152,9 @@ func nvidiaApplyNVMLDeviceHardwareInfo(info *nvidiaHardwareInfo, device nvidiaNV
 	}
 
 	if major, minor, ok := device.CUDACapability(); ok {
-		info.CUDACapability = strconv.Itoa(major) + "." + strconv.Itoa(minor)
+		if major >= 0 && minor >= 0 {
+			info.CUDACapability = strconv.Itoa(major) + "." + strconv.Itoa(minor)
+		}
 	} else {
 		failures = append(failures, "nvmlDeviceGetCudaComputeCapability")
 	}
@@ -167,13 +166,17 @@ func nvidiaApplyNVMLDeviceHardwareInfo(info *nvidiaHardwareInfo, device nvidiaNV
 	}
 
 	if value, ok := device.PCIEGeneration(); ok {
-		info.PCIEGeneration = strconv.Itoa(value)
+		if value >= 0 {
+			info.PCIEGeneration = strconv.Itoa(value)
+		}
 	} else {
 		failures = append(failures, "nvmlDeviceGetMaxPcieLinkGeneration")
 	}
 
 	if value, ok := device.PCIEWidth(); ok {
-		info.PCIEWidth = strconv.Itoa(value)
+		if value >= 0 {
+			info.PCIEWidth = strconv.Itoa(value)
+		}
 	} else {
 		failures = append(failures, "nvmlDeviceGetMaxPcieLinkWidth")
 	}

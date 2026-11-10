@@ -24,6 +24,9 @@ func TestMergeHardwareInventory(t *testing.T) {
 	partial := inventoryTestHardware(8)
 	partial.Accelerator.Devices[4] = v1.StaticNodeAcceleratorDeviceStatus{ID: "4", UUID: "GPU-4", Healthy: false}
 	partial.Details[4] = adapter.HardwareDetails{UUID: "GPU-4", PCIEBusID: "4"}
+	unidentified := inventoryTestHardware(8)
+	unidentified.Accelerator.Devices[4] = v1.StaticNodeAcceleratorDeviceStatus{ID: "4", Healthy: false}
+	unidentified.Details[4] = adapter.HardwareDetails{DriverVersion: "595.58.03"}
 	cases := []struct {
 		name     string
 		previous adapter.HardwareSnapshot
@@ -33,6 +36,7 @@ func TestMergeHardwareInventory(t *testing.T) {
 		{name: "initial discovery", fresh: healthy, want: healthy},
 		{name: "missing GPU retains its position and identity", previous: healthy, fresh: short, want: lost},
 		{name: "partial rediscovery retains hardware fields", previous: healthy, fresh: partial, want: lost},
+		{name: "unreadable UUID does not add orphan hardware details", previous: healthy, fresh: unidentified, want: lost},
 		{name: "failed discovery marks all known GPUs unhealthy", previous: healthy, want: unhealthy},
 		{name: "successful rediscovery restores health", previous: unhealthy, fresh: healthy, want: healthy},
 		{name: "newly discovered GPU is appended", previous: inventoryTestHardware(1), fresh: inventoryTestHardware(2), want: inventoryTestHardware(2)},

@@ -13,43 +13,42 @@ import (
 )
 
 func TestNvidiaNVMLHardwareInfoProviderBuildsInventory(t *testing.T) {
-	provider := nvidiaNVMLHardwareInfoProvider{client: fakeNvidiaNVMLHardwareClient{
-		initOK: true,
-		driver: "550.54",
-		cuda:   "12.8",
-		devices: []nvidiaNVMLHardwareDevice{fakeNvidiaNVMLHardwareDevice{
-			uuid:         "GPU-a",
-			index:        2,
-			minorNumber:  5,
-			product:      "NVIDIA L20",
-			architecture: 8,
-			cudaMajor:    8,
-			cudaMinor:    9,
-			pciBusID:     "0000:05:00.0",
-			pcieGen:      4,
-			pcieWidth:    16,
-			memoryBytes:  46068 * nvidiaBytesPerMiB,
-			numaNode:     0,
-		}},
-	}}
+	cases := []struct {
+		name        string
+		unsupported bool
+	}{
+		{name: "supported hardware properties"},
+		{name: "unsupported optional properties remain empty and healthy", unsupported: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			device := fakeNvidiaNVMLHardwareDevice{
+				uuid: "GPU-a", index: 2, minorNumber: 5, product: "NVIDIA L20",
+				architecture: 8, cudaMajor: 8, cudaMinor: 9, pciBusID: "0000:05:00.0",
+				pcieGen: 4, pcieWidth: 16, memoryBytes: 46068 * nvidiaBytesPerMiB, numaNode: 0,
+			}
+			want := nvidiaHardwareInfo{
+				UUID: "GPU-a", Index: "2", MinorNumber: "5", Product: "NVIDIA L20",
+				Architecture: "Ada", CUDACapability: "8.9", PCIEBusID: "0000:05:00.0",
+				PCIEGeneration: "4", PCIEWidth: "16", MemoryTotalMiB: "46068", NUMANode: "0",
+				DriverVersion: "550.54", CUDADriverVersion: "12.8",
+			}
+			if tc.unsupported {
+				device.cudaMajor, device.cudaMinor = -1, -1
+				device.pcieGen, device.pcieWidth, device.numaNode = -1, -1, -1
+				want.CUDACapability = ""
+				want.PCIEGeneration, want.PCIEWidth, want.NUMANode = "", "", ""
+			}
+			provider := nvidiaNVMLHardwareInfoProvider{SysFSRoot: t.TempDir(), client: fakeNvidiaNVMLHardwareClient{
+				initOK: true, driver: "550.54", cuda: "12.8", devices: []nvidiaNVMLHardwareDevice{device},
+			}}
 
-	infos, err := provider.GPUHardwareInfos(context.Background())
+			infos, err := provider.GPUHardwareInfos(context.Background())
 
-	require.NoError(t, err)
-	require.Len(t, infos, 1)
-	assert.Equal(t, "GPU-a", infos[0].UUID)
-	assert.Equal(t, "2", infos[0].Index)
-	assert.Equal(t, "5", infos[0].MinorNumber)
-	assert.Equal(t, "NVIDIA L20", infos[0].Product)
-	assert.Equal(t, "Ada", infos[0].Architecture)
-	assert.Equal(t, "8.9", infos[0].CUDACapability)
-	assert.Equal(t, "550.54", infos[0].DriverVersion)
-	assert.Equal(t, "12.8", infos[0].CUDADriverVersion)
-	assert.Equal(t, "46068", infos[0].MemoryTotalMiB)
-	assert.Equal(t, "0000:05:00.0", infos[0].PCIEBusID)
-	assert.Equal(t, "4", infos[0].PCIEGeneration)
-	assert.Equal(t, "16", infos[0].PCIEWidth)
-	assert.Equal(t, "0", infos[0].NUMANode)
+			require.NoError(t, err)
+			assert.Equal(t, []nvidiaHardwareInfo{want}, infos)
+		})
+	}
 }
 
 func TestNvidiaNVMLHardwareInfoProviderReportsDiscoveryFailure(t *testing.T) {

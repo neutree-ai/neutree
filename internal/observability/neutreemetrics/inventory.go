@@ -85,6 +85,10 @@ func mergeHardwareDetails(previous, fresh []adapter.HardwareDetails) []adapter.H
 	}
 
 	for _, detail := range fresh {
+		if detail.UUID == "" {
+			continue
+		}
+
 		if index, found := positions[detail.UUID]; found {
 			known := previous[index]
 			if len(detail.DeviceAliases) == 0 {
