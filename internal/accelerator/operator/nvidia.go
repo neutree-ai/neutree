@@ -69,13 +69,22 @@ func (n *NvidiaAcceleratorOperator) Status(ctx context.Context, opCtx *OperatorC
 	}
 
 	var failures []string
+	var ownerConflicts []string
 	for _, node := range nodes.Items {
+		if owner := node.Annotations[NVIDIAOperatorOwnerAnnotation]; owner != "" && owner != NVIDIAOperatorOwnerValue {
+			ownerConflicts = append(ownerConflicts, fmt.Sprintf("node %s is owned by accelerator operator %s", node.Name, owner))
+			continue
+		}
 		if !n.driverReady(ctx, opCtx, node.Name) && n.driverManaged(ctx, opCtx) {
 			failures = append(failures, n.driverFailure(ctx, opCtx, node.Name))
 		}
 	}
 
-	if len(failures) > 0 {
+	if len(ownerConflicts) > 0 {
+		status.Phase = v1.ComponentPhaseNotReady
+		status.Reason = "OwnerConflict"
+		status.Message = strings.Join(ownerConflicts, "; ")
+	} else if len(failures) > 0 {
 		status.Phase = v1.ComponentPhaseNotReady
 		status.Reason = "DriverNotReady"
 		status.Message = strings.Join(failures, "; ")

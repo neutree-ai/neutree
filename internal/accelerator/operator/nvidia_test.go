@@ -63,22 +63,29 @@ func TestNvidiaOperatorStatusReportsDriverPodByNode(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		driverPod  *corev1.Pod
+		owner      string
+		wantReason string
 		wantDetail string
+		wantDriver bool
 	}{
 		{
 			name: "pending driver Pod",
 			driverPod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 				Name: "nvidia-driver-daemonset-abc", Labels: map[string]string{NVIDIADriverDeployLabel: "true"},
 			}, Spec: corev1.PodSpec{NodeName: "gpu-1"}, Status: corev1.PodStatus{Phase: corev1.PodPending}},
+			wantReason: "DriverNotReady",
 			wantDetail: "nvidia-driver-daemonset-abc",
+			wantDriver: true,
 		},
-		{name: "missing driver Pod", wantDetail: "has no driver Pod"},
+		{name: "missing driver Pod", wantReason: "DriverNotReady", wantDetail: "has no driver Pod", wantDriver: true},
+		{name: "foreign owner", owner: "other-operator", wantReason: "OwnerConflict", wantDetail: "owned by accelerator operator other-operator"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
 			require.NoError(t, corev1.AddToScheme(scheme))
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: "gpu-1", Labels: map[string]string{NVIDIAGPUNodeLabel: NVIDIAGPUNodeValue},
+				Annotations: map[string]string{NVIDIAOperatorOwnerAnnotation: test.owner},
 			}}
 			objects := []client.Object{node, nvidiaClusterPolicy()}
 			if test.driverPod != nil {
@@ -92,10 +99,12 @@ func TestNvidiaOperatorStatusReportsDriverPodByNode(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Equal(t, v1.ComponentPhaseNotReady, status.Phase)
-			require.Equal(t, "DriverNotReady", status.Reason)
+			require.Equal(t, test.wantReason, status.Reason)
 			require.Contains(t, status.Message, "gpu-1")
 			require.Contains(t, status.Message, test.wantDetail)
-			require.Contains(t, status.Message, "driver libraries may be unavailable")
+			if test.wantDriver {
+				require.Contains(t, status.Message, "driver libraries may be unavailable")
+			}
 		})
 	}
 }

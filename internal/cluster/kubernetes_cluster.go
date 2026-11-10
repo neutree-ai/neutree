@@ -382,6 +382,10 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 
 	if c.acceleratorMgr != nil {
 		for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
+			plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
+			if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
+				continue
+			}
 			acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
 			if err != nil {
 				continue
