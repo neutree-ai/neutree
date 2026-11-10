@@ -26,17 +26,17 @@ func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, pr
 	// Kubernetes RuntimeClass comes from ClusterPolicy, not the StaticNode runtime default.
 	profile.NodeAgentRuntime.Runtime = ""
 	profile.MetricsExporter.Runtime.Runtime = ""
+	agent := profile.NodeAgentRuntime
+	agent.NodeSelector = map[string]string{
+		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
+	}
 
 	if !managed {
 		return nil
 	}
 
-	agent := profile.NodeAgentRuntime
 	agent.Runtime = runtimeClass
-	agent.NodeSelector = map[string]string{
-		accelerator.NvidiaGPUClientLabel:       accelerator.NvidiaGPUDiscoveryLabelValue,
-		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
-	}
+	agent.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
 	appendToolkitValidation(&agent.InitContainers, &agent.Volumes, &agent.VolumeMounts, "")
 
 	exporter := profile.MetricsExporter.Runtime

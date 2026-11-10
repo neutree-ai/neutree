@@ -10,7 +10,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
@@ -30,13 +29,6 @@ type MetricsComponent struct {
 	inferenceScrapeRules InferenceScrapeRules
 	cacheProviders       *clustercache.Providers
 	metricsTargets       metricsconfig.Registry
-	acceleratorOperators map[string]publicaccelerator.AcceleratorOperator
-}
-
-// WithAcceleratorOperators selects CPU/accelerator agent scopes; Metrics still owns both workloads.
-func (m *MetricsComponent) WithAcceleratorOperators(operators map[string]publicaccelerator.AcceleratorOperator) *MetricsComponent {
-	m.acceleratorOperators = operators
-	return m
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments

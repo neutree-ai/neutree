@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +15,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/accelerator/operator"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -216,24 +218,40 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 
 func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 	for _, test := range []struct {
-		name                          string
-		operator, managed, missingCPU bool
-		gpuDesired, cpuDesired        int32
-		cpuNotReady, expectedReady    bool
+		name                             string
+		operator, managed                bool
+		gpuDesired, cpuDesired           int32
+		missingCPU, missingAccelerator   bool
+		cpuNotReady, acceleratorNotReady bool
+		matchError, expectedReady        bool
+		external, missingExporter        bool
+		wantError                        string
 	}{
 		{name: "single legacy agent", gpuDesired: 2, expectedReady: true},
+		{name: "legacy agent not ready", gpuDesired: 2, acceleratorNotReady: true, wantError: "node-agent DaemonSet/neutree-node-agent is not ready (0/2)"},
 		{name: "operator with OS dependencies", operator: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
 		{name: "managed mixed nodes", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
+		{name: "managed exporter missing still blocks Metrics", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true, missingExporter: true, wantError: "accelerator-exporter daemonset nvidia-gpu-dcgm-exporter check failed"},
+		{name: "external exporter is not owned by Metrics", operator: true, managed: true, external: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
 		{name: "managed GPU only", operator: true, managed: true, gpuDesired: 1, expectedReady: true},
 		{name: "GPU recovery retains CPU coverage", operator: true, managed: true, cpuDesired: 1, expectedReady: true},
-		{name: "CPU agent missing", operator: true, managed: true, gpuDesired: 1, missingCPU: true},
-		{name: "CPU agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true},
+		{name: "CPU agent missing", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, missingCPU: true, wantError: "cpu node-agent DaemonSet/neutree-node-agent-cpu check failed"},
+		{name: "CPU agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true, wantError: "cpu node-agent DaemonSet/neutree-node-agent-cpu is not ready (0/1)"},
+		{name: "accelerator agent missing", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, missingAccelerator: true, wantError: "accelerator node-agent DaemonSet/neutree-node-agent check failed"},
+		{name: "accelerator agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, acceleratorNotReady: true, wantError: "accelerator node-agent DaemonSet/neutree-node-agent is not ready (0/1)"},
+		{name: "discovery error stops status planning", operator: true, gpuDesired: 1, cpuDesired: 1, matchError: true, wantError: "node discovery denied"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			objects := []client.Object{
 				readyMetricsDeployment("neutree-kube-state-metrics"),
 				readyMetricsDaemonSet(nodeExporterDaemonSetName, test.gpuDesired+test.cpuDesired),
-				readyMetricsDaemonSet(neutreeNodeAgentMetricsName, test.gpuDesired),
+			}
+			if !test.missingAccelerator {
+				agent := readyMetricsDaemonSet(neutreeNodeAgentMetricsName, test.gpuDesired)
+				if test.acceleratorNotReady {
+					agent.Status.NumberReady = 0
+				}
+				objects = append(objects, agent)
 			}
 			component := &MetricsComponent{
 				namespace: "default",
@@ -243,10 +261,15 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 				},
 			}
 			if test.operator {
-				component.WithAcceleratorOperators(map[string]publicaccelerator.AcceleratorOperator{publicaccelerator.NvidiaAcceleratorType: operator.NewNvidiaAcceleratorOperator()})
 				objects = append(objects, metricsTestNode("gpu", map[string]string{
 					publicaccelerator.NvidiaGPUDiscoveryLabelKey: publicaccelerator.NvidiaGPUDiscoveryLabelValue,
-				}), readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", test.gpuDesired))
+				}))
+				if !test.external && !test.missingExporter {
+					objects = append(objects, readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", test.gpuDesired))
+				}
+				if test.cpuDesired > 0 {
+					objects = append(objects, metricsTestNode("cpu", nil))
+				}
 				if !test.missingCPU {
 					cpu := readyMetricsDaemonSet(cpuNodeAgentMetricsName, test.cpuDesired)
 					if test.cpuNotReady {
@@ -256,15 +279,38 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 				}
 				manager := acceleratormocks.NewMockManager(t)
 				manager.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()})
+				manager.On("GetPlugin", publicaccelerator.NvidiaAcceleratorType).Return(&plugin.GPUAcceleratorPlugin{}, true)
 				manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(metricsNvidiaProfile(test.managed), nil)
 				component.acceleratorMgr = manager
 			}
-			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).Build()
+			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if test.matchError {
+						return errors.New("node discovery denied")
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build()
 
+			if test.external {
+				component.cluster.Spec.Config = &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: v1.ClusterAcceleratorExporterModeExternal}}}
+			}
 			status, err := component.CheckResourcesStatus(context.Background())
 			require.NoError(t, err)
 			assert.True(t, status.NeutreeNodeAgentMetricsRequired)
 			assert.Equal(t, test.expectedReady, status.NeutreeNodeAgentMetricsDaemonSetReady)
+			assert.Equal(t, test.expectedReady && !test.missingExporter, status.Ready())
+			assert.Equal(t, test.operator && !test.external && !test.matchError, status.AcceleratorExporterRequired)
+			if test.wantError != "" {
+				assert.Contains(t, status.String(), test.wantError)
+			} else {
+				assert.Empty(t, status.Errors)
+			}
+			if test.matchError {
+				assert.Zero(t, status.NeutreeNodeAgentMetricsPodsReady)
+				assert.Zero(t, status.NeutreeNodeAgentMetricsTotalPods)
+				return
+			}
 			expectedPods := int(test.gpuDesired + test.cpuDesired)
 			expectedTotal := expectedPods
 			if test.missingCPU || test.cpuNotReady {
@@ -273,11 +319,14 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 			if test.missingCPU {
 				expectedTotal -= int(test.cpuDesired)
 			}
+			if test.missingAccelerator || test.acceleratorNotReady {
+				expectedPods -= int(test.gpuDesired)
+			}
+			if test.missingAccelerator {
+				expectedTotal -= int(test.gpuDesired)
+			}
 			assert.Equal(t, expectedPods, status.NeutreeNodeAgentMetricsPodsReady)
 			assert.Equal(t, expectedTotal, status.NeutreeNodeAgentMetricsTotalPods)
-			if test.missingCPU {
-				assert.Contains(t, status.Errors[0], cpuNodeAgentMetricsName)
-			}
 		})
 	}
 }

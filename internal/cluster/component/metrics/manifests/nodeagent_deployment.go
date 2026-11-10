@@ -58,6 +58,9 @@ metadata:
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
     neutree.ai/metrics-target: node-agent
+{{ if .NodeAgent.Type }}
+    neutree.ai/node-agent-type: {{ .NodeAgent.Type }}
+{{ end }}
     neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   selector:
@@ -70,6 +73,9 @@ spec:
       labels:
         app: {{ .NeutreeNodeAgentMetricsName }}
         neutree.ai/metrics-target: node-agent
+{{ if .NodeAgent.Type }}
+        neutree.ai/node-agent-type: {{ .NodeAgent.Type }}
+{{ end }}
         cluster: {{ .ClusterName | quote }}
         workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}

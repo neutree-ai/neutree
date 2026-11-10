@@ -36,12 +36,19 @@ func metricsProfileInput(acceleratorType string) any {
 	})
 }
 
+type metricsLegacyPlugin struct{ resource string }
+
+func (p metricsLegacyPlugin) Resource() string                       { return p.resource }
+func (p metricsLegacyPlugin) Type() string                           { return publicaccelerator.InternalPluginType }
+func (p metricsLegacyPlugin) Handle() publicaccelerator.PluginHandle { return nil }
+
 func metricsTestAcceleratorManager(t *testing.T) *acceleratormocks.MockManager {
 	t.Helper()
 	manager := accelerator.NewManager()
 	profiles := acceleratormocks.NewMockManager(t)
 	profiles.On("SupportPlugins").Return(manager.SupportPlugins()).Maybe()
 	for _, acceleratorType := range manager.SupportPlugins() {
+		profiles.On("GetPlugin", acceleratorType).Return(metricsLegacyPlugin{resource: acceleratorType}, true).Maybe()
 		profile, err := manager.GetAcceleratorProfile(context.Background(), publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType})
 		require.NoError(t, err)
 		profiles.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(acceleratorType)).Return(profile, nil).Maybe()
@@ -243,6 +250,7 @@ func TestBuildMetricsResourcesWithNumericClusterMetadata(t *testing.T) {
 func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()}).Maybe()
+	acceleratorMgr.On("GetPlugin", v1.AcceleratorTypeNVIDIAGPU.String()).Return(metricsLegacyPlugin{resource: v1.AcceleratorTypeNVIDIAGPU.String()}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
@@ -421,6 +429,7 @@ func TestBuildVMAgentConfigSkipsHAMiMonitorScrapeWhenAcceleratorVirtualizationDi
 func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVirtualizationEnabled(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()}).Maybe()
+	acceleratorMgr.On("GetPlugin", v1.AcceleratorTypeNVIDIAGPU.String()).Return(metricsLegacyPlugin{resource: v1.AcceleratorTypeNVIDIAGPU.String()}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
@@ -926,6 +935,7 @@ func TestBuildMetricsResourcesDoesNotProjectExporterEnvToNodeAgent(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			acceleratorMgr := &acceleratormocks.MockManager{}
 			acceleratorMgr.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()}).Maybe()
+			acceleratorMgr.On("GetPlugin", v1.AcceleratorTypeNVIDIAGPU.String()).Return(metricsLegacyPlugin{resource: v1.AcceleratorTypeNVIDIAGPU.String()}, true).Maybe()
 			acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).
 				Return(&v1.AcceleratorProfile{
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
@@ -1193,6 +1203,7 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"})
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(profile, nil)
 	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
 
@@ -1267,6 +1278,7 @@ func TestBuildMetricsResourcesProjectsUnvalidatedStructuredAcceleratorExporterPr
 
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"})
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(profile, nil)
 	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
 
@@ -1310,6 +1322,7 @@ func TestBuildMetricsResourcesProjectsProfileOnAllDeploymentBackends(t *testing.
 	}
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_accelerator"})
+	acceleratorMgr.On("GetPlugin", "custom_accelerator").Return(metricsLegacyPlugin{resource: "custom_accelerator"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_accelerator")).Return(profile, nil)
 	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
 
@@ -1342,6 +1355,7 @@ func TestBuildMetricsResourcesProjectsProfileOnAllDeploymentBackends(t *testing.
 func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFiles(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetPlugin", "custom_gpu").Return(metricsLegacyPlugin{resource: "custom_gpu"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",
@@ -1392,6 +1406,7 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFi
 func TestBuildMetricsResourcesProjectsDuplicateAcceleratorExporterConfigBasenames(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetPlugin", "custom_gpu").Return(metricsLegacyPlugin{resource: "custom_gpu"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",
@@ -1454,6 +1469,7 @@ func TestBuildMetricsResourcesProjectsDuplicateAcceleratorExporterConfigBasename
 func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetPlugin", "custom_gpu").Return(metricsLegacyPlugin{resource: "custom_gpu"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",
@@ -1504,6 +1520,7 @@ func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetPlugin", "custom_gpu").Return(metricsLegacyPlugin{resource: "custom_gpu"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",
@@ -1549,6 +1566,7 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *tes
 func TestBuildMetricsResourcesProjectsAcceleratorExporterWithoutName(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
+	acceleratorMgr.On("GetPlugin", "custom_gpu").Return(metricsLegacyPlugin{resource: "custom_gpu"}, true).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",
@@ -1598,6 +1616,9 @@ func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			acceleratorMgr := &acceleratormocks.MockManager{}
 			acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", "legacy_accelerator"})
+			for _, acceleratorType := range []string{"custom_gpu", "legacy_accelerator"} {
+				acceleratorMgr.On("GetPlugin", acceleratorType).Return(metricsLegacyPlugin{resource: acceleratorType}, true).Maybe()
+			}
 			acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 				Return(&v1.AcceleratorProfile{
 					AcceleratorType: "custom_gpu",
@@ -1641,6 +1662,9 @@ func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()})
+	for _, acceleratorType := range []string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()} {
+		acceleratorMgr.On("GetPlugin", acceleratorType).Return(metricsLegacyPlugin{resource: acceleratorType}, true).Maybe()
+	}
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("custom_gpu")).
 		Return(&v1.AcceleratorProfile{
 			AcceleratorType: "custom_gpu",

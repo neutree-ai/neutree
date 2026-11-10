@@ -3,6 +3,7 @@ package metrics
 import (
 	"encoding/json"
 	"maps"
+	"slices"
 	"sort"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
@@ -11,13 +12,13 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
-	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
 // metricsNodeAgent projects the selected accelerator Profile; exporter runtime
 // metadata is not inherited.
 type metricsNodeAgent struct {
+	Type                           string
 	Image                          string
 	UseLegacyContract              bool
 	AcceleratorType                string
@@ -46,30 +47,37 @@ func (m *MetricsComponent) planMetricsNodeAgents(plans []metricsAcceleratorPlan)
 
 	// Legacy profiles retain their existing single agent and profile selector.
 	deployments := []nodeAgentDeploymentPlan{{Name: neutreeNodeAgentMetricsName, NodeAgent: agent}}
-	if len(plans) == 0 || m.acceleratorOperators[plans[0].AcceleratorType] == nil ||
-		plans[0].AcceleratorType != v1.AcceleratorTypeNVIDIAGPU.String() {
+	if len(plans) == 0 || !plans[0].OperatorManaged {
 		return deployments, nil
 	}
 
-	// A recovering GPU stays outside the generic agent's range even while its client label is false.
-	if agent.NodeSelector == nil {
-		agent.NodeSelector = map[string]string{}
-	}
-
-	agent.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
-	deployments[0].NodeAgent = agent
+	agent.Type = nodeAgentTypeAccelerator
 	cpuAgent := defaultMetricsNodeAgent()
+	cpuAgent.Type = nodeAgentTypeCPU
 	cpuAgent.Image = agent.Image
 	cpuAgent.UseLegacyContract = agent.UseLegacyContract
-	cpuAgent.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+	cpuAgent.Affinity = cpuNodeAgentAffinity(agent.NodeSelector)
+
+	return []nodeAgentDeploymentPlan{
+		{Name: cpuNodeAgentMetricsName, NodeAgent: cpuAgent},
+		{Name: neutreeNodeAgentMetricsName, NodeAgent: agent},
+	}, nil
+}
+
+func cpuNodeAgentAffinity(selector map[string]string) *corev1.Affinity {
+	var expressions []corev1.NodeSelectorRequirement
+	for _, key := range slices.Sorted(maps.Keys(selector)) {
+		expressions = append(expressions, corev1.NodeSelectorRequirement{
+			Key: key, Operator: corev1.NodeSelectorOpNotIn, Values: []string{selector[key]},
+		})
+	}
+
+	// Exclude any node matching a profile selector entry, including readiness-only matches.
+	return &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-			MatchExpressions: []corev1.NodeSelectorRequirement{{
-				Key: accelerator.NvidiaGPUDiscoveryLabelKey, Operator: corev1.NodeSelectorOpNotIn, Values: []string{accelerator.NvidiaGPUDiscoveryLabelValue},
-			}},
+			MatchExpressions: expressions,
 		}}},
 	}}
-
-	return append(deployments, nodeAgentDeploymentPlan{Name: cpuNodeAgentMetricsName, NodeAgent: cpuAgent}), nil
 }
 
 func selectedMetricsNodeAgent(

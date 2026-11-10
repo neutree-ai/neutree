@@ -51,15 +51,23 @@ type AcceleratorOperator interface {
 	Delete(context.Context, *OperatorContext) error
 }
 
-// ResolveOperator checks factory support before hardware matching so Legacy
-// plugins need no Kubernetes-specific interfaces or discovery calls.
+// IsOperatorSupported checks plugin capability and cluster matching without creating an Operator.
+func IsOperatorSupported(ctx context.Context, plugin Plugin, opCtx *OperatorContext) (bool, error) {
+	factory, ok := plugin.(OperatorFactory)
+	if !ok {
+		return false, nil
+	}
+
+	return factory.MatchCluster(ctx, opCtx)
+}
+
 func ResolveOperator(ctx context.Context, plugin Plugin, opCtx *OperatorContext, provider PluginProvider) (AcceleratorOperator, error) {
 	factory, ok := plugin.(OperatorFactory)
 	if !ok {
 		return nil, nil
 	}
 
-	matched, err := factory.MatchCluster(ctx, opCtx)
+	matched, err := IsOperatorSupported(ctx, plugin, opCtx)
 	if err != nil || !matched {
 		return nil, err
 	}

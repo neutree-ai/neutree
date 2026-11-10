@@ -59,6 +59,7 @@ func TestNvidiaKubernetesProfileRuntime(t *testing.T) {
 				{profile.NodeAgentRuntime.NodeSelector, profile.NodeAgentRuntime.InitContainers, profile.NodeAgentRuntime.Volumes},
 				{profile.MetricsExporter.Runtime.NodeSelector, profile.MetricsExporter.Runtime.InitContainers, profile.MetricsExporter.Runtime.Volumes},
 			} {
+				assert.Equal(t, accelerator.NvidiaGPUDiscoveryLabelValue, runtime.selector[accelerator.NvidiaGPUDiscoveryLabelKey])
 				if !tc.driver || !tc.toolkit {
 					assert.Empty(t, runtime.init)
 					assert.NotContains(t, runtime.selector, accelerator.NvidiaGPUClientLabel)

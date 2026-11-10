@@ -127,8 +127,16 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 
 				for _, plan := range nodeAgents {
 					ready, podsReady, totalPods, checkErr := m.checkDaemonSetStatus(ctx, plan.Name)
+
+					componentName := "node-agent DaemonSet/" + plan.Name
+					if plan.NodeAgent.Type != "" {
+						componentName = plan.NodeAgent.Type + " " + componentName
+					}
+
 					if checkErr != nil {
-						status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", plan.Name, checkErr))
+						status.Errors = append(status.Errors, fmt.Sprintf("%s check failed: %v", componentName, checkErr))
+					} else if !ready {
+						status.Errors = append(status.Errors, fmt.Sprintf("%s is not ready (%d/%d)", componentName, podsReady, totalPods))
 					}
 
 					status.NeutreeNodeAgentMetricsDaemonSetReady = status.NeutreeNodeAgentMetricsDaemonSetReady && ready

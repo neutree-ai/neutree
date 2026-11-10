@@ -152,6 +152,8 @@ type NodeAgentRuntimeProfile struct {
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector constrains Kubernetes NodeAgent placement. StaticNode ignores it.
+	// For Operator-managed deployments, the CPU agent requires every entry to be NotIn;
+	// plugins must provide accelerator scope labels rather than shared placement labels.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
 	// Env declares NodeAgent-only environment variables. Exporter environment
 	// variables are not implicitly inherited by the NodeAgent.

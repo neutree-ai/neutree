@@ -16,6 +16,7 @@ import (
 // NodeAgent runtime without inventing a DaemonSet.
 type metricsAcceleratorPlan struct {
 	AcceleratorType             string
+	OperatorManaged             bool
 	Exporter                    *metricsAcceleratorExporter
 	NodeAgentRuntime            *v1.NodeAgentRuntimeProfile
 	VirtualizationMetricsTarget *v1.MetricsTargetProfile
@@ -59,8 +60,18 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		return metricsAcceleratorPlan{}, false, nil
 	}
 
+	plugin, _ := m.acceleratorMgr.GetPlugin(acceleratorType)
+
+	operatorManaged, err := publicaccelerator.IsOperatorSupported(ctx, plugin, &publicaccelerator.OperatorContext{
+		Cluster: m.cluster, Client: m.ctrlClient, Namespace: m.namespace,
+	})
+	if err != nil {
+		return metricsAcceleratorPlan{}, false, err
+	}
+
 	plan := metricsAcceleratorPlan{
 		AcceleratorType:             acceleratorType,
+		OperatorManaged:             operatorManaged,
 		NodeAgentRuntime:            profile.NodeAgentRuntime,
 		VirtualizationMetricsTarget: resolveVirtualizationMetricsTargetNamespace(profile.VirtualizationMetricsTarget, m.namespace),
 	}
@@ -116,7 +127,7 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 		}
 
 		// Operator plans already matched hardware through MatchCluster; selectors only gate scheduling.
-		if m.acceleratorOperators[plan.AcceleratorType] == nil {
+		if !plan.OperatorManaged {
 			if plan.Exporter == nil {
 				continue
 			}
