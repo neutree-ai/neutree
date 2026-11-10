@@ -6,63 +6,32 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/cluster/component/metrics/manifests"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
-	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // GetMetricsResources returns all Kubernetes resources for the metrics component.
 func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructured.UnstructuredList, error) {
+	plan, err := m.deploymentPlan(ctx)
+	if err != nil {
+		return nil, errors.Wrapf(err, "plan metrics resources for cluster %s", m.cluster.Metadata.Name)
+	}
+
 	variables := m.buildManifestVariables()
-	variables.EnableVMAgent = util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL)
-
-	enableKubeStateMetrics, err := m.supportsKubeStateMetrics()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to check kube-state-metrics support for cluster %s", m.cluster.Metadata.Name)
-	}
-
-	enableManagedMetricsExporters, err := m.supportsManagedMetricsExporters()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to check managed metrics exporter support for cluster %s", m.cluster.Metadata.Name)
-	}
-
-	variables.EnableKubeStateMetrics = enableKubeStateMetrics
-	variables.EnableNodeExporter = enableManagedMetricsExporters
-	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
-
-	acceleratorPlans := []metricsAcceleratorPlan(nil)
-	acceleratorExporterTargets := []metricsconfig.Target(nil)
-	virtualizationTargets := []metricsconfig.Target(nil)
-	virtualizationEnabled := m.cluster.Spec.AcceleratorVirtualizationEnabled()
-	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
-
-	if enableManagedMetricsExporters || virtualizationEnabled || external {
-		acceleratorPlans, err = m.planAcceleratorExporters(ctx)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
-		}
-
-		acceleratorExporterTargets = m.acceleratorExporterScrapeTargets(acceleratorPlans)
-
-		if virtualizationEnabled {
-			virtualizationTargets = m.virtualizationMetricsScrapeTargets(acceleratorPlans)
-		}
-
-		if enableManagedMetricsExporters && !external {
-			variables.AcceleratorExporters = managedAcceleratorExporters(acceleratorPlans)
-		}
-	}
-
-	if variables.EnableNeutreeNodeAgentMetrics {
-		variables.ScrapeTargets = append(variables.ScrapeTargets, m.nodeAgentScrapeTargets(variables.NeutreeNodeAgentMetricsName)...)
-	}
-
-	variables.ScrapeTargets = append(variables.ScrapeTargets, acceleratorExporterTargets...)
-	variables.ScrapeTargets = append(variables.ScrapeTargets, virtualizationTargets...)
+	variables.EnableVMAgent = plan.VMAgent
+	variables.EnableKubeStateMetrics = plan.KubeStateMetrics
+	variables.EnableNodeExporter = plan.NodeExporter
+	variables.EnableNeutreeNodeAgentMetrics = plan.LegacyNodeAgent != ""
+	variables.NeutreeNodeAgentMetricsName = plan.LegacyNodeAgent
+	variables.AcceleratorExporters = plan.Exporters
+	variables.ScrapeTargets = append(variables.ScrapeTargets, m.nodeAgentScrapeTargets(plan.LegacyNodeAgent)...)
+	variables.ScrapeTargets = append(variables.ScrapeTargets, plan.ExporterTargets...)
+	variables.ScrapeTargets = append(variables.ScrapeTargets, plan.VirtualizationTargets...)
 
 	if m.metricsTargets != nil {
 		snapshot, err := m.metricsTargets.Snapshot()
@@ -74,9 +43,17 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableNeutreeNodeAgentMetrics {
-		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), acceleratorPlans)
+		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), plan.Accelerators)
 		if err != nil {
 			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
+		}
+
+		if len(m.excludedAccelerators) > 0 && len(plan.Accelerators) > 0 && len(nodeAgent.NodeSelector) == 0 {
+			if plan.Accelerators[0].Exporter == nil || len(plan.Accelerators[0].Exporter.NodeSelector) == 0 {
+				return nil, errors.Errorf("legacy accelerator %s has no dedicated node scope", plan.Accelerators[0].AcceleratorType)
+			}
+
+			nodeAgent.NodeSelector = cloneStringMap(plan.Accelerators[0].Exporter.NodeSelector)
 		}
 
 		variables.NodeAgent = nodeAgent
@@ -114,6 +91,13 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	return objs, nil
 }
 
+// GetAcceleratorResources renders only the NodeAgent and accelerator exporter
+// resources for an operator-owned accelerator. Generic vmagent, node exporter,
+// and kube-state-metrics resources remain owned by MetricsComponent.
+func (m *MetricsComponent) GetAcceleratorResources(ctx context.Context, acceleratorType string) (*unstructured.UnstructuredList, error) {
+	return m.WithAcceleratorOnly(acceleratorType).GetMetricsResources(ctx)
+}
+
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
 	if m == nil || m.cluster == nil || m.cluster.Spec == nil {
 		return v1.ClusterAcceleratorExporterModeManaged
@@ -129,6 +113,13 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to get metrics resources for cluster %s", m.cluster.Metadata.Name)
 	}
 
+	labels := m.resourceLabels()
+	if err := acceleratoroperator.ReleaseOwnedResources(
+		ctx, m.ctrlClient, m.namespace, m.cluster, "metrics", m.acceleratorOperators, m.excludedAccelerators, labels,
+	); err != nil {
+		return errors.Wrap(err, "failed to transfer operator resource ownership")
+	}
+
 	applier := deploy.NewKubernetesDeployer(
 		m.ctrlClient,
 		m.namespace,
@@ -136,12 +127,7 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 		"metrics",               // componentName
 	).
 		WithNewObjects(objs).
-		WithLabels(map[string]string{
-			v1.NeutreeClusterLabelKey:          m.cluster.Metadata.Name,
-			v1.NeutreeClusterWorkspaceLabelKey: m.cluster.Metadata.Workspace,
-			v1.LabelManagedBy:                  v1.LabelManagedByValue,
-			v1.NeutreeServingVersionLabel:      m.cluster.Spec.Version,
-		}).
+		WithLabels(labels).
 		WithLogger(m.logger)
 
 	changedCount, err := applier.Apply(ctx)
@@ -158,6 +144,12 @@ func (m *MetricsComponent) ApplyResources(ctx context.Context) error {
 
 // DeleteResources deletes all metrics resources from the cluster
 func (m *MetricsComponent) DeleteResources(ctx context.Context) (bool, error) {
+	if err := acceleratoroperator.ReleaseOwnedResources(
+		ctx, m.ctrlClient, m.namespace, m.cluster, "metrics", m.acceleratorOperators, m.excludedAccelerators, m.resourceLabels(),
+	); err != nil {
+		return false, errors.Wrap(err, "failed to transfer operator resource ownership")
+	}
+
 	applier := deploy.NewKubernetesDeployer(
 		m.ctrlClient,
 		m.namespace,
@@ -175,4 +167,13 @@ func (m *MetricsComponent) DeleteResources(ctx context.Context) (bool, error) {
 	}
 
 	return deleted, nil
+}
+
+func (m *MetricsComponent) resourceLabels() map[string]string {
+	return map[string]string{
+		v1.NeutreeClusterLabelKey:          m.cluster.Metadata.Name,
+		v1.NeutreeClusterWorkspaceLabelKey: m.cluster.Metadata.Workspace,
+		v1.LabelManagedBy:                  v1.LabelManagedByValue,
+		v1.NeutreeServingVersionLabel:      m.cluster.Spec.Version,
+	}
 }

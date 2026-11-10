@@ -4,6 +4,7 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	sharedhami "github.com/neutree-ai/neutree/internal/component/hami"
 )
 
 const (
@@ -12,11 +13,11 @@ const (
 	SchedulerName             = "hami-scheduler"
 	DevicePluginDaemonSetName = "hami-device-plugin"
 	MonitorServiceName        = "hami-device-plugin-monitor"
-	WebhookName               = "hami-webhook"
+	WebhookName               = sharedhami.WebhookName
 	TLSSecretName             = "hami-scheduler-tls" //nolint:gosec
 
-	ManagedComponentLabelKey   = "neutree.ai/component"
-	ManagedComponentLabelValue = "hami"
+	ManagedComponentLabelKey   = sharedhami.ManagedComponentLabelKey
+	ManagedComponentLabelValue = sharedhami.ManagedComponentLabelValue
 
 	CACertificateYears           = 10
 	ServingCertificateYears      = 1

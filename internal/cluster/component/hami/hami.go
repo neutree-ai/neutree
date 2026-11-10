@@ -10,25 +10,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type HAMiComponent struct {
-	cluster         *v1.Cluster
-	namespace       string
-	imagePrefix     string
-	imagePullSecret string
-	config          v1.KubernetesClusterConfig
-	ctrlClient      client.Client
-	pluginProvider  plugin.AcceleratorPluginProvider
-	logger          klog.Logger
+	cluster              *v1.Cluster
+	namespace            string
+	imagePrefix          string
+	imagePullSecret      string
+	config               v1.KubernetesClusterConfig
+	ctrlClient           client.Client
+	pluginProvider       accelerator.PluginProvider
+	excludedAccelerators map[string]struct{}
+	externalDevicePlugin bool
+	logger               klog.Logger
 }
 
 func NewHAMiComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client,
-	providers ...plugin.AcceleratorPluginProvider) *HAMiComponent {
-	var pluginProvider plugin.AcceleratorPluginProvider
+	providers ...accelerator.PluginProvider) *HAMiComponent {
+	var pluginProvider accelerator.PluginProvider
 	if len(providers) > 0 {
 		pluginProvider = providers[0]
 	}
@@ -46,6 +48,23 @@ func NewHAMiComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecr
 			"component", ComponentName,
 		),
 	}
+}
+
+// WithExcludedAccelerators keeps the legacy HAMi path away from accelerator
+// types owned by an AcceleratorOperator.
+func (h *HAMiComponent) WithExcludedAccelerators(accelerators map[string]struct{}) *HAMiComponent {
+	h.excludedAccelerators = accelerators
+	h.externalDevicePlugin = len(accelerators) > 0
+
+	return h
+}
+
+// WithExternalDevicePlugin keeps Hami's control plane while handing the
+// accelerator device-plugin DaemonSet to an AcceleratorOperator.
+func (h *HAMiComponent) WithExternalDevicePlugin() *HAMiComponent {
+	h.externalDevicePlugin = true
+
+	return h
 }
 
 func (h *HAMiComponent) Reconcile() error {
@@ -109,16 +128,6 @@ func (h *HAMiComponent) Reconcile() error {
 func (h *HAMiComponent) Delete() error {
 	ownsNodeScope := h.ownsNodeScope()
 
-	// Remove the cluster-wide scheduling scope before deleting HAMi Pods. A
-	// force delete can remove the Neutree cluster record while Kubernetes
-	// resources are still terminating, so delaying scope cleanup until every
-	// manifest is gone can leave stale vGPU labels behind.
-	if ownsNodeScope {
-		if err := h.DisableNodeScope(context.Background()); err != nil {
-			return errors.Wrap(err, "failed to disable HAMi node scope")
-		}
-	}
-
 	deleted, err := h.DeleteResources(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "failed to delete HAMi resources")
@@ -126,6 +135,13 @@ func (h *HAMiComponent) Delete() error {
 
 	if !deleted {
 		return errors.New("HAMi resources are not fully deleted, please wait")
+	}
+
+	// Stop all HAMi writers before removing their node scope and annotations.
+	if ownsNodeScope {
+		if err := h.DisableNodeScope(context.Background()); err != nil {
+			return errors.Wrap(err, "failed to disable HAMi node scope")
+		}
 	}
 
 	if err := h.CleanupTLS(context.Background()); err != nil {
@@ -201,6 +217,10 @@ func (h *HAMiComponent) hasStatus() bool {
 }
 
 func (h *HAMiComponent) ownsNodeScope() bool {
+	if h.externalDevicePlugin {
+		return false
+	}
+
 	return h.hasStatus() || (h.cluster.Spec != nil && h.cluster.Spec.AcceleratorVirtualizationEnabled())
 }
 

@@ -3,6 +3,7 @@ package metrics
 import "github.com/neutree-ai/neutree/internal/component"
 
 const (
+	daemonSetKind               = "DaemonSet"
 	nodeExporterDaemonSetName   = "neutree-node-exporter"
 	nodeExporterPort            = 19100
 	neutreeNodeAgentMetricsName = "neutree-node-agent"

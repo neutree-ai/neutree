@@ -33,6 +33,10 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorPlan, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
+		if _, excluded := m.excludedAccelerators[acceleratorType]; excluded {
+			continue
+		}
+
 		plan, ok := m.buildAcceleratorPlan(ctx, acceleratorType)
 		if ok {
 			candidates = append(candidates, plan)

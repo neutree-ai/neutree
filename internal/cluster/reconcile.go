@@ -11,10 +11,12 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -51,6 +53,8 @@ type ReconcileContext struct {
 
 	// native kubernetes cluster specific fields
 	kubernetesClusterConfig *v1.KubernetesClusterConfig
+	metricsTargets          metricsconfig.Registry
+	acceleratorOperators    map[string]acceleratoroperator.AcceleratorOperator
 
 	logger klog.Logger
 }

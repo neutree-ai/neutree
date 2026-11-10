@@ -3,9 +3,10 @@ package metrics
 import (
 	"context"
 	"encoding/json"
-	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

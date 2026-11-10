@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.openly.dev/pointy"
@@ -14,6 +12,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 )
 
 func readyMetricsDeployment(name string) *appsv1.Deployment {

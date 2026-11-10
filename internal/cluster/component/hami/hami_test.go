@@ -184,6 +184,56 @@ data:
 	assert.NotContains(t, string(manifest), ownerResourceName)
 }
 
+func TestHAMiControlPlanePreservesTransferredDevicePlugin(t *testing.T) {
+	ctx := context.Background()
+	cluster := newTestCluster()
+	fakeClient := &hamiFakeApplyClient{Client: newHAMiFakeClient(t, newHAMiNode("gpu-1", nil))}
+	component := NewHAMiComponent(cluster, "neutree-system", "docker.io", "",
+		v1.KubernetesClusterConfig{}, fakeClient, newTestPluginProvider("gpu-1"))
+	plan := nvidiaDevicePluginNodeScopePlan()
+	oldResources, err := component.renderResources(plan)
+	require.NoError(t, err)
+	require.NoError(t, component.ApplyResources(ctx, plan))
+
+	var claimed []unstructured.Unstructured
+	for _, object := range oldResources.Items {
+		if object.GetName() != DevicePluginDaemonSetName && object.GetName() != DevicePluginDaemonSetName+"-monitor" {
+			continue
+		}
+		if object.GetKind() == "Service" {
+			continue
+		}
+
+		live := object.DeepCopy()
+		require.NoError(t, fakeClient.Get(ctx, client.ObjectKeyFromObject(live), live))
+		labels := live.GetLabels()
+		labels["neutree.ai/accelerator-operator"] = "nvidia"
+		labels["neutree.ai/accelerator-deployment-mode"] = "operator"
+		live.SetLabels(labels)
+		require.NoError(t, fakeClient.Update(ctx, live))
+		claimed = append(claimed, *live)
+	}
+	require.Len(t, claimed, 5)
+
+	deployment := &appsv1.Deployment{}
+	require.NoError(t, fakeClient.Get(ctx, client.ObjectKey{Namespace: "neutree-system", Name: SchedulerName}, deployment))
+	deployment.Status = newHAMiReadyDeployment("neutree-system").Status
+	require.NoError(t, fakeClient.Status().Update(ctx, deployment))
+	component.WithExternalDevicePlugin()
+	require.NoError(t, component.Reconcile())
+	require.NoError(t, component.UpdateStatus(ctx))
+	require.Equal(t, v1.ComponentPhaseReady, cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Phase)
+	_, err = component.DeleteResources(ctx)
+	require.NoError(t, err)
+
+	for _, object := range claimed {
+		live := object.DeepCopy()
+		require.NoError(t, fakeClient.Get(ctx, client.ObjectKeyFromObject(live), live))
+		require.Nil(t, live.GetDeletionTimestamp(), "control-plane lifecycle must preserve %s/%s", live.GetKind(), live.GetName())
+		require.Equal(t, "nvidia", live.GetLabels()["neutree.ai/accelerator-operator"])
+	}
+}
+
 func TestHAMiComponentResourcesRejectInvalidOwnerDevicePluginTemplate(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
@@ -1296,6 +1346,7 @@ func TestHAMiChartDeviceConfigContent(t *testing.T) {
 				assert.Equal(t, testCase.content, strings.TrimSpace(content))
 			} else {
 				assert.Contains(t, content, "enableNumaTopology: false")
+				assert.Contains(t, content, "deviceSplitCount: 10")
 				assert.Contains(t, content, "migProfileAllowlist:")
 				assert.NotContains(t, content, "knownMigGeometries:")
 			}

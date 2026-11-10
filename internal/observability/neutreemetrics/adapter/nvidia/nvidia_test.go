@@ -300,7 +300,7 @@ func TestNvidiaAdapterBuildsVirtualizationUsageFromRawEvidence(t *testing.T) {
 			Up: true,
 			Text: `
 	hami_vgpu_memory_used_bytes{namespace="default",pod="chat-a",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a"} 4294967296
-	hami_container_device_utilization_ratio{namespace="default",pod="chat-a",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a"} 75
+	hami_container_device_utilization_ratio{namespace="default",pod="chat-a",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a"} 0.75
 			`,
 		},
 	})

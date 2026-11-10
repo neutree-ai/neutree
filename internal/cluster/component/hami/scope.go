@@ -27,6 +27,14 @@ var hamiNodeAnnotations = []string{
 }
 
 func (h *HAMiComponent) ReconcileNodeScope(ctx context.Context) (NodeScopePlan, error) {
+	if h.externalDevicePlugin {
+		return NodeScopePlan{}, nil
+	}
+
+	if h.externalDevicePlugin {
+		return NodeScopePlan{}, nil
+	}
+
 	nodeList := &corev1.NodeList{}
 	if err := h.ctrlClient.List(ctx, nodeList); err != nil {
 		return NodeScopePlan{}, errors.Wrap(err, "failed to list nodes")
@@ -60,6 +68,14 @@ func (h *HAMiComponent) ReconcileNodeScope(ctx context.Context) (NodeScopePlan, 
 }
 
 func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
+	if h.externalDevicePlugin {
+		return nil
+	}
+
+	if h.externalDevicePlugin {
+		return nil
+	}
+
 	configs, err := h.resolveVirtualizationConfigs(ctx)
 	if err != nil {
 		return err
@@ -200,6 +216,7 @@ func (h *HAMiComponent) resolveVirtualizationConfigs(
 	configs := make([]*accelerator.VirtualizationConfig, 0)
 
 	for _, acceleratorType := range h.pluginProvider.SupportPlugins() {
+
 		acceleratorPlugin, ok := h.pluginProvider.GetPlugin(acceleratorType)
 		if !ok || acceleratorPlugin == nil {
 			continue

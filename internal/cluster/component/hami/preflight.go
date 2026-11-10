@@ -5,12 +5,10 @@ import (
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
+	sharedhami "github.com/neutree-ai/neutree/internal/component/hami"
 )
 
 func (h *HAMiComponent) Preflight(ctx context.Context) error {
@@ -24,82 +22,11 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 	}
 
 	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(
-		userVirtualizationConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)); err != nil {
+		acceleratoroperator.UserVirtualizationConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)); err != nil {
 		return err
 	}
 
-	if err := h.validateUnmanagedHAMi(ctx); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (h *HAMiComponent) validateUnmanagedHAMi(ctx context.Context) error {
-	// The admission webhook is cluster-scoped and is the singleton that prevents
-	// two Neutree clusters from owning HAMi on the same Kubernetes cluster.
-	for _, check := range h.unmanagedHAMiResourceChecks() {
-		if err := h.validateManagedObject(ctx, check.object, check.key); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-type managedObjectCheck struct {
-	object client.Object
-	key    types.NamespacedName
-}
-
-func (h *HAMiComponent) unmanagedHAMiResourceChecks() []managedObjectCheck {
-	webhook := &unstructured.Unstructured{}
-	webhook.SetAPIVersion("admissionregistration.k8s.io/v1")
-	webhook.SetKind("MutatingWebhookConfiguration")
-
-	return []managedObjectCheck{{
-		object: webhook,
-		key:    types.NamespacedName{Name: WebhookName},
-	}}
-}
-
-func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Object, key types.NamespacedName) error {
-	kind := objectKind(obj)
-
-	if err := h.ctrlClient.Get(ctx, key, obj); err != nil {
-		return clientIgnoreNotFound(err)
-	}
-
-	if obj.GetLabels()[ManagedComponentLabelKey] != ManagedComponentLabelValue {
-		if kind == "MutatingWebhookConfiguration" && key.Name == WebhookName {
-			return errors.New("found existing unmanaged HAMi webhook hami-webhook")
-		}
-
-		return errors.Errorf("found existing unmanaged HAMi resource %s/%s", kind, key.Name)
-	}
-
-	// The HAMi webhook is cluster-scoped and can only be owned by one
-	// Neutree cluster. If it already carries the managed label but belongs
-	// to a different Neutree cluster, reject to prevent duplicate HAMi
-	// deployments on the same underlying Kubernetes cluster.
-	if kind == "MutatingWebhookConfiguration" && key.Name == WebhookName {
-		labels := obj.GetLabels()
-		if labels[v1.NeutreeClusterWorkspaceLabelKey] != h.cluster.Metadata.Workspace ||
-			labels[v1.NeutreeClusterLabelKey] != h.cluster.Metadata.Name {
-			return errors.New(
-				"found existing HAMi webhook managed by another Neutree cluster")
-		}
-	}
-
-	return nil
-}
-
-func objectKind(obj client.Object) string {
-	if kind := obj.GetObjectKind().GroupVersionKind().Kind; kind != "" {
-		return kind
-	}
-
-	return "Object"
+	return sharedhami.ValidateWebhookOwnership(ctx, h.ctrlClient, h.cluster)
 }
 
 func clientIgnoreNotFound(err error) error {

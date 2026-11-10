@@ -683,6 +683,7 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
 	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
 		Return(testVirtualizationPlugin{}, true)
+	acceleratorMgr.On("PluginDependencyDeployMode", string(v1.AcceleratorTypeNVIDIAGPU), string(v1.KubernetesClusterType)).Return(plugin.DependencyDeployModeLegacy)
 	reconciler := &NativeKubernetesClusterReconciler{
 		acceleratorMgr: acceleratorMgr,
 	}
@@ -758,6 +759,7 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScopeFromSt
 	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
 	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
 		Return(testVirtualizationPlugin{}, true)
+	acceleratorMgr.On("PluginDependencyDeployMode", string(v1.AcceleratorTypeNVIDIAGPU), string(v1.KubernetesClusterType)).Return(plugin.DependencyDeployModeLegacy)
 	reconciler := &NativeKubernetesClusterReconciler{
 		acceleratorMgr: acceleratorMgr,
 	}

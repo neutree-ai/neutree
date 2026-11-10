@@ -8,7 +8,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -74,10 +73,15 @@ func (m MetricsStatus) Ready() bool {
 
 // CheckResourcesStatus checks the status of all metrics resources
 func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsStatus, error) {
-	status := &MetricsStatus{
-		VMAgentRequired: util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL),
-		Errors:          []string{},
+	status := &MetricsStatus{Errors: []string{}}
+	plan, err := m.deploymentPlan(ctx)
+
+	if err != nil {
+		status.Errors = append(status.Errors, fmt.Sprintf("metrics resource plan failed: %v", err))
+		return status, nil
 	}
+
+	status.VMAgentRequired = plan.VMAgent
 
 	if status.VMAgentRequired {
 		deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
@@ -95,16 +99,10 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		}
 	}
 
-	nodeExporterRequired, err := m.supportsManagedMetricsExporters()
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("managed metrics exporter support check failed: %v", err))
-		return status, nil
-	}
+	status.NodeExporterRequired = plan.NodeExporter
+	status.NeutreeNodeAgentMetricsRequired = len(plan.nodeAgentNames()) > 0
 
-	status.NodeExporterRequired = nodeExporterRequired
-	status.NeutreeNodeAgentMetricsRequired = nodeExporterRequired
-
-	if nodeExporterRequired {
+	if plan.NodeExporter {
 		nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("node-exporter daemonset check failed: %v", err))
@@ -113,61 +111,42 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterPodsReady = nodeExporterPodsReady
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
-
-		nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
-		if checkErr != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, checkErr))
-		} else {
-			status.NeutreeNodeAgentMetricsDaemonSetReady = nodeAgentReady
-			status.NeutreeNodeAgentMetricsPodsReady = nodeAgentPodsReady
-			status.NeutreeNodeAgentMetricsTotalPods = nodeAgentTotalPods
-		}
 	}
 
-	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
-	if nodeExporterRequired && !external {
-		acceleratorExporters, err := m.planAcceleratorExporters(ctx)
-		if err != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
-		} else if nodeExporterRequired && !external && len(acceleratorExporters) > 0 {
-			status.AcceleratorExporterRequired = true
-			status.AcceleratorExporterDaemonSetsReady = true
+	if status.NeutreeNodeAgentMetricsRequired {
+		status.NeutreeNodeAgentMetricsDaemonSetReady = true
 
-			for _, plan := range acceleratorExporters {
-				if plan.Exporter == nil {
-					continue
-				}
+		for _, name := range plan.nodeAgentNames() {
+			ready, podsReady, totalPods, checkErr := m.checkDaemonSetStatus(ctx, name)
+			status.NeutreeNodeAgentMetricsDaemonSetReady = status.NeutreeNodeAgentMetricsDaemonSetReady && ready
+			status.NeutreeNodeAgentMetricsPodsReady += podsReady
+			status.NeutreeNodeAgentMetricsTotalPods += totalPods
 
-				exporter := plan.Exporter
-
-				exporterReady, exporterPodsReady, exporterTotalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
-				if checkErr != nil {
-					status.AcceleratorExporterDaemonSetsReady = false
-					status.Errors = append(status.Errors,
-						fmt.Sprintf("accelerator-exporter daemonset %s check failed: %v", exporter.Name, checkErr))
-
-					continue
-				}
-
-				if !exporterReady {
-					status.AcceleratorExporterDaemonSetsReady = false
-				}
-
-				status.AcceleratorExporterPodsReady += exporterPodsReady
-				status.AcceleratorExporterTotalPods += exporterTotalPods
+			if checkErr != nil {
+				status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", name, checkErr))
 			}
 		}
 	}
 
-	kubeStateMetricsRequired, err := m.supportsKubeStateMetrics()
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("kube-state-metrics support check failed: %v", err))
-		return status, nil
+	if len(plan.Exporters) > 0 {
+		status.AcceleratorExporterRequired = true
+		status.AcceleratorExporterDaemonSetsReady = true
+
+		for _, exporter := range plan.Exporters {
+			ready, podsReady, totalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
+			status.AcceleratorExporterDaemonSetsReady = status.AcceleratorExporterDaemonSetsReady && ready
+			status.AcceleratorExporterPodsReady += podsReady
+			status.AcceleratorExporterTotalPods += totalPods
+
+			if checkErr != nil {
+				status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter daemonset %s check failed: %v", exporter.Name, checkErr))
+			}
+		}
 	}
 
-	status.KubeStateMetricsRequired = kubeStateMetricsRequired
+	status.KubeStateMetricsRequired = plan.KubeStateMetrics
 
-	if kubeStateMetricsRequired {
+	if plan.KubeStateMetrics {
 		kubeStateMetricsReady, kubeStateMetricsPodsReady, kubeStateMetricsTotalPods, err := m.checkKubeStateMetricsDeploymentStatus(ctx)
 		kubeStateMetricsDiagnostics := func() []string {
 			return component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())

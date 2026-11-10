@@ -114,7 +114,7 @@ func nvidiaHAMiEndpointReplicaUsagesFromMetrics(
 		case hamiMetricMemoryUsedBytes:
 			usage.MemoryUsedBytes = addFloat64Pointer(usage.MemoryUsedBytes, promtext.Value(sample))
 		case hamiMetricUtilizationRatio:
-			value := promtext.Value(sample) / 100
+			value := normalizedRatio(promtext.Value(sample))
 			usage.UtilizationRatio = maxFloat64Pointer(usage.UtilizationRatio, value)
 		}
 	}
@@ -165,4 +165,12 @@ func maxFloat64Pointer(current *float64, value float64) *float64 {
 
 func float64Pointer(value float64) *float64 {
 	return &value
+}
+
+func normalizedRatio(value float64) float64 {
+	if value > 1 {
+		return value / 100
+	}
+
+	return value
 }
