@@ -330,7 +330,8 @@ $$;
 
 -- By ServiceAccount, name is the SA's id; usage by user leaves SA rows out.
 -- p_direct: with p_org_unit, only usage recorded under that OrgUnit itself;
--- without, only usage recorded under no OrgUnit (global readers only).
+-- without, only usage recorded under no OrgUnit, or under one since deleted
+-- (global readers only).
 DROP FUNCTION IF EXISTS api.get_usage_by_group(DATE, DATE, TEXT, TEXT, TEXT, TEXT, TEXT);
 
 CREATE FUNCTION api.get_usage_by_group(
@@ -434,7 +435,8 @@ BEGIN
           AND (v_units IS NULL OR u.org_unit_id = ANY (v_units))
           AND (v_filter_units IS NULL OR u.org_unit_id = ANY (v_filter_units))
           AND (v_filter_team IS NULL OR v_filter_team = ANY (u.team_ids))
-          AND (NOT v_unassigned OR u.org_unit_id IS NULL)
+          AND (NOT v_unassigned OR u.org_unit_id IS NULL
+               OR NOT EXISTS (SELECT 1 FROM api.org_units ou WHERE ou.id = u.org_unit_id))
     ), expanded AS (
         SELECT g.*, g.user_id::TEXT AS group_name,
                COALESCE(NULLIF((p.metadata).display_name, ''), (p.metadata).name, (p.spec).email) AS group_display

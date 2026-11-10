@@ -955,7 +955,7 @@ func TestSubtreeRead_UsageByDimension(t *testing.T) {
 }
 
 // NEU-904: p_direct reads an OrgUnit without its children, or, with no
-// OrgUnit, the usage recorded under none.
+// OrgUnit, the usage recorded under none or under a deleted one.
 func TestUsageByGroup_Direct(t *testing.T) {
 	db := GetTestDB(t)
 	o := setupOrgTree(t, db)
@@ -976,6 +976,21 @@ func TestUsageByGroup_Direct(t *testing.T) {
 				VALUES (CURRENT_DATE, $1, $2, $3, 'endpoint', 'ep', 'm', 1, $4)`,
 				o.users[r.user], unit, ws, r.tokens)
 		}
+
+		// ux's 3 tokens were recorded under a leaf OrgUnit deleted since.
+		var gone int
+		if err := tx.QueryRow(`
+			INSERT INTO api.org_units (api_version, kind, metadata, spec, path)
+			VALUES ('v1', 'OrgUnit', ROW($1, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
+			        ROW($2, $3, $4)::api.org_unit_spec, '/0/')
+			RETURNING id`, o.unit("gone"), o.source, "ext-"+o.unit("gone"), o.unit("b")).Scan(&gone); err != nil {
+			t.Fatal(err)
+		}
+		mustTxExec(t, tx, `
+			INSERT INTO api.group_daily_usage (usage_date, user_id, org_unit_id, workspace,
+			    endpoint_type, endpoint_name, model_name, requests, total_tokens)
+			VALUES (CURRENT_DATE, $1, $2, $3, 'endpoint', 'ep', 'm', 1, 3)`, o.users["ux"], gone, ws)
+		mustTxExec(t, tx, `DELETE FROM api.org_units WHERE id = $1`, gone)
 	}
 
 	totals := func(who, kind string, orgUnit any) (map[string]int, error) {
@@ -1021,7 +1036,8 @@ func TestUsageByGroup_Direct(t *testing.T) {
 		{"global admin, an OrgUnit itself", admin, "OrgUnit", o.unit("a"), map[string]int{o.unit("a"): 10}},
 		{"department admin, its OrgUnit itself", dadmin, "OrgUnit", o.unit("a"), map[string]int{o.unit("a"): 10}},
 		{"department admin, outside its subtree", dadmin, "User", o.unit("b"), map[string]int{}},
-		{"global admin, users in no OrgUnit", admin, "User", nil, map[string]int{u["nobody"]: 7}},
+		{"global admin, users in no OrgUnit or a deleted one", admin, "User", nil, map[string]int{u["nobody"]: 7, u["ux"]: 3}},
+		{"global admin, the parent of a deleted OrgUnit itself", admin, "OrgUnit", o.unit("b"), map[string]int{o.unit("b"): 80}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := totals(c.who, c.kind, c.orgUnit)
