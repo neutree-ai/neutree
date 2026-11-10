@@ -37,6 +37,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	acceleratorPlans := []metricsAcceleratorPlan(nil)
 	acceleratorExporterTargets := []metricsconfig.Target(nil)
 	virtualizationTargets := []metricsconfig.Target(nil)
+	var nodeAgents []nodeAgentDeploymentPlan
 	virtualizationEnabled := m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
@@ -74,15 +75,12 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableNeutreeNodeAgentMetrics {
-		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), acceleratorPlans)
+		nodeAgents, err = planMetricsNodeAgents(m.cluster.GetVersion(), acceleratorPlans)
 		if err != nil {
 			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
 		}
 
-		variables.NodeAgent = nodeAgent
-		if nodeAgent.Image != "" {
-			variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, nodeAgent.Image)
-		}
+		variables = m.nodeAgentManifestVariables(variables, nodeAgents[0])
 	}
 
 	if variables.EnableVMAgent {
@@ -111,7 +109,32 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		return nil, errors.Wrapf(err, "failed to render metrics manifest for cluster %s", m.cluster.Metadata.Name)
 	}
 
+	for index, plan := range nodeAgents {
+		if index == 0 {
+			continue
+		}
+
+		agentResources, err := util.RenderKubernetesManifest(manifests.NodeAgentTemplate, m.nodeAgentManifestVariables(variables, plan))
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to render node agent %s", plan.Name)
+		}
+
+		objs.Items = append(objs.Items, agentResources.Items...)
+	}
+
 	return objs, nil
+}
+
+func (m *MetricsComponent) nodeAgentManifestVariables(variables MetricsManifestVariables, plan nodeAgentDeploymentPlan) MetricsManifestVariables {
+	variables.NeutreeNodeAgentMetricsName = plan.Name
+	variables.NodeAgent = plan.NodeAgent
+	variables.NodeAgent.InitContainers = rewriteInitContainerImages(plan.NodeAgent.InitContainers, m.imagePrefix)
+
+	if plan.NodeAgent.Image != "" {
+		variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, plan.NodeAgent.Image)
+	}
+
+	return variables
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {

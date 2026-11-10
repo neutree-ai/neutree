@@ -103,6 +103,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 
 	status.NodeExporterRequired = nodeExporterRequired
 	status.NeutreeNodeAgentMetricsRequired = nodeExporterRequired
+	var acceleratorPlans []metricsAcceleratorPlan
 
 	if nodeExporterRequired {
 		nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
@@ -114,26 +115,37 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
 
-		nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
-		if checkErr != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, checkErr))
+		acceleratorPlans, err = m.planAcceleratorExporters(ctx)
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
 		} else {
-			status.NeutreeNodeAgentMetricsDaemonSetReady = nodeAgentReady
-			status.NeutreeNodeAgentMetricsPodsReady = nodeAgentPodsReady
-			status.NeutreeNodeAgentMetricsTotalPods = nodeAgentTotalPods
+			nodeAgents, planErr := planMetricsNodeAgents(m.cluster.GetVersion(), acceleratorPlans)
+			if planErr != nil {
+				status.Errors = append(status.Errors, fmt.Sprintf("node-agent plan failed: %v", planErr))
+			} else {
+				status.NeutreeNodeAgentMetricsDaemonSetReady = true
+
+				for _, plan := range nodeAgents {
+					ready, podsReady, totalPods, checkErr := m.checkDaemonSetStatus(ctx, plan.Name)
+					if checkErr != nil {
+						status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", plan.Name, checkErr))
+					}
+
+					status.NeutreeNodeAgentMetricsDaemonSetReady = status.NeutreeNodeAgentMetricsDaemonSetReady && ready
+					status.NeutreeNodeAgentMetricsPodsReady += podsReady
+					status.NeutreeNodeAgentMetricsTotalPods += totalPods
+				}
+			}
 		}
 	}
 
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 	if nodeExporterRequired && !external {
-		acceleratorExporters, err := m.planAcceleratorExporters(ctx)
-		if err != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
-		} else if nodeExporterRequired && !external && len(acceleratorExporters) > 0 {
+		if len(acceleratorPlans) > 0 {
 			status.AcceleratorExporterRequired = true
 			status.AcceleratorExporterDaemonSetsReady = true
 
-			for _, plan := range acceleratorExporters {
+			for _, plan := range acceleratorPlans {
 				if plan.Exporter == nil {
 					continue
 				}

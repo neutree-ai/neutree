@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +36,11 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorPlan, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
-		plan, ok := m.buildAcceleratorPlan(ctx, acceleratorType)
+		plan, ok, err := m.buildAcceleratorPlan(ctx, acceleratorType)
+		if err != nil {
+			return nil, err
+		}
+
 		if ok {
 			candidates = append(candidates, plan)
 		}
@@ -46,15 +52,20 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 func (m *MetricsComponent) buildAcceleratorPlan(
 	ctx context.Context,
 	acceleratorType string,
-) (metricsAcceleratorPlan, bool) {
+) (metricsAcceleratorPlan, bool, error) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType, Cluster: m.cluster})
 	if err != nil {
+		if errors.Is(err, publicaccelerator.ErrKubernetesProfileResolution) {
+			return metricsAcceleratorPlan{}, false, err
+		}
+
 		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
-		return metricsAcceleratorPlan{}, false
+
+		return metricsAcceleratorPlan{}, false, nil
 	}
 
 	if profile == nil {
-		return metricsAcceleratorPlan{}, false
+		return metricsAcceleratorPlan{}, false, nil
 	}
 
 	plan := metricsAcceleratorPlan{
@@ -73,10 +84,10 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 
 	if profile.MetricsExporter == nil {
 		if !external || plan.ExporterTarget == nil {
-			return metricsAcceleratorPlan{}, false
+			return metricsAcceleratorPlan{}, false, nil
 		}
 
-		return plan, true
+		return plan, true, nil
 	}
 
 	plan.Exporter = buildManagedAcceleratorExporter(
@@ -92,7 +103,7 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		}
 	}
 
-	return plan, true
+	return plan, true, nil
 }
 
 func (m *MetricsComponent) selectClusterAcceleratorPlan(
@@ -156,8 +167,16 @@ func acceleratorExporterMatchesAnyNode(exporter metricsAcceleratorExporter, node
 		return false
 	}
 
+	selector := exporter.NodeSelector
+	if exporter.AcceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() &&
+		selector[publicaccelerator.NvidiaGPUClientLabel] == publicaccelerator.NvidiaGPUDiscoveryLabelValue {
+		// The client gate controls scheduling, not hardware discovery during driver recovery.
+		selector = maps.Clone(exporter.NodeSelector)
+		delete(selector, publicaccelerator.NvidiaGPUClientLabel)
+	}
+
 	for _, node := range nodes {
-		if nodeMatchesSelector(node, exporter.NodeSelector) {
+		if nodeMatchesSelector(node, selector) {
 			return true
 		}
 	}

@@ -55,20 +55,26 @@ func RegisterPlugin(registration PluginRegistration) error {
 	if registration.Plugin == nil || registration.Plugin.Resource() == "" {
 		return fmt.Errorf("accelerator plugin resource is required")
 	}
+
 	pluginMu.Lock()
 	defer pluginMu.Unlock()
+
 	if existing, ok := registrations[registration.Plugin.Resource()]; ok && existing.Plugin != registration.Plugin {
 		return fmt.Errorf("accelerator plugin resource %q is already registered", registration.Plugin.Resource())
 	}
+
 	registrations[registration.Plugin.Resource()] = registration
 	plugins[registration.Plugin.Resource()] = registration.Plugin
+
 	return nil
 }
 
 func GetPluginRegistration(acceleratorType string) (PluginRegistration, bool) {
 	pluginMu.Lock()
 	defer pluginMu.Unlock()
+
 	registration, ok := registrations[acceleratorType]
+
 	return registration, ok
 }
 

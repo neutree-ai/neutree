@@ -61,7 +61,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	require.NoError(t, json.Unmarshal([]byte(profileJSON), profile))
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
 	acceleratorMgr.EXPECT().SupportPlugins().Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.EXPECT().GetAcceleratorProfile(mock.Anything, "vendor_accelerator").Return(profile, nil).Maybe()
+	acceleratorMgr.EXPECT().GetAcceleratorProfile(mock.Anything, metricsProfileInput("vendor_accelerator")).Return(profile, nil).Maybe()
 
 	component := &MetricsComponent{
 		cluster: &v1.Cluster{

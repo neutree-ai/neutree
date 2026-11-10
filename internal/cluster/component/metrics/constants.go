@@ -6,6 +6,7 @@ const (
 	nodeExporterDaemonSetName   = "neutree-node-exporter"
 	nodeExporterPort            = 19100
 	neutreeNodeAgentMetricsName = "neutree-node-agent"
+	cpuNodeAgentMetricsName     = neutreeNodeAgentMetricsName + "-cpu"
 	neutreeNodeAgentImageName   = "neutree/neutree-node-agent"
 	neutreeNodeAgentMetricsPort = 19101
 

@@ -49,6 +49,7 @@ func (p *AMDGPUAcceleratorPlugin) MatchCluster(cluster *v1.Cluster) bool {
 	if cluster == nil || cluster.Spec == nil || cluster.Spec.Config == nil || cluster.Spec.Config.AcceleratorType == nil || *cluster.Spec.Config.AcceleratorType == "" {
 		return true
 	}
+
 	return *cluster.Spec.Config.AcceleratorType == p.Resource()
 }
 

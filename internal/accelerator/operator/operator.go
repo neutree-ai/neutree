@@ -24,15 +24,3 @@ type AcceleratorOperator interface {
 	Status(context.Context, *OperatorContext) (*v1.ComponentStatus, error)
 	Delete(context.Context, *OperatorContext) error
 }
-
-const (
-	NVIDIAAcceleratorType         = "nvidia_gpu"
-	NVIDIAOperatorName            = "nvidia"
-	NVIDIAGPUNodeLabel            = "nvidia.com/gpu.present"
-	NVIDIAGPUNodeValue            = "true"
-	NVIDIAGPUClientLabel          = "nvidia.com/gpu.deploy.client"
-	NVIDIAOperatorOwnerAnnotation = "neutree.ai/accelerator-operator"
-	NVIDIAOperatorOwnerValue      = "nvidia"
-	NVIDIADriverDeployLabel       = "nvidia.com/gpu.deploy.driver"
-	NVIDIAClusterPolicyName       = "cluster-policy"
-)

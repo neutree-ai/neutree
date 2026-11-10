@@ -5,15 +5,19 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func readyMetricsDeployment(name string) *appsv1.Deployment {
@@ -209,28 +213,70 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
 
-func TestCheckResourcesStatusChecksSingleNodeAgent(t *testing.T) {
-	client := fake.NewClientBuilder().WithObjects(
-		readyMetricsDeployment("neutree-kube-state-metrics"),
-		readyMetricsDaemonSet(nodeExporterDaemonSetName, 2),
-		readyMetricsDaemonSet(neutreeNodeAgentMetricsName, 2),
-	).Build()
-	component := &MetricsComponent{
-		ctrlClient: client,
-		namespace:  "default",
-		cluster: &v1.Cluster{
-			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
-			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
-		},
+func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		managed, missingCPU        bool
+		gpuDesired, cpuDesired     int32
+		cpuNotReady, expectedReady bool
+	}{
+		{name: "single legacy agent", gpuDesired: 2, expectedReady: true},
+		{name: "managed mixed nodes", managed: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
+		{name: "managed GPU only", managed: true, gpuDesired: 1, expectedReady: true},
+		{name: "GPU recovery retains CPU coverage", managed: true, cpuDesired: 1, expectedReady: true},
+		{name: "CPU agent missing", managed: true, gpuDesired: 1, missingCPU: true},
+		{name: "CPU agent not ready", managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			objects := []client.Object{
+				readyMetricsDeployment("neutree-kube-state-metrics"),
+				readyMetricsDaemonSet(nodeExporterDaemonSetName, test.gpuDesired+test.cpuDesired),
+				readyMetricsDaemonSet(neutreeNodeAgentMetricsName, test.gpuDesired),
+			}
+			component := &MetricsComponent{
+				namespace: "default",
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+					Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+				},
+			}
+			if test.managed {
+				objects = append(objects, metricsTestNode("gpu", map[string]string{
+					publicaccelerator.NvidiaGPUDiscoveryLabelKey: publicaccelerator.NvidiaGPUDiscoveryLabelValue,
+				}), readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", test.gpuDesired))
+				if !test.missingCPU {
+					cpu := readyMetricsDaemonSet(cpuNodeAgentMetricsName, test.cpuDesired)
+					if test.cpuNotReady {
+						cpu.Status.NumberReady = 0
+					}
+					objects = append(objects, cpu)
+				}
+				manager := acceleratormocks.NewMockManager(t)
+				manager.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()})
+				manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(metricsNvidiaProfile(true), nil)
+				component.acceleratorMgr = manager
+			}
+			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).Build()
+
+			status, err := component.CheckResourcesStatus(context.Background())
+			require.NoError(t, err)
+			assert.True(t, status.NeutreeNodeAgentMetricsRequired)
+			assert.Equal(t, test.expectedReady, status.NeutreeNodeAgentMetricsDaemonSetReady)
+			expectedPods := int(test.gpuDesired + test.cpuDesired)
+			expectedTotal := expectedPods
+			if test.missingCPU || test.cpuNotReady {
+				expectedPods -= int(test.cpuDesired)
+			}
+			if test.missingCPU {
+				expectedTotal -= int(test.cpuDesired)
+			}
+			assert.Equal(t, expectedPods, status.NeutreeNodeAgentMetricsPodsReady)
+			assert.Equal(t, expectedTotal, status.NeutreeNodeAgentMetricsTotalPods)
+			if test.missingCPU {
+				assert.Contains(t, status.Errors[0], cpuNodeAgentMetricsName)
+			}
+		})
 	}
-
-	status, err := component.CheckResourcesStatus(context.Background())
-
-	require.NoError(t, err)
-	assert.True(t, status.NeutreeNodeAgentMetricsRequired)
-	assert.True(t, status.NeutreeNodeAgentMetricsDaemonSetReady)
-	assert.Equal(t, 2, status.NeutreeNodeAgentMetricsPodsReady)
-	assert.Equal(t, 2, status.NeutreeNodeAgentMetricsTotalPods)
 }
 
 func TestCheckResourcesStatusDoesNotRequireVMAgentWithoutValidRemoteWrite(t *testing.T) {
@@ -318,7 +364,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 		ctrlClient:            fakeClient,
 		namespace:             "default",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(),
+		acceleratorMgr:        metricsTestAcceleratorManager(t),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},

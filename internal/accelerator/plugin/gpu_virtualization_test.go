@@ -48,6 +48,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 					"driver": map[string]interface{}{
 						"enabled": true,
 					},
+					"toolkit": map[string]interface{}{"enabled": true},
 					"devicePlugin": map[string]interface{}{
 						"enabled": true,
 					},
@@ -70,11 +71,11 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 			"migStrategy":             "none",
 			"deviceSplitCount":        NvidiaGPUDefaultDeviceSplitCount,
 			"nvidiaDriverRoot":        NvidiaGPUOperatorDriverRoot,
-			"runtimeClassName":        "nvidia",
 			"gpuOperatorToolkitReady": map[string]interface{}{"enabled": true, "hostPath": "/run/nvidia/validations"},
 			"nvidiaNodeSelector": map[string]interface{}{
-				"gpu":                           nil,
-				NvidiaGPUVirtualizationLabelKey: "true",
+				"gpu":                            nil,
+				accelerator.NvidiaGPUClientLabel: "true",
+				NvidiaGPUVirtualizationLabelKey:  "true",
 			},
 		},
 	}, config.ConfigPatch)

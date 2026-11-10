@@ -9,10 +9,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
-type GPUOperatorClusterPolicy struct {
-	Name string
-	Spec map[string]interface{}
-}
+type GPUOperatorClusterPolicy = accelerator.GPUOperatorClusterPolicy
 
 type VirtualizationConfigInput struct {
 	Nodes                      []corev1.Node

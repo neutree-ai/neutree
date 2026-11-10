@@ -1,1 +1,2 @@
 nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless
+docker.io/library/busybox:1.36

@@ -59,8 +59,9 @@ type Manager interface {
 func (a *manager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (acceleratoroperator.AcceleratorOperator, error) {
 	registration, ok := plugin.GetPluginRegistration(acceleratorType)
 	if !ok || registration.KubernetesOperatorFactory == nil {
-		return nil, errors.Errorf("kubernetes operator factory for accelerator %s is not registered", acceleratorType)
+		return nil, nil
 	}
+
 	return registration.KubernetesOperatorFactory(cluster, a)
 }
 
@@ -302,21 +303,16 @@ func (a *manager) GetAcceleratorProfile(
 		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
 	}
 
-	if input.Cluster != nil && hasKubernetesClusterConfig(input.Cluster) {
+	if input.Cluster != nil {
 		if resolver, ok := p.Handle().(publicaccelerator.KubernetesProfileResolver); ok {
 			profile, err = resolver.ResolveKubernetesProfile(ctx, input.Cluster, profile)
 			if err != nil {
-				return nil, errors.Wrapf(err, "resolve Kubernetes accelerator profile from plugin %s failed", p.Resource())
+				return nil, fmt.Errorf("%w from plugin %s: %w", publicaccelerator.ErrKubernetesProfileResolution, p.Resource(), err)
 			}
 		}
 	}
 
 	return profile, nil
-}
-
-func hasKubernetesClusterConfig(cluster *v1.Cluster) bool {
-	return cluster != nil && cluster.Spec != nil && cluster.Spec.Config != nil &&
-		cluster.Spec.Config.KubernetesConfig != nil && cluster.Spec.Config.KubernetesConfig.Kubeconfig != ""
 }
 
 func (a *manager) GetStaticNodeRuntimeConfig(

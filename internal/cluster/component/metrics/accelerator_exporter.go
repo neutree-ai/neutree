@@ -84,7 +84,7 @@ func buildManagedAcceleratorExporter(
 		MetricsPath:      metricsTargetPath(profile.MetricsPath),
 		SecurityContext:  exporterRuntimeSecurityContext(runtime),
 		RuntimeClassName: exporterRuntimeClass(runtime),
-		InitContainers:   append([]corev1.Container(nil), exporterInitContainers(runtime)...),
+		InitContainers:   rewriteInitContainerImages(exporterInitContainers(runtime), imagePrefix),
 		NodeSelector:     exporterRuntimeNodeSelector(runtime),
 		ConfigFileData:   configFileData,
 		ConfigChecksum:   configChecksum,
@@ -97,6 +97,7 @@ func exporterRuntimeClass(runtime *v1.AcceleratorExporterRuntimeProfile) string 
 	if runtime == nil {
 		return ""
 	}
+
 	return runtime.Runtime
 }
 
@@ -104,6 +105,7 @@ func exporterInitContainers(runtime *v1.AcceleratorExporterRuntimeProfile) []cor
 	if runtime == nil {
 		return nil
 	}
+
 	return runtime.InitContainers
 }
 

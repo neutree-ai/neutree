@@ -3,10 +3,8 @@ package plugin
 import (
 	"context"
 	"maps"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -15,8 +13,8 @@ import (
 )
 
 const (
-	nvidiaValidationPath  = "/run/nvidia/validations"
-	nvidiaValidationImage = "busybox:1.36"
+	nvidiaValidationPath  = accelerator.NvidiaValidationPath
+	nvidiaValidationImage = "docker.io/library/busybox:1.36"
 )
 
 // ResolveKubernetesProfile applies the existing GPU Operator runtime gate to
@@ -31,13 +29,21 @@ func (p *GPUAcceleratorPlugin) ResolveKubernetesProfile(ctx context.Context, clu
 		return nil, err
 	}
 
-	policies, err := listGPUOperatorClusterPolicies(ctx, ctrlClient)
+	return resolveNvidiaKubernetesProfile(ctx, ctrlClient, profile)
+}
+
+func resolveNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, profile *v1.AcceleratorProfile) (*v1.AcceleratorProfile, error) {
+	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, reader)
 	if err != nil {
 		return nil, err
 	}
 
-	managed, runtimeClass := nvidiaKubernetesRuntime(policies)
-	containerd, err := nvidiaClusterUsesContainerd(ctx, ctrlClient)
+	managed, runtimeClass, err := accelerator.NvidiaOperatorRuntime(policies)
+	if err != nil {
+		return nil, err
+	}
+
+	containerd, err := nvidiaClusterUsesContainerd(ctx, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +52,7 @@ func (p *GPUAcceleratorPlugin) ResolveKubernetesProfile(ctx context.Context, clu
 	if profile.NodeAgentRuntime != nil {
 		resolved.NodeAgentRuntime = enrichNodeAgentRuntime(profile.NodeAgentRuntime, managed && containerd, runtimeClass, managed)
 	}
+
 	if profile.MetricsExporter != nil && profile.MetricsExporter.Runtime != nil {
 		exporter := *profile.MetricsExporter
 		exporter.Runtime = enrichExporterRuntime(profile.MetricsExporter.Runtime, managed && containerd, runtimeClass, managed)
@@ -55,54 +62,13 @@ func (p *GPUAcceleratorPlugin) ResolveKubernetesProfile(ctx context.Context, clu
 	return &resolved, nil
 }
 
-func nvidiaKubernetesRuntime(policies []GPUOperatorClusterPolicy) (bool, string) {
-	for _, policy := range policies {
-		driver, foundDriver, _ := unstructured.NestedBool(policy.Spec, "driver", "enabled")
-		toolkit, foundToolkit, _ := unstructured.NestedBool(policy.Spec, "toolkit", "enabled")
-		if !foundDriver {
-			driver = true
-		}
-		if !foundToolkit {
-			toolkit = true
-		}
-		if !driver || !toolkit {
-			continue
-		}
-
-		runtimeClass, _, _ := unstructured.NestedString(policy.Spec, "operator", "runtimeClass")
-		if runtimeClass == "" {
-			runtimeClass = "nvidia"
-		}
-
-		return true, runtimeClass
-	}
-
-	return false, ""
-}
-
 func nvidiaClusterUsesContainerd(ctx context.Context, reader client.Reader) (bool, error) {
 	nodes := &corev1.NodeList{}
 	if err := reader.List(ctx, nodes); err != nil {
 		return false, err
 	}
-	if len(nodes.Items) == 0 {
-		return false, nil
-	}
 
-	foundGPU := false
-	for _, node := range nodes.Items {
-		if node.Labels[NvidiaGPUDiscoveryLabelKey] != NvidiaGPUDiscoveryLabelValue {
-			continue
-		}
-		foundGPU = true
-
-		name, _, found := strings.Cut(node.Status.NodeInfo.ContainerRuntimeVersion, "://")
-		if !found || name != "containerd" {
-			return false, nil
-		}
-	}
-
-	return foundGPU, nil
+	return accelerator.NvidiaNodesUseContainerd(nodes.Items), nil
 }
 
 func enrichNodeAgentRuntime(base *v1.NodeAgentRuntimeProfile, useRuntimeClass bool, runtimeClass string, managed bool) *v1.NodeAgentRuntimeProfile {
@@ -112,12 +78,20 @@ func enrichNodeAgentRuntime(base *v1.NodeAgentRuntimeProfile, useRuntimeClass bo
 	resolved.Volumes = append([]v1.ComponentVolume(nil), base.Volumes...)
 	resolved.VolumeMounts = append([]v1.ComponentVolumeMount(nil), base.VolumeMounts...)
 	resolved.InitContainers = append([]corev1.Container(nil), base.InitContainers...)
+
 	if useRuntimeClass {
 		resolved.Runtime = runtimeClass
 	} else {
 		resolved.Runtime = ""
 	}
+
 	if managed {
+		if resolved.NodeSelector == nil {
+			resolved.NodeSelector = map[string]string{}
+		}
+
+		resolved.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
+		resolved.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
 		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts)
 	}
 
@@ -130,12 +104,20 @@ func enrichExporterRuntime(base *v1.AcceleratorExporterRuntimeProfile, useRuntim
 	resolved.Volumes = append([]v1.ComponentVolume(nil), base.Volumes...)
 	resolved.VolumeMounts = append([]v1.ComponentVolumeMount(nil), base.VolumeMounts...)
 	resolved.InitContainers = append([]corev1.Container(nil), base.InitContainers...)
+
 	if useRuntimeClass {
 		resolved.Runtime = runtimeClass
 	} else {
 		resolved.Runtime = ""
 	}
+
 	if managed {
+		if resolved.NodeSelector == nil {
+			resolved.NodeSelector = map[string]string{}
+		}
+
+		resolved.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
+		resolved.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
 		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts)
 	}
 
@@ -147,9 +129,10 @@ func appendToolkitValidation(initContainers *[]corev1.Container, volumes *[]v1.C
 	*initContainers = append(*initContainers, corev1.Container{
 		Name: "toolkit-validation", Image: nvidiaValidationImage,
 		Command:      []string{"sh", "-c"},
-		Args:         []string{"until [ -f " + nvidiaValidationPath + "/toolkit-ready ] && { grep -q '^nvidia ' /proc/modules || [ -e /dev/dxg ]; }; do sleep 5; done"},
+		Args:         []string{"until [ -f " + nvidiaValidationPath + "/toolkit-ready ]; do sleep 5; done"},
 		VolumeMounts: []corev1.VolumeMount{{Name: "nvidia-validations", MountPath: nvidiaValidationPath, ReadOnly: true, MountPropagation: &propagation}},
 	})
+
 	*volumes = append(*volumes, v1.ComponentVolume{
 		Name:     "nvidia-validations",
 		HostPath: &v1.ComponentHostPathVolumeSource{Path: nvidiaValidationPath, Type: v1.ComponentHostPathTypeDirectoryOrCreate},

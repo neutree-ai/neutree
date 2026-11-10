@@ -3,6 +3,7 @@ package accelerator
 
 import (
 	"context"
+	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -13,6 +14,10 @@ import (
 const (
 	InternalPluginType = "internal"
 )
+
+// ErrKubernetesProfileResolution prevents API discovery failures from being
+// treated like an unsupported optional legacy profile.
+var ErrKubernetesProfileResolution = errors.New("resolve Kubernetes accelerator profile")
 
 type Plugin interface {
 	Resource() string
@@ -33,10 +38,12 @@ func PluginMatchesCluster(plugin Plugin, cluster *v1.Cluster) bool {
 	if plugin == nil {
 		return false
 	}
+
 	matcher, ok := plugin.(Matcher)
 	if !ok {
 		return true
 	}
+
 	return matcher.MatchCluster(cluster)
 }
 

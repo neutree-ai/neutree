@@ -81,6 +81,10 @@ spec:
       nodeSelector:
 {{ .NodeAgent.NodeSelector | toYaml | indent 8 }}
 {{ end }}
+{{ if .NodeAgent.Affinity }}
+      affinity:
+{{ .NodeAgent.Affinity | toYaml | indent 8 }}
+{{ end }}
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
@@ -146,3 +150,5 @@ spec:
 {{ .NodeAgent.Volumes | toYaml | indent 6 }}
 {{ end }}
 `
+
+const NodeAgentTemplate = nodeAgentRBACManifestTemplate + nodeAgentDeploymentManifestTemplate

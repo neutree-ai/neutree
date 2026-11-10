@@ -85,21 +85,27 @@ DCGM_FI_DRIVER_VERSION, label, Driver Version.
 `
 	NvidiaGPUMemoryNodeLabelKey      string = "nvidia.com/gpu.memory"
 	NvidiaGPUVirtualizationLabelKey  string = "neutree.ai/nvidia-vgpu-enabled"
-	NvidiaGPUDiscoveryLabelKey       string = "nvidia.com/gpu.present"
-	NvidiaGPUDiscoveryLabelValue     string = "true"
+	NvidiaGPUDiscoveryLabelKey       string = accelerator.NvidiaGPUDiscoveryLabelKey
+	NvidiaGPUDiscoveryLabelValue     string = accelerator.NvidiaGPUDiscoveryLabelValue
 	NvidiaGPUTopologyAwarePolicy     string = "topology-aware"
 	NvidiaGPUDefaultDeviceSplitCount int    = 100
-	NvidiaGPUOperatorDriverRoot      string = "/run/nvidia/driver"
+	NvidiaGPUOperatorDriverRoot      string = accelerator.NvidiaGPUOperatorDriverRoot
 )
 
 func init() { //nolint:gochecknoinits
 	gpuPlugin := &GPUAcceleratorPlugin{
 		executor: &command.OSExecutor{},
 	}
-	registerAcceleratorPlugin(gpuPlugin)
-	_ = RegisterPlugin(PluginRegistration{Plugin: gpuPlugin, KubernetesOperatorFactory: func(_ *v1.Cluster, _ accelerator.PluginProvider) (operator.AcceleratorOperator, error) {
-		return operator.NewNvidiaAcceleratorOperator(), nil
-	}})
+
+	registration := PluginRegistration{
+		Plugin: gpuPlugin,
+		KubernetesOperatorFactory: func(_ *v1.Cluster, _ accelerator.PluginProvider) (operator.AcceleratorOperator, error) {
+			return operator.NewNvidiaAcceleratorOperator(), nil
+		},
+	}
+	if err := RegisterPlugin(registration); err != nil {
+		panic(err)
+	}
 }
 
 type GPUAcceleratorPlugin struct {
@@ -327,6 +333,7 @@ func (p *GPUAcceleratorPlugin) MatchCluster(cluster *v1.Cluster) bool {
 	if cluster == nil || cluster.Spec == nil || cluster.Spec.Config == nil || cluster.Spec.Config.AcceleratorType == nil || *cluster.Spec.Config.AcceleratorType == "" {
 		return true
 	}
+
 	return *cluster.Spec.Config.AcceleratorType == p.Resource()
 }
 

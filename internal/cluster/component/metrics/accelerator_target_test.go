@@ -3,9 +3,10 @@ package metrics
 import (
 	"context"
 	"encoding/json"
-	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -21,7 +22,7 @@ import (
 func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -92,7 +93,7 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"other_accelerator", v1.AcceleratorTypeNVIDIAGPU.String()})
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(&v1.AcceleratorProfile{
 		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/nvidia-node-agent:v1",
@@ -110,7 +111,7 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 			Port:        9400,
 		},
 	}, nil)
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "other_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("other_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "other_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/other-node-agent:v1",
@@ -169,7 +170,7 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -229,7 +230,7 @@ func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T
 func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmpty(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -315,7 +316,7 @@ func containsEnv(env []corev1.EnvVar, name string) bool {
 func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		MetricsExporter: &v1.AcceleratorExporterProfile{
 			Name:  "vendor-exporter",

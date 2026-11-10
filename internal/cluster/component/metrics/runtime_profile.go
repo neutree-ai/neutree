@@ -4,6 +4,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 // buildComponentVolumes projects trusted management-plane profile fields into
@@ -109,4 +110,13 @@ func runtimeSecurityContext(privileged bool, capabilities *corev1.Capabilities) 
 	}
 
 	return securityContext
+}
+
+func rewriteInitContainerImages(containers []corev1.Container, imagePrefix string) []corev1.Container {
+	rewritten := append([]corev1.Container(nil), containers...)
+	for i := range rewritten {
+		rewritten[i].Image = util.RewriteImageRef(imagePrefix, rewritten[i].Image)
+	}
+
+	return rewritten
 }

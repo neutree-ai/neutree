@@ -170,9 +170,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
-	if err := c.reconcileAcceleratorOperators(reconcileCtx); err != nil {
-		return err
-	}
+	operatorErr := c.reconcileAcceleratorOperators(reconcileCtx)
 
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
@@ -184,6 +182,9 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileDeleteComps = append(reconcileDeleteComps, needDeleteAdditionalComps...)
 
 	var errs []error
+	if operatorErr != nil {
+		errs = append(errs, operatorErr)
+	}
 
 	for _, comp := range reconcileComps {
 		err = comp.Reconcile()
@@ -222,11 +223,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 // workload deployment and deletion.
 func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconcileCtx *ReconcileContext) error {
 	reconcileCtx.acceleratorOperators = map[string]acceleratoroperator.AcceleratorOperator{}
+
 	if c.acceleratorMgr == nil {
 		return nil
 	}
 
 	candidates := map[string]acceleratoroperator.AcceleratorOperator{}
+
 	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
 		plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
 		if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
@@ -235,34 +238,50 @@ func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconc
 
 		acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
 		if err != nil {
-			continue // Plugins without an Operator retain the Legacy path.
+			return errors.Wrapf(err, "create accelerator operator %s", acceleratorType)
 		}
+
+		if acceleratorOperator == nil {
+			continue // Plugins without a factory retain the Legacy path.
+		}
+
 		candidates[acceleratorType] = acceleratorOperator
 	}
+
 	if len(candidates) > 1 {
 		return errors.Errorf("multiple accelerator operators match cluster: %d", len(candidates))
 	}
 
 	var errs []error
+
 	for acceleratorType, acceleratorOperator := range candidates {
 		reconcileCtx.acceleratorOperators[acceleratorType] = acceleratorOperator
 		operatorContext := &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}
+
 		if _, err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {
 			errs = append(errs, errors.Wrapf(err, "reconcile accelerator operator %s", acceleratorType))
 			continue
 		}
+
 		status, err := acceleratorOperator.Status(reconcileCtx.Ctx, operatorContext)
 		if err != nil {
 			errs = append(errs, errors.Wrapf(err, "status accelerator operator %s", acceleratorType))
 			continue
 		}
+
 		if reconcileCtx.Cluster.Status == nil {
 			reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
 		}
+
 		if reconcileCtx.Cluster.Status.ComponentStatus == nil {
 			reconcileCtx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
 		}
-		reconcileCtx.Cluster.Status.ComponentStatus["accelerator-operator/"+acceleratorType] = status
+
+		reconcileCtx.Cluster.Status.ComponentStatus["accelerator-operator/"+acceleratorOperator.Name()] = status
+
+		if status.Phase != v1.ComponentPhaseReady {
+			errs = append(errs, errors.Errorf("accelerator operator %s is not ready: %s: %s", acceleratorOperator.Name(), status.Reason, status.Message))
+		}
 	}
 
 	return utilerrors.NewAggregate(errs)
@@ -386,11 +405,21 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 			if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
 				continue
 			}
+
 			acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
 			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "create accelerator operator %s for deletion", acceleratorType))
 				continue
 			}
-			if err := acceleratorOperator.Delete(reconcileCtx.Ctx, &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}); err != nil {
+
+			if acceleratorOperator == nil {
+				continue
+			}
+
+			operatorContext := &acceleratoroperator.OperatorContext{
+				Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace,
+			}
+			if err := acceleratorOperator.Delete(reconcileCtx.Ctx, operatorContext); err != nil {
 				errs = append(errs, errors.Wrapf(err, "failed to delete accelerator operator %s state", acceleratorType))
 			}
 		}
