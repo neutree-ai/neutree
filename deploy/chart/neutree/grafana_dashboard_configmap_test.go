@@ -28,6 +28,7 @@ func TestGrafanaDashboardConfigMaps(t *testing.T) {
 	resources := renderChart(t, nil)
 	dashboardConfigMaps, grafana := renderedGrafanaDashboards(t, resources.Items)
 	require.Contains(t, dashboardConfigMaps, longestGrafanaDashboardConfigMap)
+	require.Contains(t, dashboardConfigMaps, "router-grafana-dashboard")
 	projectedConfigMaps := projectedDashboardConfigMaps(t, *grafana)
 	require.Equal(t, dashboardConfigMaps, projectedConfigMaps)
 	assertDashboardVolumeMount(t, *grafana)

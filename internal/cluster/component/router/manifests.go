@@ -1,7 +1,10 @@
 package router
 
 import (
+	"strconv"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -101,6 +104,9 @@ spec:
         - "session_id"
         - --service-discovery
         - k8s
+        {{- range .ProxyArgs }}
+        - {{ . | quote }}
+        {{- end }}
         {{- if .Resources }}
         resources:
           limits:
@@ -157,6 +163,7 @@ type RouteManifestVariables struct {
 	Replicas        int
 	Resources       map[string]string
 	AccessMode      string
+	ProxyArgs       []string
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -204,5 +211,33 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 		Replicas:        replicas,
 		Resources:       resources,
 		AccessMode:      string(accessMode),
+		ProxyArgs:       routerProxyArgs(r.config.Router, routerVersion),
 	}
+}
+
+func routerProxyArgs(config v1.RouterSpec, version string) []string {
+	supported, err := clusterversion.SupportsRouterClientConfig(version)
+	if err != nil || !supported {
+		return nil
+	}
+
+	var args []string
+	if config.MaxConnectionsPerBackend != nil {
+		args = append(args, "--max-connections-per-backend", strconv.Itoa(*config.MaxConnectionsPerBackend))
+	}
+
+	for _, timeout := range []struct {
+		flag  string
+		value *float64
+	}{
+		{flag: "--connect-timeout-seconds", value: config.ConnectTimeoutSeconds},
+		{flag: "--sock-connect-timeout-seconds", value: config.SockConnectTimeoutSeconds},
+		{flag: "--sock-read-timeout-seconds", value: config.SockReadTimeoutSeconds},
+	} {
+		if timeout.value != nil {
+			args = append(args, timeout.flag, strconv.FormatFloat(*timeout.value, 'f', -1, 64))
+		}
+	}
+
+	return args
 }

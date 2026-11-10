@@ -126,6 +126,13 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 			}
 		}
 
+		if validationErr := validateClusterRouterProxyInput(input); validationErr != nil {
+			c.JSON(validationErrStatus(validationErr), validationErr)
+			c.Abort()
+
+			return
+		}
+
 		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
