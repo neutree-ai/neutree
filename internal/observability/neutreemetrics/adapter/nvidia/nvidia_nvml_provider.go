@@ -67,10 +67,7 @@ func (p nvidiaNVMLHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([
 
 	count, ok := client.DeviceCount()
 	if !ok {
-		err := fmt.Errorf("nvmlDeviceGetCount failed")
-		klog.Warning(err)
-
-		return nil, err
+		return nil, fmt.Errorf("nvmlDeviceGetCount failed")
 	}
 
 	driverVersion, driverOK := client.DriverVersion()
