@@ -466,13 +466,16 @@ func TestSubjectPolicy_Read(t *testing.T) {
 			kind, name string
 			limit      sql.NullInt64
 			effective  sql.NullInt64
+			left       sql.NullInt64
+			hasID      bool
 		}
 
 		read := func(reader, kind, scope string) ([]row, error) {
 			var rows []row
 
 			err := asUser(t, db, reader, nil, func(tx *sql.Tx) error {
-				rs, err := tx.Query(`SELECT subject_kind, subject_name, (token_quota ->> 'limit')::bigint, effective_remaining
+				rs, err := tx.Query(`SELECT subject_kind, subject_name, (token_quota ->> 'limit')::bigint, effective_remaining,
+					(pool ->> 'remaining')::bigint, id IS NOT NULL
 					FROM api.get_scope_subject_policies($1, $2)`, kind, scope)
 				if err != nil {
 					return err
@@ -481,7 +484,7 @@ func TestSubjectPolicy_Read(t *testing.T) {
 
 				for rs.Next() {
 					var r row
-					if err := rs.Scan(&r.kind, &r.name, &r.limit, &r.effective); err != nil {
+					if err := rs.Scan(&r.kind, &r.name, &r.limit, &r.effective, &r.left, &r.hasID); err != nil {
 						return err
 					}
 
@@ -509,7 +512,8 @@ func TestSubjectPolicy_Read(t *testing.T) {
 
 		for _, r := range rows {
 			w := want[r.name]
-			if r.kind != w.kind || r.limit != w.limit || r.effective != w.effective {
+			// No usage yet: the pool of the scope's policy is whole.
+			if r.kind != w.kind || r.limit != w.limit || r.effective != w.effective || r.left != w.limit || !r.hasID {
 				t.Errorf("%s: %+v, want %+v", r.name, r, w)
 			}
 		}

@@ -7,10 +7,8 @@ import (
 )
 
 // GroupPolicy holds the model access rules of one group (a Team or an
-// OrgUnit), or of one user or ServiceAccount in one scope. A group has at most
-// one; a user or ServiceAccount at most one per scope. Group rules bind every
-// member, also while the group is Inactive; a subject policy binds its
-// subject while the subject is in its scope.
+// OrgUnit), or of one user or ServiceAccount in one scope. A user or
+// ServiceAccount policy only narrows what the others allow.
 type GroupPolicy struct {
 	ID         int              `json:"id,omitempty"`
 	APIVersion string           `json:"api_version,omitempty"`

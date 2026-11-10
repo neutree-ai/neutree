@@ -127,7 +127,9 @@ $$;
 
 -- The group rules for a user in a workspace. allowed_models NULL = no allow
 -- rule; otherwise the allowed names with denied ones already removed.
-CREATE OR REPLACE FUNCTION api.user_group_model_policy(
+DROP FUNCTION IF EXISTS api.user_group_model_policy(UUID, TEXT);
+
+CREATE FUNCTION api.user_group_model_policy(
     p_user_id UUID,
     p_workspace TEXT,
     OUT allowed_models TEXT[],
@@ -402,11 +404,17 @@ BEGIN
 END;
 $$;
 
-DROP FUNCTION IF EXISTS api.group_policy_scope_display_name(api.group_policy_spec);
+REVOKE ALL ON FUNCTION api.user_group_model_policy(UUID, TEXT) FROM PUBLIC;
+
 DROP FUNCTION IF EXISTS api.can_read_principal_group_policy(UUID, UUID);
 DROP FUNCTION IF EXISTS api.principal_group_policies(UUID);
-DROP FUNCTION IF EXISTS api.has_group_policy_scoped_permission(UUID, api.permission_action, api.group_policy_spec);
+DROP FUNCTION IF EXISTS api.group_policy_permitted_scopes(UUID, api.permission_action);
+DROP FUNCTION IF EXISTS api.has_permission_on_scope(UUID, api.permission_action, TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.scope_principals(TEXT, TEXT);
 DROP FUNCTION IF EXISTS api.group_policy_in_scope(api.group_policy_spec, UUID);
+DROP FUNCTION IF EXISTS api.is_subject_policy_kind(TEXT);
+
+DROP INDEX IF EXISTS api.group_policies_scope_idx;
 
 DROP INDEX IF EXISTS api.group_daily_usage_user_idx;
 DROP INDEX IF EXISTS api.group_daily_usage_service_account_idx;

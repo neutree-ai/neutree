@@ -1,27 +1,7 @@
--- Group policies on one user or one ServiceAccount, written by whoever manages
--- them in a scope.
-
--- ----------------------
--- Subjects and scopes
--- ----------------------
--- Besides a Team or an OrgUnit, spec.subject_kind may be:
---   * 'User': spec.subject_name is the user's id;
---   * 'ServiceAccount': spec.subject_name is the SA's id.
--- spec.scope_kind / spec.scope_name say who manages such a policy:
---   * none: global group_policy:* only;
---   * 'Team': group_policy:* on that Team; the user is a member, or the SA
---     belongs to it;
---   * 'OrgUnit' (users only): group_policy:* on that OrgUnit; the user's
---     primary OrgUnit is in its subtree.
--- A subject has at most one policy per scope. A Team or OrgUnit policy has no
--- scope. Subject and scope do not change after creation.
---
--- A subject policy applies while its subject is in its scope. Every one that
--- applies is one more constraint: its allow list intersects with the rest
--- (Team allow lists still unite among themselves, as before), its deny list
--- adds to the union, and its token pool is the subject's own usage, all keys,
--- every workspace. So a policy can only narrow what other policies allow, and
--- several scopes setting a pool for one subject means the strictest one wins.
+-- Group policies on one user or one ServiceAccount, written in a scope (a Team
+-- or an OrgUnit) by whoever manages that scope. They only narrow: each one's
+-- allow list intersects with the rest and each pool counts the subject's own
+-- usage, so the strictest pool rejects.
 
 ALTER TYPE api.group_policy_spec ADD ATTRIBUTE scope_kind TEXT;
 ALTER TYPE api.group_policy_spec ADD ATTRIBUTE scope_name TEXT;
@@ -32,7 +12,9 @@ CREATE UNIQUE INDEX group_policies_subject_unique_idx
     ON api.group_policies (((spec).subject_kind), ((spec).subject_name),
                            (COALESCE((spec).scope_kind, '')), (COALESCE((spec).scope_name, '')));
 
--- Pools of one user or SA read their rows by owner.
+CREATE INDEX group_policies_scope_idx
+    ON api.group_policies (((spec).scope_kind), ((spec).scope_name));
+
 CREATE INDEX IF NOT EXISTS group_daily_usage_user_idx
     ON api.group_daily_usage (user_id, usage_date) WHERE user_id IS NOT NULL;
 
@@ -40,11 +22,19 @@ CREATE INDEX IF NOT EXISTS group_daily_usage_service_account_idx
     ON api.group_daily_usage (service_account_id, usage_date) WHERE service_account_id IS NOT NULL;
 
 -- ----------------------
--- Scope
+-- Subjects and scopes
 -- ----------------------
 
--- Is p_principal (a user or an SA) in the scope of p_spec now? A policy
--- without a scope covers its subject everywhere.
+CREATE OR REPLACE FUNCTION api.is_subject_policy_kind(p_kind TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT COALESCE(p_kind IN ('User', 'ServiceAccount'), FALSE);
+$$;
+
+-- Through api.user_groups, so "in a scope" means what group membership means
+-- everywhere else.
 CREATE OR REPLACE FUNCTION api.group_policy_in_scope(p_spec api.group_policy_spec, p_principal UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -52,36 +42,44 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-    SELECT CASE
-        WHEN p_spec.scope_kind IS NULL THEN TRUE
-        WHEN p_spec.scope_kind = 'Team' THEN EXISTS (
-            SELECT 1
-            FROM api.teams t
-            WHERE (t.metadata).name = p_spec.scope_name
-              AND (EXISTS (SELECT 1 FROM api.team_members tm
-                           WHERE tm.team_id = t.id AND tm.user_id = p_principal)
-                   OR EXISTS (SELECT 1 FROM api.service_accounts sa
-                              WHERE sa.id = p_principal AND sa.team_id = t.id)))
-        WHEN p_spec.scope_kind = 'OrgUnit' THEN EXISTS (
-            SELECT 1
-            FROM api.org_unit_members m
-            JOIN api.org_units u ON u.id = m.org_unit_id
-            JOIN api.org_units r ON (r.metadata).name = p_spec.scope_name
-            WHERE m.user_id = p_principal
-              AND r.id = ANY (api.org_unit_ancestor_ids(u.path)))
-        ELSE FALSE
-    END;
+    SELECT p_spec.scope_kind IS NULL
+        OR EXISTS (SELECT 1 FROM api.user_groups(p_principal) g
+                   WHERE g.kind = p_spec.scope_kind AND g.name = p_spec.scope_name);
 $$;
 
 REVOKE ALL ON FUNCTION api.group_policy_in_scope(api.group_policy_spec, UUID) FROM PUBLIC;
 
--- May p_user do p_permission on a subject policy through its scope? Global
--- assignments are checked apart, once per statement. Team and OrgUnit
--- policies have no scope, so FALSE.
-CREATE OR REPLACE FUNCTION api.has_group_policy_scoped_permission(
+-- The users and SAs a scope manages: a Team's members and SAs, an OrgUnit's
+-- subtree users.
+CREATE OR REPLACE FUNCTION api.scope_principals(p_kind TEXT, p_name TEXT)
+RETURNS TABLE (kind TEXT, id UUID)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+    SELECT 'User'::TEXT, tm.user_id
+    FROM api.teams t JOIN api.team_members tm ON tm.team_id = t.id
+    WHERE p_kind = 'Team' AND (t.metadata).name = p_name
+    UNION
+    SELECT 'ServiceAccount'::TEXT, sa.id
+    FROM api.teams t JOIN api.service_accounts sa ON sa.team_id = t.id
+    WHERE p_kind = 'Team' AND (t.metadata).name = p_name
+    UNION
+    SELECT 'User'::TEXT, m.user_id
+    FROM api.org_units o CROSS JOIN LATERAL api.org_unit_subtree_members(o.id) m
+    WHERE p_kind = 'OrgUnit' AND (o.metadata).name = p_name;
+$$;
+
+REVOKE ALL ON FUNCTION api.scope_principals(TEXT, TEXT) FROM PUBLIC;
+
+-- p_permission on a Team or an OrgUnit, by name: globally or through an
+-- assignment scoped to it. FALSE for an unknown name.
+CREATE OR REPLACE FUNCTION api.has_permission_on_scope(
     p_user UUID,
     p_permission api.permission_action,
-    p_spec api.group_policy_spec
+    p_kind TEXT,
+    p_name TEXT
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -92,24 +90,34 @@ AS $$
 DECLARE
     v_id INTEGER;
 BEGIN
-    IF p_user IS NULL OR p_spec.subject_kind NOT IN ('User', 'ServiceAccount') THEN
-        RETURN FALSE;
-    END IF;
-
-    IF p_spec.scope_kind = 'Team' THEN
-        SELECT t.id INTO v_id FROM api.teams t WHERE (t.metadata).name = p_spec.scope_name;
-
-        RETURN v_id IS NOT NULL
-            AND api.has_team_scoped_permission(p_user, p_permission, v_id) IS TRUE;
-    ELSIF p_spec.scope_kind = 'OrgUnit' THEN
-        SELECT o.id INTO v_id FROM api.org_units o WHERE (o.metadata).name = p_spec.scope_name;
-
-        RETURN v_id IS NOT NULL
-            AND api.has_org_scoped_permission(p_user, p_permission, v_id) IS TRUE;
+    IF p_kind = 'Team' THEN
+        SELECT t.id INTO v_id FROM api.teams t WHERE (t.metadata).name = p_name;
+        RETURN v_id IS NOT NULL AND api.has_permission_on_team(p_user, p_permission, v_id) IS TRUE;
+    ELSIF p_kind = 'OrgUnit' THEN
+        SELECT o.id INTO v_id FROM api.org_units o WHERE (o.metadata).name = p_name;
+        RETURN v_id IS NOT NULL AND api.has_permission_on_org_unit(p_user, p_permission, v_id) IS TRUE;
     END IF;
 
     RETURN FALSE;
 END;
+$$;
+
+-- The scopes ('Team/<name>', 'OrgUnit/<name>') where p_user holds
+-- p_permission through a scoped assignment. The RLS policies evaluate it once
+-- per statement instead of once per row.
+CREATE OR REPLACE FUNCTION api.group_policy_permitted_scopes(p_user UUID, p_permission api.permission_action)
+RETURNS TEXT[]
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+    SELECT ARRAY(
+        SELECT 'Team/' || (t.metadata).name FROM api.teams t
+        WHERE api.has_team_scoped_permission(p_user, p_permission, t.id) IS TRUE
+        UNION ALL
+        SELECT 'OrgUnit/' || (o.metadata).name FROM api.org_units o
+        WHERE api.has_org_scoped_permission(p_user, p_permission, o.id) IS TRUE);
 $$;
 
 -- ----------------------
@@ -150,7 +158,7 @@ BEGIN
         v_spec.scope_name := (OLD.spec).scope_name;
     END IF;
 
-    IF v_spec.subject_kind IN ('User', 'ServiceAccount') AND v_spec.subject_name IS NOT NULL THEN
+    IF api.is_subject_policy_kind(v_spec.subject_kind) AND v_spec.subject_name IS NOT NULL THEN
         BEGIN
             v_id := v_spec.subject_name::uuid;
         EXCEPTION WHEN invalid_text_representation THEN
@@ -241,6 +249,7 @@ BEGIN
 END;
 $$;
 
+
 -- A policy goes with its group, and with the scope it was written in.
 CREATE OR REPLACE FUNCTION api.group_policies_delete_with_group()
 RETURNS TRIGGER
@@ -250,8 +259,10 @@ SET search_path = pg_catalog
 AS $$
 BEGIN
     DELETE FROM api.group_policies p
-    WHERE ((p.spec).subject_kind = TG_ARGV[0] AND (p.spec).subject_name = (OLD.metadata).name)
-       OR ((p.spec).scope_kind = TG_ARGV[0] AND (p.spec).scope_name = (OLD.metadata).name);
+    WHERE (p.spec).subject_kind = TG_ARGV[0] AND (p.spec).subject_name = (OLD.metadata).name;
+
+    DELETE FROM api.group_policies p
+    WHERE (p.spec).scope_kind = TG_ARGV[0] AND (p.spec).scope_name = (OLD.metadata).name;
 
     RETURN OLD;
 END;
@@ -284,12 +295,12 @@ CREATE TRIGGER service_accounts_delete_group_policy
     FOR EACH ROW
     EXECUTE FUNCTION api.group_policies_delete_with_subject('ServiceAccount');
 
+
 -- ----------------------
 -- RLS
 -- ----------------------
--- Global group_policy:* reads and writes every policy. A subject policy is
--- also readable and writable through group_policy:* on its scope, and
--- readable by its subject.
+-- A subject policy is also read and written through group_policy:* on its
+-- scope, and read by its subject.
 
 DROP POLICY IF EXISTS "group_policy read policy" ON api.group_policies;
 DROP POLICY IF EXISTS "group_policy create policy" ON api.group_policies;
@@ -300,68 +311,82 @@ CREATE POLICY "group_policy read policy" ON api.group_policies
     FOR SELECT
     USING (
         (SELECT api.has_permission(auth.uid(), 'group_policy:read', NULL))
-        OR ((spec).subject_kind IN ('User', 'ServiceAccount') AND (spec).subject_name = auth.uid()::text)
-        OR api.has_group_policy_scoped_permission(auth.uid(), 'group_policy:read', spec)
+        OR (api.is_subject_policy_kind((spec).subject_kind) AND (
+            (spec).subject_name = (SELECT auth.uid()::text)
+            OR (spec).scope_kind || '/' || (spec).scope_name
+                = ANY ((SELECT api.group_policy_permitted_scopes(auth.uid(), 'group_policy:read'))::TEXT[])))
     );
 
 CREATE POLICY "group_policy create policy" ON api.group_policies
     FOR INSERT
     WITH CHECK (
         (SELECT api.has_permission(auth.uid(), 'group_policy:create', NULL))
-        OR api.has_group_policy_scoped_permission(auth.uid(), 'group_policy:create', spec)
+        OR (api.is_subject_policy_kind((spec).subject_kind)
+            AND (spec).scope_kind || '/' || (spec).scope_name
+                = ANY ((SELECT api.group_policy_permitted_scopes(auth.uid(), 'group_policy:create'))::TEXT[]))
     );
 
 CREATE POLICY "group_policy update policy" ON api.group_policies
     FOR UPDATE
     USING (
         (SELECT api.has_permission(auth.uid(), 'group_policy:update', NULL))
-        OR api.has_group_policy_scoped_permission(auth.uid(), 'group_policy:update', spec)
+        OR (api.is_subject_policy_kind((spec).subject_kind)
+            AND (spec).scope_kind || '/' || (spec).scope_name
+                = ANY ((SELECT api.group_policy_permitted_scopes(auth.uid(), 'group_policy:update'))::TEXT[]))
     )
     WITH CHECK (
         (SELECT api.has_permission(auth.uid(), 'group_policy:update', NULL))
-        OR api.has_group_policy_scoped_permission(auth.uid(), 'group_policy:update', spec)
+        OR (api.is_subject_policy_kind((spec).subject_kind)
+            AND (spec).scope_kind || '/' || (spec).scope_name
+                = ANY ((SELECT api.group_policy_permitted_scopes(auth.uid(), 'group_policy:update'))::TEXT[]))
     );
 
 CREATE POLICY "group_policy delete policy" ON api.group_policies
     FOR DELETE
     USING (
         (SELECT api.has_permission(auth.uid(), 'group_policy:delete', NULL))
-        OR api.has_group_policy_scoped_permission(auth.uid(), 'group_policy:delete', spec)
+        OR (api.is_subject_policy_kind((spec).subject_kind)
+            AND (spec).scope_kind || '/' || (spec).scope_name
+                = ANY ((SELECT api.group_policy_permitted_scopes(auth.uid(), 'group_policy:delete'))::TEXT[]))
     );
 
 -- ----------------------
 -- Merge
 -- ----------------------
 
--- Every policy that applies to a user or an SA: those of its groups (Inactive
--- ones included, as before) and its own ones that are in scope.
+-- Every policy of a user or an SA: its groups' (Inactive ones included) and
+-- its own. Only rows with in_scope apply; the rest are listed for readers.
 CREATE OR REPLACE FUNCTION api.principal_group_policies(p_principal UUID)
-RETURNS TABLE (kind TEXT, name TEXT, active BOOLEAN, spec api.group_policy_spec)
+RETURNS TABLE (kind TEXT, name TEXT, active BOOLEAN, in_scope BOOLEAN, policy_name TEXT, spec api.group_policy_spec)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-    SELECT g.kind, g.name, g.active, p.spec
+    SELECT g.kind, g.name, g.active, TRUE, (p.metadata).name, p.spec
     FROM api.user_groups(p_principal) g
     JOIN api.group_policies p
       ON (p.spec).subject_kind = g.kind
      AND (p.spec).subject_name = g.name
     UNION ALL
-    SELECT (p.spec).subject_kind, (p.spec).subject_name, TRUE, p.spec
+    SELECT (p.spec).subject_kind, (p.spec).subject_name, TRUE,
+           api.group_policy_in_scope(p.spec, p_principal), (p.metadata).name, p.spec
     FROM api.group_policies p
-    WHERE (p.spec).subject_kind IN ('User', 'ServiceAccount')
-      AND (p.spec).subject_name = p_principal::text
-      AND api.group_policy_in_scope(p.spec, p_principal);
+    WHERE api.is_subject_policy_kind((p.spec).subject_kind)
+      AND (p.spec).subject_name = p_principal::text;
 $$;
 
 REVOKE ALL ON FUNCTION api.principal_group_policies(UUID) FROM PUBLIC;
 
-CREATE OR REPLACE FUNCTION api.user_group_model_policy(
+-- has_pool: a token pool applies, so the controller attaches the quota plugin.
+DROP FUNCTION IF EXISTS api.user_group_model_policy(UUID, TEXT);
+
+CREATE FUNCTION api.user_group_model_policy(
     p_user_id UUID,
     p_workspace TEXT,
     OUT allowed_models TEXT[],
-    OUT denied_models TEXT[]
+    OUT denied_models TEXT[],
+    OUT has_pool BOOLEAN
 )
 LANGUAGE plpgsql
 STABLE
@@ -376,13 +401,17 @@ DECLARE
     r RECORD;
 BEGIN
     denied_models := ARRAY[]::TEXT[];
+    has_pool := FALSE;
 
     FOR r IN
         SELECT g.kind,
+               (g.spec).token_quota IS NOT NULL AS pool,
                api.group_policy_model_names((g.spec).allowed_models, p_workspace) AS allow,
                api.group_policy_model_names((g.spec).denied_models, p_workspace) AS deny
         FROM api.principal_group_policies(p_user_id) g
+        WHERE g.in_scope
     LOOP
+        has_pool := has_pool OR r.pool;
         denied_models := denied_models || COALESCE(r.deny, ARRAY[]::TEXT[]);
 
         CONTINUE WHEN r.allow IS NULL;
@@ -413,6 +442,8 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION api.user_group_model_policy(UUID, TEXT) FROM PUBLIC;
+
 -- ----------------------
 -- Pools
 -- ----------------------
@@ -429,6 +460,7 @@ AS $$
 DECLARE
     v_start DATE := api.api_key_period_start(p_period);
     v_id INTEGER;
+    v_principal UUID;
     v_used NUMERIC;
 BEGIN
     IF p_kind = 'Team' THEN
@@ -447,16 +479,13 @@ BEGIN
         JOIN api.group_daily_usage u ON u.org_unit_id = s.id
         WHERE u.usage_date >= v_start
           AND u.usage_date <= CURRENT_DATE;
-    ELSIF p_kind = 'User' THEN
+    ELSIF api.is_subject_policy_kind(p_kind) THEN
+        -- Users and SAs share one id space, and a row has one of the two.
+        v_principal := p_name::uuid;
+
         SELECT SUM(u.total_tokens) INTO v_used
         FROM api.group_daily_usage u
-        WHERE u.user_id = p_name::uuid
-          AND u.usage_date >= v_start
-          AND u.usage_date <= CURRENT_DATE;
-    ELSIF p_kind = 'ServiceAccount' THEN
-        SELECT SUM(u.total_tokens) INTO v_used
-        FROM api.group_daily_usage u
-        WHERE u.service_account_id = p_name::uuid
+        WHERE (u.user_id = v_principal OR u.service_account_id = v_principal)
           AND u.usage_date >= v_start
           AND u.usage_date <= CURRENT_DATE;
     END IF;
@@ -483,7 +512,7 @@ AS $$
            (g.spec).scope_kind,
            (g.spec).scope_name
     FROM api.principal_group_policies(p_user_id) g
-    WHERE (g.spec).token_quota IS NOT NULL;
+    WHERE g.in_scope AND (g.spec).token_quota IS NOT NULL;
 $$;
 
 REVOKE ALL ON FUNCTION api.user_group_token_pools(UUID) FROM PUBLIC;
@@ -502,9 +531,10 @@ AS $$
 DECLARE
     v_allowed TEXT[];
     v_denied TEXT[];
+    v_pool BOOLEAN;
     v_list JSONB;
 BEGIN
-    SELECT p.allowed_models, p.denied_models INTO v_allowed, v_denied
+    SELECT p.allowed_models, p.denied_models, p.has_pool INTO v_allowed, v_denied, v_pool
     FROM api.user_group_model_policy(p_owner_id, p_workspace) p;
 
     IF jsonb_typeof(p_allowed_models) = 'array' THEN
@@ -524,10 +554,7 @@ BEGIN
     RETURN jsonb_build_object(
         'allowed_models', COALESCE(v_list, 'null'::jsonb),
         'denied_models', to_jsonb(COALESCE(v_denied, ARRAY[]::TEXT[])),
-        'group_token_pool', EXISTS (
-            SELECT 1
-            FROM api.principal_group_policies(p_owner_id) g
-            WHERE (g.spec).token_quota IS NOT NULL));
+        'group_token_pool', COALESCE(v_pool, FALSE));
 END;
 $$;
 
@@ -580,60 +607,34 @@ BEGIN
 END;
 $$;
 
+
 -- ----------------------
 -- Reading a subject's policy
 -- ----------------------
 
--- May p_reader read the effective policy of p_principal (a user or an SA)?
--- Itself; group_policy:read globally or on the user's subtree; or
--- group_policy:read on a Team the user is in or the SA belongs to.
+-- Itself; group_policy:read on the user (globally or on its subtree), on the
+-- SA's Team, or on a Team the user is in.
 CREATE OR REPLACE FUNCTION api.can_read_principal_group_policy(p_reader UUID, p_principal UUID)
 RETURNS BOOLEAN
-LANGUAGE plpgsql
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog
-AS $$
-BEGIN
-    IF p_reader IS NULL OR p_principal IS NULL THEN
-        RETURN FALSE;
-    END IF;
-
-    IF p_reader = p_principal
-        OR api.has_permission_on_subject(p_reader, 'group_policy:read', p_principal) IS TRUE THEN
-        RETURN TRUE;
-    END IF;
-
-    RETURN EXISTS (
-        SELECT 1
-        FROM (
-            SELECT tm.team_id FROM api.team_members tm WHERE tm.user_id = p_principal
-            UNION
-            SELECT sa.team_id FROM api.service_accounts sa WHERE sa.id = p_principal
-        ) t
-        WHERE api.has_team_scoped_permission(p_reader, 'group_policy:read', t.team_id) IS TRUE);
-END;
-$$;
-
-REVOKE ALL ON FUNCTION api.can_read_principal_group_policy(UUID, UUID) FROM PUBLIC;
-
--- The display name of a policy's scope, for readers who cannot read groups.
-CREATE OR REPLACE FUNCTION api.group_policy_scope_display_name(p_spec api.group_policy_spec)
-RETURNS TEXT
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-    SELECT CASE WHEN p_spec.scope_kind IS NULL THEN NULL
-                ELSE api.group_display_name(p_spec.scope_kind, p_spec.scope_name) END;
+    SELECT p_reader IS NOT NULL AND p_principal IS NOT NULL AND (
+        p_reader = p_principal
+        OR api.has_permission_on_subject(p_reader, 'group_policy:read', p_principal) IS TRUE
+        OR api.has_permission_on_service_account(p_reader, 'group_policy:read', p_principal) IS TRUE
+        OR EXISTS (
+            SELECT 1 FROM api.user_groups(p_principal) g
+            WHERE g.kind = 'Team'
+              AND api.has_permission_on_scope(p_reader, 'group_policy:read', 'Team', g.name)));
 $$;
 
-REVOKE ALL ON FUNCTION api.group_policy_scope_display_name(api.group_policy_spec) FROM PUBLIC;
+REVOKE ALL ON FUNCTION api.can_read_principal_group_policy(UUID, UUID) FROM PUBLIC;
 
 -- p_user_id may be a user or an SA. subject_policies lists its own policies,
--- out-of-scope ones included (in_scope FALSE); token_pools every pool that
--- applies, each with the scope it was set in.
+-- those out of scope too (in_scope FALSE).
 CREATE OR REPLACE FUNCTION api.get_user_group_policy(p_user_id UUID, p_workspace TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -644,6 +645,7 @@ AS $$
 DECLARE
     v_allowed TEXT[];
     v_denied TEXT[];
+    v_out JSONB;
 BEGIN
     IF api.can_read_principal_group_policy(auth.uid(), p_user_id) IS NOT TRUE THEN
         RAISE insufficient_privilege
@@ -660,78 +662,75 @@ BEGIN
         FROM api.user_group_model_policy(p_user_id, p_workspace) p;
     END IF;
 
-    RETURN jsonb_build_object(
-        'allowed_models', to_jsonb(v_allowed),
-        'denied_models', to_jsonb(v_denied),
+    WITH g AS (
+        SELECT * FROM api.principal_group_policies(p_user_id)
+    ), pools AS (
+        SELECT g.kind, g.name, (g.spec).scope_kind AS scope_kind, (g.spec).scope_name AS scope_name,
+               ((g.spec).token_quota ->> 'limit')::BIGINT AS token_limit,
+               (g.spec).token_quota ->> 'period' AS period,
+               api.group_token_pool_usage(g.kind, g.name, (g.spec).token_quota ->> 'period') AS used
+        FROM g
+        WHERE g.in_scope AND (g.spec).token_quota IS NOT NULL
+    )
+    SELECT jsonb_build_object(
         'groups', COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
                     'kind', g.kind,
                     'name', g.name,
                     'display_name', api.group_display_name(g.kind, g.name),
                     'active', g.active,
-                    'allowed_models', (p.spec).allowed_models,
-                    'denied_models', (p.spec).denied_models,
-                    'token_quota', (p.spec).token_quota)
+                    'allowed_models', (g.spec).allowed_models,
+                    'denied_models', (g.spec).denied_models,
+                    'token_quota', (g.spec).token_quota)
                 ORDER BY g.kind, g.name)
-            FROM api.user_groups(p_user_id) g
-            JOIN api.group_policies p
-              ON (p.spec).subject_kind = g.kind
-             AND (p.spec).subject_name = g.name
-        ), '[]'::jsonb),
+            FROM g WHERE NOT api.is_subject_policy_kind(g.kind)), '[]'::jsonb),
         'subject_policies', COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
-                    'name', (p.metadata).name,
-                    'subject_kind', (p.spec).subject_kind,
-                    'scope_kind', (p.spec).scope_kind,
-                    'scope_name', (p.spec).scope_name,
-                    'scope_display_name', api.group_policy_scope_display_name(p.spec),
-                    'in_scope', api.group_policy_in_scope(p.spec, p_user_id),
-                    'allowed_models', (p.spec).allowed_models,
-                    'denied_models', (p.spec).denied_models,
-                    'token_quota', (p.spec).token_quota)
-                ORDER BY (p.spec).scope_kind NULLS FIRST, (p.spec).scope_name)
-            FROM api.group_policies p
-            WHERE (p.spec).subject_kind IN ('User', 'ServiceAccount')
-              AND (p.spec).subject_name = p_user_id::text
-        ), '[]'::jsonb),
+                    'name', g.policy_name,
+                    'subject_kind', g.kind,
+                    'scope_kind', (g.spec).scope_kind,
+                    'scope_name', (g.spec).scope_name,
+                    'scope_display_name', api.group_display_name((g.spec).scope_kind, (g.spec).scope_name),
+                    'in_scope', g.in_scope,
+                    'allowed_models', (g.spec).allowed_models,
+                    'denied_models', (g.spec).denied_models,
+                    'token_quota', (g.spec).token_quota)
+                ORDER BY (g.spec).scope_kind NULLS FIRST, (g.spec).scope_name)
+            FROM g WHERE api.is_subject_policy_kind(g.kind)), '[]'::jsonb),
         'token_pools', COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
                     'kind', t.kind,
                     'name', t.name,
-                    'display_name', CASE WHEN t.kind IN ('Team', 'OrgUnit')
-                                         THEN api.group_display_name(t.kind, t.name) END,
+                    'display_name', api.group_display_name(t.kind, t.name),
                     'scope_kind', t.scope_kind,
                     'scope_name', t.scope_name,
-                    'scope_display_name', CASE WHEN t.scope_kind IS NOT NULL
-                                               THEN api.group_display_name(t.scope_kind, t.scope_name) END,
+                    'scope_display_name', api.group_display_name(t.scope_kind, t.scope_name),
                     'token_limit', t.token_limit,
                     'period', t.period,
                     'used', t.used,
                     'remaining', t.token_limit - t.used,
                     'resets_at', api.api_key_period_reset(t.period))
                 ORDER BY t.kind, t.name, t.scope_kind NULLS FIRST, t.scope_name)
-            FROM api.user_group_token_pools(p_user_id) t
-        ), '[]'::jsonb));
+            FROM pools t), '[]'::jsonb))
+    INTO v_out;
+
+    RETURN jsonb_build_object('allowed_models', to_jsonb(v_allowed), 'denied_models', to_jsonb(v_denied)) || v_out;
 END;
 $$;
 
--- Every subject a scope manages, with its policy in that scope (NULL when
--- none) and the pool in that policy, plus effective_remaining: the least
--- remaining of every pool that applies to the subject, from any group or
--- scope (NULL for no limit). For a Team: its members and its SAs; for an
--- OrgUnit: the users of its subtree. Needs group_policy:read globally or on
--- the scope.
+-- Each subject of a scope with its policy there (id NULL when none) and that
+-- policy's pool; effective_remaining is the least remaining of every pool
+-- that applies to the subject, from any group or scope.
 CREATE OR REPLACE FUNCTION api.get_scope_subject_policies(p_scope_kind TEXT, p_scope_name TEXT)
 RETURNS TABLE (
     subject_kind TEXT,
     subject_name TEXT,
+    id INTEGER,
     policy_name TEXT,
     allowed_models JSONB,
     denied_models JSONB,
     token_quota JSONB,
-    used BIGINT,
-    remaining BIGINT,
-    resets_at DATE,
+    pool JSONB,
     effective_remaining BIGINT
 )
 LANGUAGE plpgsql
@@ -739,63 +738,58 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-DECLARE
-    v_id INTEGER;
-    v_allowed BOOLEAN;
 BEGIN
-    IF p_scope_kind = 'Team' THEN
-        SELECT t.id INTO v_id FROM api.teams t WHERE (t.metadata).name = p_scope_name;
-        v_allowed := v_id IS NOT NULL
-            AND api.has_permission_on_team(auth.uid(), 'group_policy:read', v_id) IS TRUE;
-    ELSIF p_scope_kind = 'OrgUnit' THEN
-        SELECT o.id INTO v_id FROM api.org_units o WHERE (o.metadata).name = p_scope_name;
-        v_allowed := v_id IS NOT NULL
-            AND api.has_permission_on_org_unit(auth.uid(), 'group_policy:read', v_id) IS TRUE;
-    ELSE
+    IF p_scope_kind IS NULL OR p_scope_kind NOT IN ('Team', 'OrgUnit') THEN
         RAISE invalid_parameter_value
             USING message = 'p_scope_kind must be Team or OrgUnit';
     END IF;
 
-    IF v_allowed IS NOT TRUE THEN
+    IF api.has_permission_on_scope(auth.uid(), 'group_policy:read', p_scope_kind, p_scope_name) IS NOT TRUE THEN
         RAISE insufficient_privilege
             USING message = 'group_policy:read on the scope is required to read its subject policies';
     END IF;
 
     RETURN QUERY
     WITH s AS (
-        SELECT 'User'::TEXT AS kind, tm.user_id AS id
-        FROM api.team_members tm
-        WHERE p_scope_kind = 'Team' AND tm.team_id = v_id
-        UNION
-        SELECT 'ServiceAccount'::TEXT, sa.id
-        FROM api.service_accounts sa
-        WHERE p_scope_kind = 'Team' AND sa.team_id = v_id
-        UNION
-        SELECT 'User'::TEXT, m.user_id
-        FROM api.org_unit_subtree_members(v_id) m
-        WHERE p_scope_kind = 'OrgUnit'
+        SELECT * FROM api.scope_principals(p_scope_kind, p_scope_name)
+    ), sp AS (
+        -- Every pool that applies to each subject.
+        SELECT s.id AS sid, g.kind, g.name,
+               ((g.spec).token_quota ->> 'limit')::BIGINT AS token_limit,
+               (g.spec).token_quota ->> 'period' AS period
+        FROM s CROSS JOIN LATERAL api.principal_group_policies(s.id) g
+        WHERE g.in_scope AND (g.spec).token_quota IS NOT NULL
+    ), pu AS (
+        -- Once per pool: a Team's or OrgUnit's is shared by its subjects.
+        SELECT DISTINCT ON (k.kind, k.name, k.period) k.kind, k.name, k.period,
+               api.group_token_pool_usage(k.kind, k.name, k.period) AS used
+        FROM (SELECT DISTINCT sp.kind, sp.name, sp.period FROM sp) k
+    ), eff AS (
+        SELECT sp.sid, MIN(sp.token_limit - u.used) AS remaining
+        FROM sp JOIN pu u USING (kind, name, period)
+        GROUP BY sp.sid
     )
     SELECT s.kind,
            s.id::TEXT,
+           p.id,
            (p.metadata).name,
            (p.spec).allowed_models,
            (p.spec).denied_models,
            (p.spec).token_quota,
-           u.used,
-           ((p.spec).token_quota ->> 'limit')::BIGINT - u.used,
-           CASE WHEN (p.spec).token_quota IS NOT NULL
-                THEN api.api_key_period_reset((p.spec).token_quota ->> 'period') END,
-           (SELECT MIN(x.token_limit - x.used) FROM api.user_group_token_pools(s.id) x)
+           CASE WHEN (p.spec).token_quota IS NOT NULL THEN jsonb_build_object(
+               'used', u.used,
+               'remaining', ((p.spec).token_quota ->> 'limit')::BIGINT - u.used,
+               'resets_at', api.api_key_period_reset((p.spec).token_quota ->> 'period')) END,
+           e.remaining
     FROM s
     LEFT JOIN api.group_policies p
       ON (p.spec).subject_kind = s.kind
      AND (p.spec).subject_name = s.id::TEXT
      AND (p.spec).scope_kind = p_scope_kind
      AND (p.spec).scope_name = p_scope_name
-    LEFT JOIN LATERAL (
-        SELECT api.group_token_pool_usage(s.kind, s.id::TEXT, (p.spec).token_quota ->> 'period') AS used
-        WHERE (p.spec).token_quota IS NOT NULL
-    ) u ON TRUE
+    LEFT JOIN pu u
+      ON u.kind = s.kind AND u.name = s.id::TEXT AND u.period = (p.spec).token_quota ->> 'period'
+    LEFT JOIN eff e ON e.sid = s.id
     ORDER BY s.kind DESC, s.id;
 END;
 $$;
