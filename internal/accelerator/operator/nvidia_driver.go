@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -12,44 +11,21 @@ import (
 )
 
 func nvidiaDriverPods(ctx context.Context, reader client.Reader) ([]corev1.Pod, error) {
-	daemonSets := &appsv1.DaemonSetList{}
-	if err := reader.List(ctx, daemonSets); err != nil {
-		return nil, fmt.Errorf("list NVIDIA driver DaemonSets: %w", err)
-	}
-	var drivers []appsv1.DaemonSet
-
-	for _, ds := range daemonSets.Items {
-		if ds.DeletionTimestamp == nil && ds.Spec.Template.Spec.NodeSelector[accelerator.NvidiaDriverDeployLabel] == "true" {
-			drivers = append(drivers, ds)
-		}
-	}
-
-	if len(drivers) == 0 {
-		return nil, nil
-	}
-
 	pods := &corev1.PodList{}
-	if err := reader.List(ctx, pods); err != nil {
+	if err := reader.List(ctx, pods, client.MatchingLabels{
+		accelerator.NvidiaDriverAppLabel:       accelerator.NvidiaDriverAppValue,
+		accelerator.NvidiaDriverComponentLabel: accelerator.NvidiaDriverComponentValue,
+	}); err != nil {
 		return nil, fmt.Errorf("list NVIDIA driver Pods: %w", err)
 	}
 	var result []corev1.Pod
 
 	for _, pod := range pods.Items {
-		if pod.DeletionTimestamp != nil {
+		if pod.DeletionTimestamp != nil || pod.Spec.NodeName == "" {
 			continue
 		}
 
-		for _, ds := range drivers {
-			if pod.Namespace != ds.Namespace {
-				continue
-			}
-
-			for _, owner := range pod.OwnerReferences {
-				if owner.Controller != nil && *owner.Controller && owner.Kind == "DaemonSet" && owner.Name == ds.Name && owner.UID == ds.UID {
-					result = append(result, pod)
-				}
-			}
-		}
+		result = append(result, pod)
 	}
 
 	return result, nil
@@ -64,7 +40,7 @@ func driverPodForNode(pods []corev1.Pod, node string) *corev1.Pod {
 			continue
 		}
 
-		if latest == nil || pod.CreationTimestamp.After(latest.CreationTimestamp.Time) {
+		if latest == nil {
 			latest = pod
 		}
 	}

@@ -156,24 +156,17 @@ func TestNvidiaOperatorStatusReportsDriverPodByNode(t *testing.T) {
 
 func TestNvidiaOperatorVersionPolicy(t *testing.T) {
 	for _, tc := range []struct {
-		name, version         string
-		fromImage, wantNative bool
+		name, version string
+		wantNative    bool
 	}{
 		{name: "old release", version: "v25.3.4"},
 		{name: "threshold", version: "26.7.0", wantNative: true},
 		{name: "unknown version", version: "latest"},
-		{name: "controller image version", version: "v26.7.1", fromImage: true, wantNative: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			policy := accelerator.GPUOperatorClusterPolicy{Labels: map[string]string{}}
-			var objects []client.Object
-			if tc.fromImage {
-				objects = append(objects, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "gpu-operator", Namespace: "gpu-operator", Labels: map[string]string{"app": "gpu-operator"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "gpu-operator", Image: "nvcr.io/nvidia/gpu-operator:" + tc.version}}}})
-			} else {
-				policy.Labels["app.kubernetes.io/version"] = tc.version
-			}
-			native, err := nativeNvidiaClientManagement(context.Background(), driverTestClient(t, objects...), []accelerator.GPUOperatorClusterPolicy{policy})
-			require.NoError(t, err)
+			policy.Labels["app.kubernetes.io/version"] = tc.version
+			native := nativeNvidiaClientManagement([]accelerator.GPUOperatorClusterPolicy{policy})
 			require.Equal(t, tc.wantNative, native)
 		})
 	}
@@ -211,5 +204,5 @@ func driverTestDaemonSet() *appsv1.DaemonSet {
 }
 
 func driverTestPod(phase corev1.PodPhase) *corev1.Pod {
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-driver-abc", Namespace: "gpu-operator", UID: "driver-pod", OwnerReferences: []metav1.OwnerReference{{Kind: "DaemonSet", Name: "nvidia-driver", UID: "driver-ds", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{NodeName: "gpu-1"}, Status: corev1.PodStatus{Phase: phase}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-driver-abc", Namespace: "gpu-operator", UID: "driver-pod", Labels: map[string]string{accelerator.NvidiaDriverAppLabel: accelerator.NvidiaDriverAppValue, accelerator.NvidiaDriverComponentLabel: accelerator.NvidiaDriverComponentValue}, OwnerReferences: []metav1.OwnerReference{{Kind: "DaemonSet", Name: "nvidia-driver", UID: "driver-ds", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{NodeName: "gpu-1"}, Status: corev1.PodStatus{Phase: phase}}
 }

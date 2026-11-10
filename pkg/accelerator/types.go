@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -32,6 +33,28 @@ type PluginProvider interface {
 
 type Matcher interface {
 	MatchCluster(*v1.Cluster) bool
+}
+
+// KubernetesOperator is implemented by plugins that provide a Kubernetes
+// accelerator operator. Plugins without this optional interface stay Legacy.
+type KubernetesOperator interface {
+	NewKubernetesOperator(*v1.Cluster, PluginProvider) (AcceleratorOperator, error)
+}
+
+type OperatorContext struct {
+	Cluster   *v1.Cluster
+	Client    client.Client
+	Namespace string
+}
+
+type OperatorResult struct{}
+
+type AcceleratorOperator interface {
+	Name() string
+	AcceleratorType() string
+	Reconcile(context.Context, *OperatorContext) (OperatorResult, error)
+	Status(context.Context, *OperatorContext) (*v1.ComponentStatus, error)
+	Delete(context.Context, *OperatorContext) error
 }
 
 func PluginMatchesCluster(plugin Plugin, cluster *v1.Cluster) bool {

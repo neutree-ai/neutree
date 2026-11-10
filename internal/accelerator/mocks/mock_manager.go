@@ -9,8 +9,6 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	operator "github.com/neutree-ai/neutree/internal/accelerator/operator"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -754,23 +752,23 @@ func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) RunAndReturn(run func(con
 }
 
 // OperatorForKubernetesCluster provides a mock function with given fields: acceleratorType, cluster
-func (_m *MockManager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (operator.AcceleratorOperator, error) {
+func (_m *MockManager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (accelerator.AcceleratorOperator, error) {
 	ret := _m.Called(acceleratorType, cluster)
 
 	if len(ret) == 0 {
 		panic("no return value specified for OperatorForKubernetesCluster")
 	}
 
-	var r0 operator.AcceleratorOperator
+	var r0 accelerator.AcceleratorOperator
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) (operator.AcceleratorOperator, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) (accelerator.AcceleratorOperator, error)); ok {
 		return rf(acceleratorType, cluster)
 	}
-	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) operator.AcceleratorOperator); ok {
+	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) accelerator.AcceleratorOperator); ok {
 		r0 = rf(acceleratorType, cluster)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(operator.AcceleratorOperator)
+			r0 = ret.Get(0).(accelerator.AcceleratorOperator)
 		}
 	}
 
@@ -802,12 +800,12 @@ func (_c *MockManager_OperatorForKubernetesCluster_Call) Run(run func(accelerato
 	return _c
 }
 
-func (_c *MockManager_OperatorForKubernetesCluster_Call) Return(_a0 operator.AcceleratorOperator, _a1 error) *MockManager_OperatorForKubernetesCluster_Call {
+func (_c *MockManager_OperatorForKubernetesCluster_Call) Return(_a0 accelerator.AcceleratorOperator, _a1 error) *MockManager_OperatorForKubernetesCluster_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_OperatorForKubernetesCluster_Call) RunAndReturn(run func(string, *v1.Cluster) (operator.AcceleratorOperator, error)) *MockManager_OperatorForKubernetesCluster_Call {
+func (_c *MockManager_OperatorForKubernetesCluster_Call) RunAndReturn(run func(string, *v1.Cluster) (accelerator.AcceleratorOperator, error)) *MockManager_OperatorForKubernetesCluster_Call {
 	_c.Call.Return(run)
 	return _c
 }

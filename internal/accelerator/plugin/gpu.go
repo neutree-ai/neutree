@@ -96,20 +96,15 @@ func init() { //nolint:gochecknoinits
 	gpuPlugin := &GPUAcceleratorPlugin{
 		executor: &command.OSExecutor{},
 	}
-
-	registration := PluginRegistration{
-		Plugin: gpuPlugin,
-		KubernetesOperatorFactory: func(_ *v1.Cluster, _ accelerator.PluginProvider) (operator.AcceleratorOperator, error) {
-			return operator.NewNvidiaAcceleratorOperator(), nil
-		},
-	}
-	if err := RegisterPlugin(registration); err != nil {
-		panic(err)
-	}
+	registerAcceleratorPlugin(gpuPlugin)
 }
 
 type GPUAcceleratorPlugin struct {
 	executor command.Executor
+}
+
+func (p *GPUAcceleratorPlugin) NewKubernetesOperator(_ *v1.Cluster, _ accelerator.PluginProvider) (accelerator.AcceleratorOperator, error) {
+	return operator.NewNvidiaAcceleratorOperator(), nil
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {

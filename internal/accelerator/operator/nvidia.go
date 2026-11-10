@@ -36,9 +36,8 @@ func (n *NvidiaAcceleratorOperator) Reconcile(ctx context.Context, opCtx *Operat
 		return OperatorResult{}, err
 	}
 
-	native, err := nativeNvidiaClientManagement(ctx, opCtx.Client, policies)
-	if err != nil || native {
-		return OperatorResult{}, err
+	if nativeNvidiaClientManagement(policies) {
+		return OperatorResult{}, nil
 	}
 
 	pods, err := nvidiaDriverPods(ctx, opCtx.Client)

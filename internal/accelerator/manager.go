@@ -11,7 +11,6 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
@@ -22,7 +21,7 @@ type Manager interface {
 
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, input publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
-	OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (acceleratoroperator.AcceleratorOperator, error)
+	OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (publicaccelerator.AcceleratorOperator, error)
 	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -56,13 +55,19 @@ type Manager interface {
 	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
 }
 
-func (a *manager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (acceleratoroperator.AcceleratorOperator, error) {
-	registration, ok := plugin.GetPluginRegistration(acceleratorType)
-	if !ok || registration.KubernetesOperatorFactory == nil {
+func (a *manager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (publicaccelerator.AcceleratorOperator, error) {
+	acceleratorPlugin, ok := a.GetPlugin(acceleratorType)
+	if !ok {
 		return nil, nil
 	}
 
-	return registration.KubernetesOperatorFactory(cluster, a)
+	provider, ok := acceleratorPlugin.(publicaccelerator.KubernetesOperator)
+
+	if !ok {
+		return nil, nil
+	}
+
+	return provider.NewKubernetesOperator(cluster, a)
 }
 
 type registerPlugin struct {
