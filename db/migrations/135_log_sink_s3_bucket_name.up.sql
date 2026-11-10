@@ -122,18 +122,25 @@ BEGIN
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
         END IF;
 
-        IF s3->>'bucket' ~ '[[:space:][:cntrl:]/]' OR char_length(s3->>'bucket') > 63 THEN
-            RAISE sqlstate 'PGRST'
-                USING message = '{"code": "10327","message": "spec.s3.bucket is not a valid bucket name","hint": "Use at most 63 characters, with no spaces or slashes"}',
-                detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
-        END IF;
+        -- Only a new or changed name is checked: rows stored before this rule
+        -- must still take status writes and soft deletes. The endpoint counts
+        -- because clearing it applies the AWS rules.
+        IF TG_OP = 'INSERT'
+           OR (OLD.spec).s3->>'bucket' IS DISTINCT FROM s3->>'bucket'
+           OR coalesce((OLD.spec).s3->>'endpoint', '') <> coalesce(s3->>'endpoint', '') THEN
+            IF s3->>'bucket' ~ '[[:space:][:cntrl:]/]' OR char_length(s3->>'bucket') > 63 THEN
+                RAISE sqlstate 'PGRST'
+                    USING message = '{"code": "10327","message": "spec.s3.bucket is not a valid bucket name","hint": "Use at most 63 characters, with no spaces or slashes"}',
+                    detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+            END IF;
 
-        -- AWS naming rules apply only without an endpoint: S3-compatible stores
-        -- such as MinIO or Ceph can accept names AWS rejects, e.g. upper case.
-        IF coalesce(s3->>'endpoint', '') = '' AND NOT (s3->>'bucket' ~ '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') THEN
-            RAISE sqlstate 'PGRST'
-                USING message = '{"code": "10327","message": "spec.s3.bucket is not a valid AWS S3 bucket name","hint": "Use 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit"}',
-                detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+            -- AWS naming rules apply only without an endpoint: S3-compatible stores
+            -- such as MinIO or Ceph can accept names AWS rejects, e.g. upper case.
+            IF coalesce(s3->>'endpoint', '') = '' AND NOT (s3->>'bucket' ~ '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') THEN
+                RAISE sqlstate 'PGRST'
+                    USING message = '{"code": "10327","message": "spec.s3.bucket is not a valid AWS S3 bucket name","hint": "Use 3-63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit"}',
+                    detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+            END IF;
         END IF;
 
         IF coalesce(trim(s3->>'region'), '') = '' THEN

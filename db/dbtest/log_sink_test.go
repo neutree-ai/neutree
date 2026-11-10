@@ -599,3 +599,69 @@ func TestLogSinkS3Normalization(t *testing.T) {
 		}
 	})
 }
+
+// Rows stored before the bucket name rule must stay writable for the
+// controller and deletable; only a changed bucket or endpoint is checked.
+func TestLogSinkS3StoredInvalidBucket(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	const name = "log-sink-s3-stored-bucket"
+
+	run := func(t *testing.T, s3, update string) error {
+		t.Helper()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Stores the row the way the previous rule allowed it.
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE api.log_sinks DISABLE TRIGGER validate_log_sink_spec_on_log_sinks`); err != nil {
+			t.Fatalf("failed to disable trigger: %v", err)
+		}
+		if err := insertLogSinkSpec(ctx, tx, name, "s3", "", s3, ""); err != nil {
+			t.Fatalf("failed to insert: %v", err)
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE api.log_sinks ENABLE TRIGGER validate_log_sink_spec_on_log_sinks`); err != nil {
+			t.Fatalf("failed to enable trigger: %v", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `UPDATE api.log_sinks SET `+update+` WHERE (metadata).name = $1`, name)
+
+		return err
+	}
+
+	const auth = `"auth": {"access_key_id": "ak", "secret_access_key": "sk"}`
+	spaced := `{"region": "r", "bucket": "invalid bucket", ` + auth + `}`
+
+	t.Run("status update succeeds", func(t *testing.T) {
+		if err := run(t, spaced, `status.phase = 'Failed'`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("soft delete succeeds", func(t *testing.T) {
+		if err := run(t, spaced, `metadata.deletion_timestamp = now()`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("changing the bucket to another invalid name is rejected", func(t *testing.T) {
+		err := run(t, spaced, `spec.s3 = '{"region": "r", "bucket": "still invalid", `+auth+`}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10327"`) {
+			t.Fatalf("expected error code 10327, got: %v", err)
+		}
+	})
+
+	t.Run("clearing the endpoint of an upper-case bucket is rejected", func(t *testing.T) {
+		err := run(t, `{"endpoint": "http://minio:9000", "region": "r", "bucket": "Logs", `+auth+`}`,
+			`spec.s3 = '{"region": "r", "bucket": "Logs", `+auth+`}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10327"`) {
+			t.Fatalf("expected error code 10327, got: %v", err)
+		}
+	})
+}
