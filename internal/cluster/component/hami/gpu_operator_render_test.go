@@ -23,7 +23,8 @@ func TestHAMiGPUOperatorChartValues(t *testing.T) {
 	}{
 		{name: "2.9 managed containerd", clusterVersion: "v1.2.0", runtime: "containerd://1.7.28", managed: true, wantClass: "custom-nvidia"},
 		{name: "2.10 managed containerd", clusterVersion: "v1.3.0", runtime: "containerd://1.7.28", managed: true, wantClass: "custom-nvidia"},
-		{name: "managed CRI-O", clusterVersion: "v1.3.0", runtime: "cri-o://1.29", managed: true},
+		{name: "managed CRI-O", clusterVersion: "v1.3.0", runtime: "cri-o://1.29", managed: true, wantClass: "custom-nvidia"},
+		{name: "managed Docker", clusterVersion: "v1.3.0", runtime: "docker://26.1.4", managed: true, wantClass: "custom-nvidia"},
 		{name: "OS driver", clusterVersion: "v1.3.0", runtime: "containerd://1.7.28"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

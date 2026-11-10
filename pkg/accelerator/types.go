@@ -33,6 +33,7 @@ type Matcher interface {
 // OperatorFactory is implemented by plugins that provide a Kubernetes
 // accelerator operator. Plugins without this optional interface stay Legacy.
 type OperatorFactory interface {
+	Matcher
 	NewKubernetesOperator(*v1.Cluster, PluginProvider) (AcceleratorOperator, error)
 }
 
@@ -58,11 +59,9 @@ func ResolveOperator(ctx context.Context, plugin Plugin, opCtx *OperatorContext,
 		return nil, nil
 	}
 
-	if matcher, ok := plugin.(Matcher); ok {
-		matched, err := matcher.MatchCluster(ctx, opCtx)
-		if err != nil || !matched {
-			return nil, err
-		}
+	matched, err := factory.MatchCluster(ctx, opCtx)
+	if err != nil || !matched {
+		return nil, err
 	}
 
 	return factory.NewKubernetesOperator(opCtx.Cluster, provider)

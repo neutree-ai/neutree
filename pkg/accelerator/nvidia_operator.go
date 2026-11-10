@@ -3,9 +3,7 @@ package accelerator
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -76,25 +74,4 @@ func NvidiaOperatorRuntime(policies []GPUOperatorClusterPolicy) (managed bool, r
 	}
 
 	return false, "", nil
-}
-
-// NvidiaNodesUseContainerd uses stable hardware discovery rather than client
-// admission or allocatable resources, which disappear while drivers recover.
-func NvidiaNodesUseContainerd(nodes []corev1.Node) bool {
-	foundGPU := false
-
-	for _, node := range nodes {
-		if node.Labels[NvidiaGPUDiscoveryLabelKey] != NvidiaGPUDiscoveryLabelValue {
-			continue
-		}
-
-		foundGPU = true
-
-		runtime, version, found := strings.Cut(node.Status.NodeInfo.ContainerRuntimeVersion, "://")
-		if !found || runtime != "containerd" || version == "" {
-			return false
-		}
-	}
-
-	return foundGPU
 }

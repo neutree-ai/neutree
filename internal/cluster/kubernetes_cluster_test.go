@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -843,11 +845,12 @@ func TestKubernetesAcceleratorOperatorUsesRegisteredFactory(t *testing.T) {
 	for _, tc := range []struct {
 		name, acceleratorType            string
 		managed, wantOperator, wantError bool
-		hasGPU, deleting                 bool
+		hasGPU, deleting, matchError     bool
 	}{
 		{name: "GPU factory runs without managed dependencies", acceleratorType: accelerator.NvidiaAcceleratorType, hasGPU: true, wantOperator: true},
 		{name: "managed driver failure reported", acceleratorType: accelerator.NvidiaAcceleratorType, managed: true, hasGPU: true, wantOperator: true, wantError: true},
 		{name: "delete state after GPU discovery disappears", deleting: true},
+		{name: "discovery failure does not select Legacy", matchError: true},
 		{name: "no discovered GPU keeps Legacy", acceleratorType: accelerator.NvidiaAcceleratorType},
 		{name: "hardware discovery overrides configured type", acceleratorType: v1.AcceleratorTypeAMDGPU.String(), hasGPU: true, wantOperator: true},
 		{name: "unregistered factory remains Legacy", acceleratorType: v1.AcceleratorTypeAMDGPU.String()},
@@ -871,7 +874,14 @@ func TestKubernetesAcceleratorOperatorUsesRegisteredFactory(t *testing.T) {
 					"spec": map[string]interface{}{"driver": map[string]interface{}{"enabled": true}, "toolkit": map[string]interface{}{"enabled": true}},
 				}})
 			}
-			ctrlClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			ctrlClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if tc.matchError {
+						return errors.New("node discovery denied")
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build()
 			reconcileCtx := &ReconcileContext{Ctx: context.Background(), ctrClient: ctrlClient, Cluster: &v1.Cluster{
 				Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
 				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Config: &v1.ClusterConfig{AcceleratorType: ptr.To(tc.acceleratorType)}},
@@ -888,6 +898,11 @@ func TestKubernetesAcceleratorOperatorUsesRegisteredFactory(t *testing.T) {
 				return
 			}
 			err := reconciler.reconcileAcceleratorOperators(reconcileCtx)
+			if tc.matchError {
+				require.ErrorContains(t, err, "node discovery denied")
+				require.Nil(t, reconcileCtx.acceleratorOperators, "failed MatchCluster cannot be published as a Legacy selection")
+				return
+			}
 			if tc.wantError {
 				require.ErrorContains(t, err, "gpu-1 has no driver Pod")
 			} else {

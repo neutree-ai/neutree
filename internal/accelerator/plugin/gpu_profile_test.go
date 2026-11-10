@@ -25,7 +25,8 @@ func TestNvidiaKubernetesProfileRuntime(t *testing.T) {
 	}{
 		{name: "managed containerd", nodeRuntime: "containerd://1.7.28", driver: true, toolkit: true, wantClass: "nvidia"},
 		{name: "managed custom class", nodeRuntime: "containerd://1.7.28", configuredClass: "custom-nvidia", driver: true, toolkit: true, wantClass: "custom-nvidia"},
-		{name: "managed CRI-O", nodeRuntime: "cri-o://1.29", driver: true, toolkit: true},
+		{name: "managed CRI-O", nodeRuntime: "cri-o://1.29", driver: true, toolkit: true, wantClass: "nvidia"},
+		{name: "managed Docker", nodeRuntime: "docker://26.1.4", driver: true, toolkit: true, wantClass: "nvidia"},
 		{name: "driver only", nodeRuntime: "containerd://1.7.28", driver: true},
 		{name: "toolkit only", nodeRuntime: "containerd://1.7.28", toolkit: true},
 		{name: "unmanaged", nodeRuntime: "containerd://1.7.28"},

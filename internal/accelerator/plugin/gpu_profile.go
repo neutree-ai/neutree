@@ -23,21 +23,12 @@ func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, pr
 		return err
 	}
 
-	// Docker runtime names do not imply an installed Kubernetes RuntimeClass.
+	// Kubernetes RuntimeClass comes from ClusterPolicy, not the StaticNode runtime default.
 	profile.NodeAgentRuntime.Runtime = ""
 	profile.MetricsExporter.Runtime.Runtime = ""
 
 	if !managed {
 		return nil
-	}
-
-	containerd, err := nvidiaClusterUsesContainerd(ctx, reader)
-	if err != nil {
-		return err
-	}
-
-	if !containerd {
-		runtimeClass = ""
 	}
 
 	agent := profile.NodeAgentRuntime
@@ -54,15 +45,6 @@ func enrichNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, pr
 	appendToolkitValidation(&exporter.InitContainers, &exporter.Volumes, &exporter.VolumeMounts, profile.MetricsExporter.Image)
 
 	return nil
-}
-
-func nvidiaClusterUsesContainerd(ctx context.Context, reader client.Reader) (bool, error) {
-	nodes := &corev1.NodeList{}
-	if err := reader.List(ctx, nodes); err != nil {
-		return false, err
-	}
-
-	return accelerator.NvidiaNodesUseContainerd(nodes.Items), nil
 }
 
 func appendToolkitValidation(initContainers *[]corev1.Container, volumes *[]v1.ComponentVolume, mounts *[]v1.ComponentVolumeMount, image string) {

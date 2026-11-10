@@ -3,7 +3,6 @@ package metrics
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -106,11 +105,8 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 		return nil, nil
 	}
 
-	nodes, err := m.clusterNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	var nodes []corev1.Node
+	nodesLoaded := false
 	var matching []metricsAcceleratorPlan
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
@@ -119,17 +115,31 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 			continue
 		}
 
-		if plan.Exporter == nil {
-			continue
-		}
+		// Operator plans already matched hardware through MatchCluster; selectors only gate scheduling.
+		if m.acceleratorOperators[plan.AcceleratorType] == nil {
+			if plan.Exporter == nil {
+				continue
+			}
 
-		if external && len(plan.Exporter.NodeSelector) == 0 {
-			continue
-		}
+			if external && len(plan.Exporter.NodeSelector) == 0 {
+				continue
+			}
 
-		if len(plan.Exporter.NodeSelector) > 0 &&
-			!acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes) {
-			continue
+			if !nodesLoaded {
+				var err error
+
+				nodes, err = m.clusterNodes(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				nodesLoaded = true
+			}
+
+			if len(plan.Exporter.NodeSelector) > 0 &&
+				!acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes) {
+				continue
+			}
 		}
 
 		matching = append(matching, plan)
@@ -159,16 +169,8 @@ func acceleratorExporterMatchesAnyNode(exporter metricsAcceleratorExporter, node
 		return false
 	}
 
-	selector := exporter.NodeSelector
-	if exporter.AcceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() &&
-		selector[publicaccelerator.NvidiaGPUClientLabel] == publicaccelerator.NvidiaGPUDiscoveryLabelValue {
-		// The client gate controls scheduling, not hardware discovery during driver recovery.
-		selector = maps.Clone(exporter.NodeSelector)
-		delete(selector, publicaccelerator.NvidiaGPUClientLabel)
-	}
-
 	for _, node := range nodes {
-		if nodeMatchesSelector(node, selector) {
+		if nodeMatchesSelector(node, exporter.NodeSelector) {
 			return true
 		}
 	}

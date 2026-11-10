@@ -171,6 +171,9 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileDeleteComps := []component.Component{}
 
 	operatorErr := c.reconcileAcceleratorOperators(reconcileCtx)
+	if operatorErr != nil && reconcileCtx.acceleratorOperators == nil {
+		return operatorErr
+	}
 
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
@@ -222,13 +225,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 // operator owns node labels and annotations; Legacy components still own all
 // workload deployment and deletion.
 func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconcileCtx *ReconcileContext) error {
-	reconcileCtx.acceleratorOperators = map[string]acceleratoroperator.AcceleratorOperator{}
+	reconcileCtx.acceleratorOperators = nil
+	candidates := map[string]acceleratoroperator.AcceleratorOperator{}
 
 	if c.acceleratorMgr == nil {
+		reconcileCtx.acceleratorOperators = candidates
 		return nil
 	}
-
-	candidates := map[string]acceleratoroperator.AcceleratorOperator{}
 
 	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
 		plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
@@ -253,11 +256,12 @@ func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconc
 	if len(candidates) > 1 {
 		return errors.Errorf("multiple accelerator operators match cluster: %d", len(candidates))
 	}
+	// Publish matching only after discovery succeeds; an API error must not select Legacy.
+	reconcileCtx.acceleratorOperators = candidates
 
 	var errs []error
 
 	for acceleratorType, acceleratorOperator := range candidates {
-		reconcileCtx.acceleratorOperators[acceleratorType] = acceleratorOperator
 		operatorContext := &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}
 
 		if err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {

@@ -88,9 +88,7 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	if managed {
 		// Hami keeps ownership of the device-plugin and virtualization label;
 		// only pass GPU Operator runtime compatibility through chart values.
-		if accelerator.NvidiaNodesUseContainerd(input.Nodes) {
-			devicePlugin["runtimeClassName"] = runtimeClass
-		}
+		devicePlugin["runtimeClassName"] = runtimeClass
 
 		if err := unstructured.SetNestedField(configPatch, accelerator.NvidiaGPUDiscoveryLabelValue,
 			"devicePlugin", "nvidiaNodeSelector", accelerator.NvidiaGPUClientLabel); err != nil {
