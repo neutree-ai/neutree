@@ -17,12 +17,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	internalaccelerator "github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
+	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func newNode(name string, schedulable bool, resources map[corev1.ResourceName]resource.Quantity, labels map[string]string) *corev1.Node {
@@ -668,6 +672,7 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 	gpuNode := newNodeWithAnnotations("gpu-node", true, nil, map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
 	}, map[string]string{
+		accelerator.NeutreeOwnerAnnotation:                 "true",
 		"hami.io/node-nvidia-register":                     `[{"id":"GPU-delete-path"}]`,
 		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-delete-path"}]`,
 	})
@@ -681,7 +686,6 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 		[]unstructured.Unstructured{*metricsClusterRole})
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
 	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
-	acceleratorMgr.On("OperatorForKubernetesCluster", string(v1.AcceleratorTypeNVIDIAGPU), cluster).Return(nil, nil)
 	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
 		Return(testVirtualizationPlugin{}, true)
 	reconciler := &NativeKubernetesClusterReconciler{
@@ -757,7 +761,6 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScopeFromSt
 		[]unstructured.Unstructured{*metricsClusterRole})
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
 	acceleratorMgr.On("SupportPlugins").Return([]string{string(v1.AcceleratorTypeNVIDIAGPU)})
-	acceleratorMgr.On("OperatorForKubernetesCluster", string(v1.AcceleratorTypeNVIDIAGPU), cluster).Return(nil, nil)
 	acceleratorMgr.On("GetPlugin", string(v1.AcceleratorTypeNVIDIAGPU)).
 		Return(testVirtualizationPlugin{}, true)
 	reconciler := &NativeKubernetesClusterReconciler{
@@ -834,4 +837,67 @@ func (testVirtualizationPlugin) ResolveClusterVirtualizationConfig(
 			DisabledValue: "false",
 		},
 	}, nil
+}
+
+func TestKubernetesAcceleratorOperatorUsesRegisteredFactory(t *testing.T) {
+	for _, tc := range []struct {
+		name, acceleratorType            string
+		managed, wantOperator, wantError bool
+		hasGPU, deleting                 bool
+	}{
+		{name: "GPU factory runs without managed dependencies", acceleratorType: accelerator.NvidiaAcceleratorType, hasGPU: true, wantOperator: true},
+		{name: "managed driver failure reported", acceleratorType: accelerator.NvidiaAcceleratorType, managed: true, hasGPU: true, wantOperator: true, wantError: true},
+		{name: "delete state after GPU discovery disappears", deleting: true},
+		{name: "no discovered GPU keeps Legacy", acceleratorType: accelerator.NvidiaAcceleratorType},
+		{name: "hardware discovery overrides configured type", acceleratorType: v1.AcceleratorTypeAMDGPU.String(), hasGPU: true, wantOperator: true},
+		{name: "unregistered factory remains Legacy", acceleratorType: v1.AcceleratorTypeAMDGPU.String()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, appsv1.AddToScheme(scheme))
+			scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicy"}, &unstructured.Unstructured{})
+			scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicyList"}, &unstructured.UnstructuredList{})
+			var objects []client.Object
+			if tc.deleting {
+				objects = append(objects, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Annotations: map[string]string{accelerator.NeutreeOwnerAnnotation: "true"}, Labels: map[string]string{accelerator.NvidiaGPUClientLabel: "false"}}})
+			}
+			if tc.hasGPU {
+				objects = append(objects, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: map[string]string{accelerator.NvidiaGPUDiscoveryLabelKey: "true"}}})
+			}
+			if tc.managed {
+				objects = append(objects, &unstructured.Unstructured{Object: map[string]interface{}{
+					"apiVersion": "nvidia.com/v1", "kind": "ClusterPolicy", "metadata": map[string]interface{}{"name": "policy"},
+					"spec": map[string]interface{}{"driver": map[string]interface{}{"enabled": true}, "toolkit": map[string]interface{}{"enabled": true}},
+				}})
+			}
+			ctrlClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			reconcileCtx := &ReconcileContext{Ctx: context.Background(), ctrClient: ctrlClient, Cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Config: &v1.ClusterConfig{AcceleratorType: ptr.To(tc.acceleratorType)}},
+			}}
+			reconciler := &NativeKubernetesClusterReconciler{acceleratorMgr: internalaccelerator.NewManager()}
+			if tc.deleting {
+				reconcileCtx.clusterNamespace = "test"
+				reconcileCtx.kubernetesClusterConfig = &v1.KubernetesClusterConfig{}
+				require.NoError(t, reconciler.deleteClusterComponents(reconcileCtx))
+				node := &corev1.Node{}
+				require.NoError(t, ctrlClient.Get(reconcileCtx.Ctx, client.ObjectKey{Name: "gpu-1"}, node))
+				require.NotContains(t, node.Annotations, accelerator.NeutreeOwnerAnnotation)
+				require.Equal(t, "false", node.Labels[accelerator.NvidiaGPUClientLabel])
+				return
+			}
+			err := reconciler.reconcileAcceleratorOperators(reconcileCtx)
+			if tc.wantError {
+				require.ErrorContains(t, err, "gpu-1 has no driver Pod")
+			} else {
+				require.NoError(t, err)
+			}
+			if tc.wantOperator {
+				require.Len(t, reconcileCtx.acceleratorOperators, 1)
+			} else {
+				require.Empty(t, reconcileCtx.acceleratorOperators)
+			}
+		})
+	}
 }

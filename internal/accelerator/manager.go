@@ -21,7 +21,6 @@ type Manager interface {
 
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, input publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
-	OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (publicaccelerator.AcceleratorOperator, error)
 	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -53,21 +52,6 @@ type Manager interface {
 	// internal type: the health sync loop removes any plugin whose Type() is
 	// not InternalPluginType. The batch is validated atomically.
 	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
-}
-
-func (a *manager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (publicaccelerator.AcceleratorOperator, error) {
-	acceleratorPlugin, ok := a.GetPlugin(acceleratorType)
-	if !ok {
-		return nil, nil
-	}
-
-	provider, ok := acceleratorPlugin.(publicaccelerator.KubernetesOperator)
-
-	if !ok {
-		return nil, nil
-	}
-
-	return provider.NewKubernetesOperator(cluster, a)
 }
 
 type registerPlugin struct {
@@ -303,18 +287,9 @@ func (a *manager) GetAcceleratorProfile(
 		return nil, errors.Errorf("accelerator plugin %s not found", input.AcceleratorType)
 	}
 
-	profile, err := p.Handle().GetAcceleratorProfile(ctx)
+	profile, err := p.Handle().GetAcceleratorProfile(ctx, input)
 	if err != nil {
 		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
-	}
-
-	if input.Cluster != nil {
-		if resolver, ok := p.Handle().(publicaccelerator.KubernetesProfileResolver); ok {
-			profile, err = resolver.ResolveKubernetesProfile(ctx, input.Cluster, profile)
-			if err != nil {
-				return nil, fmt.Errorf("%w from plugin %s: %w", publicaccelerator.ErrKubernetesProfileResolution, p.Resource(), err)
-			}
-		}
 	}
 
 	return profile, nil

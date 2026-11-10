@@ -2,13 +2,11 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
@@ -55,13 +53,7 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 ) (metricsAcceleratorPlan, bool, error) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType, Cluster: m.cluster})
 	if err != nil {
-		if errors.Is(err, publicaccelerator.ErrKubernetesProfileResolution) {
-			return metricsAcceleratorPlan{}, false, err
-		}
-
-		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
-
-		return metricsAcceleratorPlan{}, false, nil
+		return metricsAcceleratorPlan{}, false, err
 	}
 
 	if profile == nil {

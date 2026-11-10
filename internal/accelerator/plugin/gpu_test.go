@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -304,7 +305,7 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	p := &GPUAcceleratorPlugin{}
 
-	profile, err := p.GetAcceleratorProfile(context.Background())
+	profile, err := p.GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 
 	require.NoError(t, err)
 	require.NotNil(t, profile)
@@ -411,7 +412,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 func TestGPUAcceleratorPluginDeclaresPCIeThroughputAsGauge(t *testing.T) {
 	p := &GPUAcceleratorPlugin{}
 
-	profile, err := p.GetAcceleratorProfile(context.Background())
+	profile, err := p.GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 	require.NoError(t, err)
 	require.Len(t, profile.MetricsExporter.ConfigFiles, 1)
 
@@ -432,7 +433,7 @@ func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
 	// OCI device rewrite that systemd can rebuild.
 	p := &GPUAcceleratorPlugin{}
 
-	profile, err := p.GetAcceleratorProfile(context.Background())
+	profile, err := p.GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 	require.NoError(t, err)
 
 	// Exporter runtime selects the nvidia handler and keeps the --gpus all
@@ -449,7 +450,7 @@ func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
 func TestGPUAcceleratorPluginProfileNodeAgentExplicit(t *testing.T) {
 	p := &GPUAcceleratorPlugin{}
 
-	profile, err := p.GetAcceleratorProfile(context.Background())
+	profile, err := p.GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 
 	require.NoError(t, err)
 	require.NotNil(t, profile.NodeAgentRuntime)

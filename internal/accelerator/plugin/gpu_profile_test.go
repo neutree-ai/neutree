@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -42,27 +41,22 @@ func TestNvidiaKubernetesProfileRuntime(t *testing.T) {
 			}}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: map[string]string{NvidiaGPUDiscoveryLabelKey: "true"}}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{ContainerRuntimeVersion: tc.nodeRuntime}}}
 			reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(policy, node).Build()
-			profile, err := (&GPUAcceleratorPlugin{}).GetAcceleratorProfile(context.Background())
+			profile, err := (&GPUAcceleratorPlugin{}).GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 			require.NoError(t, err)
-			resolved, err := resolveNvidiaKubernetesProfile(context.Background(), reader, profile, "v1.2.0")
-			require.NoError(t, err)
-			assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime, "base StaticNode profile is unchanged")
-			assert.Empty(t, profile.NodeAgentRuntime.InitContainers)
-			assert.Equal(t, tc.wantClass, resolved.NodeAgentRuntime.Runtime)
-			assert.Equal(t, tc.wantClass, resolved.MetricsExporter.Runtime.Runtime)
+			require.NoError(t, enrichNvidiaKubernetesProfile(context.Background(), reader, profile))
+			assert.Equal(t, tc.wantClass, profile.NodeAgentRuntime.Runtime)
+			assert.Equal(t, tc.wantClass, profile.MetricsExporter.Runtime.Runtime)
 			if tc.driver && tc.toolkit {
-				selection, err := clusterversion.SelectNodeAgent("v1.2.0")
-				require.NoError(t, err)
-				assert.Equal(t, selection.Image, resolved.NodeAgentRuntime.InitContainers[0].Image)
-				assert.Equal(t, profile.MetricsExporter.Image, resolved.MetricsExporter.Runtime.InitContainers[0].Image)
+				assert.Empty(t, profile.NodeAgentRuntime.InitContainers[0].Image, "Metrics binds the selected primary image")
+				assert.Equal(t, profile.MetricsExporter.Image, profile.MetricsExporter.Runtime.InitContainers[0].Image)
 			}
 			for _, runtime := range []struct {
 				selector map[string]string
 				init     []corev1.Container
 				volumes  []v1.ComponentVolume
 			}{
-				{resolved.NodeAgentRuntime.NodeSelector, resolved.NodeAgentRuntime.InitContainers, resolved.NodeAgentRuntime.Volumes},
-				{resolved.MetricsExporter.Runtime.NodeSelector, resolved.MetricsExporter.Runtime.InitContainers, resolved.MetricsExporter.Runtime.Volumes},
+				{profile.NodeAgentRuntime.NodeSelector, profile.NodeAgentRuntime.InitContainers, profile.NodeAgentRuntime.Volumes},
+				{profile.MetricsExporter.Runtime.NodeSelector, profile.MetricsExporter.Runtime.InitContainers, profile.MetricsExporter.Runtime.Volumes},
 			} {
 				if !tc.driver || !tc.toolkit {
 					assert.Empty(t, runtime.init)

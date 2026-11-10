@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -53,8 +52,8 @@ func TestNvidiaOperatorReconcileNodeState(t *testing.T) {
 			if tc.running {
 				pod.Status.Phase = corev1.PodRunning
 			}
-			ctrlClient := driverTestClient(t, node, policy, driverTestDaemonSet(), pod)
-			_, err := NewNvidiaAcceleratorOperator().Reconcile(context.Background(), driverTestContext(ctrlClient))
+			ctrlClient := driverTestClient(t, node, policy, pod)
+			err := NewNvidiaAcceleratorOperator().Reconcile(context.Background(), driverTestContext(ctrlClient))
 			require.NoError(t, err)
 			got := &corev1.Node{}
 			require.NoError(t, ctrlClient.Get(context.Background(), client.ObjectKeyFromObject(node), got))
@@ -109,20 +108,26 @@ func TestNvidiaOperatorDeletePreservesClientLabel(t *testing.T) {
 
 func TestNvidiaOperatorStatusReportsDriverPodByNode(t *testing.T) {
 	for _, tc := range []struct {
-		name                      string
-		phase                     corev1.PodPhase
-		ready, missing, unmanaged bool
-		wantDetail                string
+		name                                  string
+		phase                                 corev1.PodPhase
+		ready, missing, unmanaged, secondNode bool
+		wantDetail                            string
 	}{
 		{name: "pending driver", phase: corev1.PodPending, wantDetail: "Init:CrashLoopBackOff"},
 		{name: "missing driver", missing: true, wantDetail: "has no driver Pod"},
+		{name: "multiple failed nodes are aggregated", missing: true, secondNode: true, wantDetail: "has no driver Pod"},
 		{name: "driver status not yet reported", wantDetail: "Unknown"},
 		{name: "Running but not Ready", phase: corev1.PodRunning, wantDetail: "Pod is not Ready"},
 		{name: "ready driver", phase: corev1.PodRunning, ready: true},
 		{name: "OS driver", unmanaged: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objects := []client.Object{driverTestNode(), driverTestDaemonSet()}
+			objects := []client.Object{driverTestNode()}
+			if tc.secondNode {
+				node := driverTestNode()
+				node.Name = "gpu-2"
+				objects = append(objects, node)
+			}
 			if !tc.unmanaged {
 				objects = append(objects, driverTestPolicy())
 			}
@@ -136,19 +141,19 @@ func TestNvidiaOperatorStatusReportsDriverPodByNode(t *testing.T) {
 				}
 				objects = append(objects, pod)
 			}
-			status, err := NewNvidiaAcceleratorOperator().Status(context.Background(), driverTestContext(driverTestClient(t, objects...)))
-			require.NoError(t, err)
+			err := NewNvidiaAcceleratorOperator().Status(context.Background(), driverTestContext(driverTestClient(t, objects...)))
 			if tc.wantDetail == "" {
-				require.Equal(t, v1.ComponentPhaseReady, status.Phase)
+				require.NoError(t, err)
 				return
 			}
-			require.Equal(t, v1.ComponentPhaseNotReady, status.Phase)
-			require.Equal(t, "DriverNotReady", status.Reason)
-			require.Contains(t, status.Message, "gpu-1")
-			require.Contains(t, status.Message, tc.wantDetail)
-			require.Contains(t, status.Message, "driver libraries may be unavailable")
+			require.ErrorContains(t, err, "gpu-1")
+			if tc.secondNode {
+				require.ErrorContains(t, err, "gpu-2")
+			}
+			require.ErrorContains(t, err, tc.wantDetail)
+			require.ErrorContains(t, err, "driver libraries may be unavailable")
 			if !tc.missing {
-				require.Contains(t, status.Message, "nvidia-driver-abc")
+				require.ErrorContains(t, err, "nvidia-driver-abc")
 			}
 		})
 	}
@@ -176,7 +181,6 @@ func driverTestClient(t *testing.T, objects ...client.Object) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
-	require.NoError(t, appsv1.AddToScheme(scheme))
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicy"}, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "nvidia.com", Version: "v1", Kind: "ClusterPolicyList"}, &unstructured.UnstructuredList{})
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
@@ -199,10 +203,6 @@ func driverTestPolicy() *unstructured.Unstructured {
 	}}
 }
 
-func driverTestDaemonSet() *appsv1.DaemonSet {
-	return &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-driver", Namespace: "gpu-operator", UID: "driver-ds"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{NodeSelector: map[string]string{accelerator.NvidiaDriverDeployLabel: "true"}}}}}
-}
-
 func driverTestPod(phase corev1.PodPhase) *corev1.Pod {
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-driver-abc", Namespace: "gpu-operator", UID: "driver-pod", Labels: map[string]string{accelerator.NvidiaDriverAppLabel: accelerator.NvidiaDriverAppValue, accelerator.NvidiaDriverComponentLabel: accelerator.NvidiaDriverComponentValue}, OwnerReferences: []metav1.OwnerReference{{Kind: "DaemonSet", Name: "nvidia-driver", UID: "driver-ds", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{NodeName: "gpu-1"}, Status: corev1.PodStatus{Phase: phase}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-driver-abc", Namespace: "gpu-operator", UID: "driver-pod", Labels: map[string]string{accelerator.NvidiaDriverAppLabel: accelerator.NvidiaDriverAppValue, accelerator.NvidiaDriverComponentLabel: accelerator.NvidiaDriverComponentValue}}, Spec: corev1.PodSpec{NodeName: "gpu-1"}, Status: corev1.PodStatus{Phase: phase}}
 }

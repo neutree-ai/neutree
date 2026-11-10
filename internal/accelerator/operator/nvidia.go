@@ -3,13 +3,11 @@ package operator
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -21,35 +19,35 @@ func (n *NvidiaAcceleratorOperator) AcceleratorType() string {
 	return accelerator.NvidiaAcceleratorType
 }
 
-func (n *NvidiaAcceleratorOperator) Reconcile(ctx context.Context, opCtx *OperatorContext) (OperatorResult, error) {
+func (n *NvidiaAcceleratorOperator) Reconcile(ctx context.Context, opCtx *OperatorContext) error {
 	if err := validateContext(opCtx); err != nil {
-		return OperatorResult{}, err
+		return err
 	}
 
 	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, opCtx.Client)
 	if err != nil {
-		return OperatorResult{}, err
+		return err
 	}
 
 	managed, _, err := accelerator.NvidiaOperatorRuntime(policies)
 	if err != nil || !managed {
-		return OperatorResult{}, err
+		return err
 	}
 
 	if nativeNvidiaClientManagement(policies) {
-		return OperatorResult{}, nil
+		return nil
 	}
 
 	pods, err := nvidiaDriverPods(ctx, opCtx.Client)
 	if err != nil {
-		return OperatorResult{}, err
+		return err
 	}
 
 	nodes := &corev1.NodeList{}
 	if err := opCtx.Client.List(ctx, nodes, client.MatchingLabels{
 		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
 	}); err != nil {
-		return OperatorResult{}, err
+		return err
 	}
 
 	// Metrics/HAMi own workloads and virtualization labels. Only opted-in
@@ -64,64 +62,54 @@ func (n *NvidiaAcceleratorOperator) Reconcile(ctx context.Context, opCtx *Operat
 		}
 
 		if err := opCtx.Client.Patch(ctx, updated, client.MergeFrom(node)); err != nil {
-			return OperatorResult{}, err
+			return err
 		}
 	}
 
-	return OperatorResult{}, nil
+	return nil
 }
 
-func (n *NvidiaAcceleratorOperator) Status(ctx context.Context, opCtx *OperatorContext) (*v1.ComponentStatus, error) {
+func (n *NvidiaAcceleratorOperator) Status(ctx context.Context, opCtx *OperatorContext) error {
 	if err := validateContext(opCtx); err != nil {
-		return nil, err
+		return err
 	}
-
-	status := &v1.ComponentStatus{Phase: v1.ComponentPhaseReady, Managed: true, Version: accelerator.NvidiaAcceleratorType}
 
 	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, opCtx.Client)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	managed, _, err := accelerator.NvidiaOperatorRuntime(policies)
 	if err != nil || !managed {
-		return status, err
+		return err
 	}
 
 	pods, err := nvidiaDriverPods(ctx, opCtx.Client)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	nodes := &corev1.NodeList{}
 	if err := opCtx.Client.List(ctx, nodes, client.MatchingLabels{
 		accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue,
 	}); err != nil {
-		return nil, err
+		return err
 	}
-	var failures []string
+	var failures []error
 
 	for _, node := range nodes.Items {
 		pod := driverPodForNode(pods, node.Name)
 		if pod == nil {
-			failures = append(failures, fmt.Sprintf("node %s has no driver Pod; NVIDIA driver and driver libraries may be unavailable", node.Name))
+			failures = append(failures, fmt.Errorf("node %s has no driver Pod; NVIDIA driver and driver libraries may be unavailable", node.Name))
 			continue
 		}
 
 		if detail := driverPodFailure(pod); detail != "" {
-			failures = append(failures, fmt.Sprintf("node %s driver Pod %s is not ready: %s; NVIDIA driver and driver libraries may be unavailable", node.Name, pod.Name, detail))
+			failures = append(failures, fmt.Errorf("node %s driver Pod %s is not ready: %s; NVIDIA driver and driver libraries may be unavailable", node.Name, pod.Name, detail))
 		}
 	}
 
-	if len(failures) > 0 {
-		sort.Strings(failures)
-
-		status.Phase = v1.ComponentPhaseNotReady
-		status.Reason = "DriverNotReady"
-		status.Message = strings.Join(failures, "; ")
-	}
-
-	return status, nil
+	return utilerrors.NewAggregate(failures)
 }
 
 func (n *NvidiaAcceleratorOperator) Delete(ctx context.Context, opCtx *OperatorContext) error {

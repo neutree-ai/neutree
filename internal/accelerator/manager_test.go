@@ -460,7 +460,7 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetContainerRuntimeConfig() (v1.Runtim
 	return v1.RuntimeConfig{}, nil
 }
 
-func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context, _ publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	return p.acceleratorProfile, nil
 }
 

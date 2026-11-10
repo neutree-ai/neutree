@@ -1589,13 +1589,11 @@ func TestBuildMetricsResourcesProjectsAcceleratorExporterWithoutName(t *testing.
 
 func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 	for _, test := range []struct {
-		name          string
-		profileError  error
-		expectedError bool
+		name         string
+		profileError error
 	}{
-		{name: "unavailable legacy profile is skipped", profileError: errors.New("profile endpoint returned 404")},
-		{name: "Kubernetes dependency discovery error stops rendering", profileError: errors.Join(
-			publicaccelerator.ErrKubernetesProfileResolution, errors.New("ClusterPolicy API forbidden")), expectedError: true},
+		{name: "unavailable profile stops rendering", profileError: errors.New("profile endpoint returned 404")},
+		{name: "Kubernetes dependency discovery error stops rendering", profileError: errors.New("ClusterPolicy API forbidden")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			acceleratorMgr := &acceleratormocks.MockManager{}
@@ -1634,17 +1632,8 @@ func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 			}
 
 			objs, err := metricsCmpt.GetMetricsResources(context.Background())
-			if test.expectedError {
-				require.ErrorIs(t, err, publicaccelerator.ErrKubernetesProfileResolution)
-				require.Nil(t, objs, "failed dependency discovery cannot replace the GPU plan with a generic agent")
-				return
-			}
-			require.NoError(t, err)
-
-			findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
-			for _, obj := range objs.Items {
-				assert.Assert(t, !(obj.GetKind() == "DaemonSet" && strings.Contains(obj.GetName(), "legacy-accelerator")))
-			}
+			require.ErrorIs(t, err, test.profileError)
+			require.Nil(t, objs, "failed profile discovery must not produce partial resources")
 		})
 	}
 }

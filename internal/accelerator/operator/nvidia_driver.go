@@ -32,20 +32,13 @@ func nvidiaDriverPods(ctx context.Context, reader client.Reader) ([]corev1.Pod, 
 }
 
 func driverPodForNode(pods []corev1.Pod, node string) *corev1.Pod {
-	var latest *corev1.Pod
-
 	for i := range pods {
-		pod := &pods[i]
-		if pod.Spec.NodeName != node {
-			continue
-		}
-
-		if latest == nil {
-			latest = pod
+		if pods[i].Spec.NodeName == node {
+			return &pods[i]
 		}
 	}
 
-	return latest
+	return nil
 }
 
 func driverPodFailure(pod *corev1.Pod) string {

@@ -119,7 +119,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
 		} else {
-			nodeAgents, planErr := planMetricsNodeAgents(m.cluster.GetVersion(), acceleratorPlans)
+			nodeAgents, planErr := m.planMetricsNodeAgents(acceleratorPlans)
 			if planErr != nil {
 				status.Errors = append(status.Errors, fmt.Sprintf("node-agent plan failed: %v", planErr))
 			} else {

@@ -4,5 +4,4 @@ package operator
 import "github.com/neutree-ai/neutree/pkg/accelerator"
 
 type OperatorContext = accelerator.OperatorContext
-type OperatorResult = accelerator.OperatorResult
 type AcceleratorOperator = accelerator.AcceleratorOperator

@@ -13,18 +13,20 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 	for _, test := range []struct {
 		name, clientLabel string
-		managed           bool
+		managed, operator bool
 	}{
-		{name: "unmanaged keeps shared agent"},
-		{name: "managed GPU ready", managed: true, clientLabel: "true"},
-		{name: "managed GPU recovering", managed: true, clientLabel: "false"},
-		{name: "managed client label not initialized", managed: true},
+		{name: "legacy keeps shared agent"},
+		{name: "operator with OS dependencies splits agents", operator: true},
+		{name: "managed GPU ready", managed: true, operator: true, clientLabel: "true"},
+		{name: "managed GPU recovering", managed: true, operator: true, clientLabel: "false"},
+		{name: "managed client label not initialized", managed: true, operator: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			manager := acceleratormocks.NewMockManager(t)
@@ -43,11 +45,14 @@ func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 				).Build(),
 			}
 
+			if test.operator {
+				component.WithAcceleratorOperators(map[string]accelerator.AcceleratorOperator{accelerator.NvidiaAcceleratorType: operator.NewNvidiaAcceleratorOperator()})
+			}
 			resources, err := component.GetMetricsResources(context.Background())
 			require.NoError(t, err)
 			agent := findMetricsDaemonSet(t, resources, neutreeNodeAgentMetricsName)
 			exporter := findMetricsDaemonSet(t, resources, "nvidia-gpu-dcgm-exporter")
-			if !test.managed {
+			if !test.operator {
 				require.False(t, hasMetricsDaemonSet(resources, cpuNodeAgentMetricsName))
 				require.Empty(t, agent.Spec.Template.Spec.NodeSelector)
 				require.Nil(t, agent.Spec.Template.Spec.Affinity)
@@ -55,6 +60,12 @@ func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 			}
 
 			for _, daemonSet := range []*corev1.PodSpec{&agent.Spec.Template.Spec, &exporter.Spec.Template.Spec} {
+				if !test.managed {
+					require.Nil(t, daemonSet.RuntimeClassName)
+					require.Empty(t, daemonSet.InitContainers)
+					require.NotContains(t, daemonSet.NodeSelector, accelerator.NvidiaGPUClientLabel)
+					continue
+				}
 				require.NotNil(t, daemonSet.RuntimeClassName)
 				require.Equal(t, "nvidia", *daemonSet.RuntimeClassName)
 				require.Len(t, daemonSet.InitContainers, 1)
@@ -112,7 +123,7 @@ func metricsNvidiaProfile(managed bool) *v1.AcceleratorProfile {
 	}
 	if managed {
 		profile.NodeAgentRuntime.Runtime = "nvidia"
-		profile.NodeAgentRuntime.InitContainers = []corev1.Container{{Name: "toolkit-validation", Image: "neutree/neutree-node-agent:v1.2.0-rc.1"}}
+		profile.NodeAgentRuntime.InitContainers = []corev1.Container{{Name: "toolkit-validation"}}
 		profile.NodeAgentRuntime.NodeSelector = map[string]string{accelerator.NvidiaGPUClientLabel: "true"}
 		profile.MetricsExporter.Runtime.Runtime = "nvidia"
 		profile.MetricsExporter.Runtime.InitContainers = []corev1.Container{{Name: "toolkit-validation", Image: profile.MetricsExporter.Image}}

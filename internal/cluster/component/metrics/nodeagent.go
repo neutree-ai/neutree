@@ -38,19 +38,24 @@ type nodeAgentDeploymentPlan struct {
 	NodeAgent metricsNodeAgent
 }
 
-func planMetricsNodeAgents(clusterVersion string, plans []metricsAcceleratorPlan) ([]nodeAgentDeploymentPlan, error) {
-	agent, err := selectedMetricsNodeAgent(clusterVersion, plans)
+func (m *MetricsComponent) planMetricsNodeAgents(plans []metricsAcceleratorPlan) ([]nodeAgentDeploymentPlan, error) {
+	agent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), plans)
 	if err != nil {
 		return nil, err
 	}
 
+	// Legacy profiles retain their existing single agent and profile selector.
 	deployments := []nodeAgentDeploymentPlan{{Name: neutreeNodeAgentMetricsName, NodeAgent: agent}}
-	if len(plans) == 0 || plans[0].AcceleratorType != v1.AcceleratorTypeNVIDIAGPU.String() ||
-		agent.NodeSelector[accelerator.NvidiaGPUClientLabel] != "true" {
+	if len(plans) == 0 || m.acceleratorOperators[plans[0].AcceleratorType] == nil ||
+		plans[0].AcceleratorType != v1.AcceleratorTypeNVIDIAGPU.String() {
 		return deployments, nil
 	}
 
 	// A recovering GPU stays outside the generic agent's range even while its client label is false.
+	if agent.NodeSelector == nil {
+		agent.NodeSelector = map[string]string{}
+	}
+
 	agent.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
 	deployments[0].NodeAgent = agent
 	cpuAgent := defaultMetricsNodeAgent()

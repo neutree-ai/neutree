@@ -232,11 +232,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconc
 
 	for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
 		plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
-		if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
+		if !ok {
 			continue
 		}
 
-		acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
+		opCtx := &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}
+
+		acceleratorOperator, err := publicaccelerator.ResolveOperator(reconcileCtx.Ctx, plugin, opCtx, c.acceleratorMgr)
 		if err != nil {
 			return errors.Wrapf(err, "create accelerator operator %s", acceleratorType)
 		}
@@ -258,29 +260,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconc
 		reconcileCtx.acceleratorOperators[acceleratorType] = acceleratorOperator
 		operatorContext := &acceleratoroperator.OperatorContext{Cluster: reconcileCtx.Cluster, Client: reconcileCtx.ctrClient, Namespace: reconcileCtx.clusterNamespace}
 
-		if _, err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {
+		if err := acceleratorOperator.Reconcile(reconcileCtx.Ctx, operatorContext); err != nil {
 			errs = append(errs, errors.Wrapf(err, "reconcile accelerator operator %s", acceleratorType))
 			continue
 		}
 
-		status, err := acceleratorOperator.Status(reconcileCtx.Ctx, operatorContext)
-		if err != nil {
-			errs = append(errs, errors.Wrapf(err, "status accelerator operator %s", acceleratorType))
-			continue
-		}
-
-		if reconcileCtx.Cluster.Status == nil {
-			reconcileCtx.Cluster.Status = &v1.ClusterStatus{}
-		}
-
-		if reconcileCtx.Cluster.Status.ComponentStatus == nil {
-			reconcileCtx.Cluster.Status.ComponentStatus = map[string]*v1.ComponentStatus{}
-		}
-
-		reconcileCtx.Cluster.Status.ComponentStatus["accelerator-operator/"+acceleratorOperator.Name()] = status
-
-		if status.Phase != v1.ComponentPhaseReady {
-			errs = append(errs, errors.Errorf("accelerator operator %s is not ready: %s: %s", acceleratorOperator.Name(), status.Reason, status.Message))
+		if err := acceleratorOperator.Status(reconcileCtx.Ctx, operatorContext); err != nil {
+			errs = append(errs, errors.Wrapf(err, "accelerator operator %s", acceleratorOperator.Name()))
 		}
 	}
 
@@ -328,6 +314,7 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
+		WithAcceleratorOperators(reconcileCtx.acceleratorOperators).
 		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster)).
 		WithCacheProviders(c.cacheProviders)
 	reconcileComps = append(reconcileComps, metricsComp)
@@ -402,11 +389,17 @@ func (c *NativeKubernetesClusterReconciler) deleteClusterComponents(
 	if c.acceleratorMgr != nil {
 		for _, acceleratorType := range c.acceleratorMgr.SupportPlugins() {
 			plugin, ok := c.acceleratorMgr.GetPlugin(acceleratorType)
-			if !ok || plugin == nil || !publicaccelerator.PluginMatchesCluster(plugin, reconcileCtx.Cluster) {
+			if !ok {
 				continue
 			}
 
-			acceleratorOperator, err := c.acceleratorMgr.OperatorForKubernetesCluster(acceleratorType, reconcileCtx.Cluster)
+			factory, ok := plugin.(publicaccelerator.OperatorFactory)
+			if !ok {
+				continue
+			}
+
+			// Cleanup still applies after hardware discovery labels disappear.
+			acceleratorOperator, err := factory.NewKubernetesOperator(reconcileCtx.Cluster, c.acceleratorMgr)
 			if err != nil {
 				errs = append(errs, errors.Wrapf(err, "create accelerator operator %s for deletion", acceleratorType))
 				continue

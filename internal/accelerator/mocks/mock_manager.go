@@ -751,65 +751,6 @@ func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// OperatorForKubernetesCluster provides a mock function with given fields: acceleratorType, cluster
-func (_m *MockManager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (accelerator.AcceleratorOperator, error) {
-	ret := _m.Called(acceleratorType, cluster)
-
-	if len(ret) == 0 {
-		panic("no return value specified for OperatorForKubernetesCluster")
-	}
-
-	var r0 accelerator.AcceleratorOperator
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) (accelerator.AcceleratorOperator, error)); ok {
-		return rf(acceleratorType, cluster)
-	}
-	if rf, ok := ret.Get(0).(func(string, *v1.Cluster) accelerator.AcceleratorOperator); ok {
-		r0 = rf(acceleratorType, cluster)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(accelerator.AcceleratorOperator)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, *v1.Cluster) error); ok {
-		r1 = rf(acceleratorType, cluster)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockManager_OperatorForKubernetesCluster_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'OperatorForKubernetesCluster'
-type MockManager_OperatorForKubernetesCluster_Call struct {
-	*mock.Call
-}
-
-// OperatorForKubernetesCluster is a helper method to define mock.On call
-//   - acceleratorType string
-//   - cluster *v1.Cluster
-func (_e *MockManager_Expecter) OperatorForKubernetesCluster(acceleratorType interface{}, cluster interface{}) *MockManager_OperatorForKubernetesCluster_Call {
-	return &MockManager_OperatorForKubernetesCluster_Call{Call: _e.mock.On("OperatorForKubernetesCluster", acceleratorType, cluster)}
-}
-
-func (_c *MockManager_OperatorForKubernetesCluster_Call) Run(run func(acceleratorType string, cluster *v1.Cluster)) *MockManager_OperatorForKubernetesCluster_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(*v1.Cluster))
-	})
-	return _c
-}
-
-func (_c *MockManager_OperatorForKubernetesCluster_Call) Return(_a0 accelerator.AcceleratorOperator, _a1 error) *MockManager_OperatorForKubernetesCluster_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockManager_OperatorForKubernetesCluster_Call) RunAndReturn(run func(string, *v1.Cluster) (accelerator.AcceleratorOperator, error)) *MockManager_OperatorForKubernetesCluster_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // SupportPlugins provides a mock function with no fields
 func (_m *MockManager) SupportPlugins() []string {
 	ret := _m.Called()

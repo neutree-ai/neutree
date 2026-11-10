@@ -17,6 +17,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -215,17 +216,18 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 
 func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 	for _, test := range []struct {
-		name                       string
-		managed, missingCPU        bool
-		gpuDesired, cpuDesired     int32
-		cpuNotReady, expectedReady bool
+		name                          string
+		operator, managed, missingCPU bool
+		gpuDesired, cpuDesired        int32
+		cpuNotReady, expectedReady    bool
 	}{
 		{name: "single legacy agent", gpuDesired: 2, expectedReady: true},
-		{name: "managed mixed nodes", managed: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
-		{name: "managed GPU only", managed: true, gpuDesired: 1, expectedReady: true},
-		{name: "GPU recovery retains CPU coverage", managed: true, cpuDesired: 1, expectedReady: true},
-		{name: "CPU agent missing", managed: true, gpuDesired: 1, missingCPU: true},
-		{name: "CPU agent not ready", managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true},
+		{name: "operator with OS dependencies", operator: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
+		{name: "managed mixed nodes", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, expectedReady: true},
+		{name: "managed GPU only", operator: true, managed: true, gpuDesired: 1, expectedReady: true},
+		{name: "GPU recovery retains CPU coverage", operator: true, managed: true, cpuDesired: 1, expectedReady: true},
+		{name: "CPU agent missing", operator: true, managed: true, gpuDesired: 1, missingCPU: true},
+		{name: "CPU agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			objects := []client.Object{
@@ -240,7 +242,8 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 					Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
 				},
 			}
-			if test.managed {
+			if test.operator {
+				component.WithAcceleratorOperators(map[string]publicaccelerator.AcceleratorOperator{publicaccelerator.NvidiaAcceleratorType: operator.NewNvidiaAcceleratorOperator()})
 				objects = append(objects, metricsTestNode("gpu", map[string]string{
 					publicaccelerator.NvidiaGPUDiscoveryLabelKey: publicaccelerator.NvidiaGPUDiscoveryLabelValue,
 				}), readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", test.gpuDesired))
@@ -253,7 +256,7 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 				}
 				manager := acceleratormocks.NewMockManager(t)
 				manager.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()})
-				manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(metricsNvidiaProfile(true), nil)
+				manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(metricsNvidiaProfile(test.managed), nil)
 				component.acceleratorMgr = manager
 			}
 			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).Build()

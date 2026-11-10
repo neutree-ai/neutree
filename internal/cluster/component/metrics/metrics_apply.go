@@ -75,7 +75,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableNeutreeNodeAgentMetrics {
-		nodeAgents, err = planMetricsNodeAgents(m.cluster.GetVersion(), acceleratorPlans)
+		nodeAgents, err = m.planMetricsNodeAgents(acceleratorPlans)
 		if err != nil {
 			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
 		}
@@ -132,6 +132,12 @@ func (m *MetricsComponent) nodeAgentManifestVariables(variables MetricsManifestV
 
 	if plan.NodeAgent.Image != "" {
 		variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, plan.NodeAgent.Image)
+	}
+
+	for i := range variables.NodeAgent.InitContainers {
+		if variables.NodeAgent.InitContainers[i].Image == "" {
+			variables.NodeAgent.InitContainers[i].Image = variables.NeutreeNodeAgentMetricsImage
+		}
 	}
 
 	return variables

@@ -3,7 +3,6 @@ package accelerator
 
 import (
 	"context"
-	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -15,10 +14,6 @@ import (
 const (
 	InternalPluginType = "internal"
 )
-
-// ErrKubernetesProfileResolution prevents API discovery failures from being
-// treated like an unsupported optional legacy profile.
-var ErrKubernetesProfileResolution = errors.New("resolve Kubernetes accelerator profile")
 
 type Plugin interface {
 	Resource() string
@@ -32,12 +27,12 @@ type PluginProvider interface {
 }
 
 type Matcher interface {
-	MatchCluster(*v1.Cluster) bool
+	MatchCluster(context.Context, *OperatorContext) (bool, error)
 }
 
-// KubernetesOperator is implemented by plugins that provide a Kubernetes
+// OperatorFactory is implemented by plugins that provide a Kubernetes
 // accelerator operator. Plugins without this optional interface stay Legacy.
-type KubernetesOperator interface {
+type OperatorFactory interface {
 	NewKubernetesOperator(*v1.Cluster, PluginProvider) (AcceleratorOperator, error)
 }
 
@@ -47,27 +42,30 @@ type OperatorContext struct {
 	Namespace string
 }
 
-type OperatorResult struct{}
-
 type AcceleratorOperator interface {
 	Name() string
 	AcceleratorType() string
-	Reconcile(context.Context, *OperatorContext) (OperatorResult, error)
-	Status(context.Context, *OperatorContext) (*v1.ComponentStatus, error)
+	Reconcile(context.Context, *OperatorContext) error
+	Status(context.Context, *OperatorContext) error
 	Delete(context.Context, *OperatorContext) error
 }
 
-func PluginMatchesCluster(plugin Plugin, cluster *v1.Cluster) bool {
-	if plugin == nil {
-		return false
-	}
-
-	matcher, ok := plugin.(Matcher)
+// ResolveOperator checks factory support before hardware matching so Legacy
+// plugins need no Kubernetes-specific interfaces or discovery calls.
+func ResolveOperator(ctx context.Context, plugin Plugin, opCtx *OperatorContext, provider PluginProvider) (AcceleratorOperator, error) {
+	factory, ok := plugin.(OperatorFactory)
 	if !ok {
-		return true
+		return nil, nil
 	}
 
-	return matcher.MatchCluster(cluster)
+	if matcher, ok := plugin.(Matcher); ok {
+		matched, err := matcher.MatchCluster(ctx, opCtx)
+		if err != nil || !matched {
+			return nil, err
+		}
+	}
+
+	return factory.NewKubernetesOperator(opCtx.Cluster, provider)
 }
 
 // AcceleratorProfileInput identifies the accelerator profile and optional
@@ -82,15 +80,9 @@ type PluginHandle interface {
 	GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
 	DetectStaticNodeAccelerator(context.Context, *v1.DetectStaticNodeAcceleratorRequest) (*v1.DetectStaticNodeAcceleratorResponse, error)
 	GetContainerRuntimeConfig() (v1.RuntimeConfig, error)
-	GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error)
+	GetAcceleratorProfile(context.Context, AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
 	GetResourceConverter() ResourceConverter
 	GetResourceParser() ResourceParser
-}
-
-// KubernetesProfileResolver optionally enriches a base profile with
-// Kubernetes-only runtime fields. StaticNode callers never invoke it.
-type KubernetesProfileResolver interface {
-	ResolveKubernetesProfile(context.Context, *v1.Cluster, *v1.AcceleratorProfile) (*v1.AcceleratorProfile, error)
 }
 
 // StaticNodeRuntimeConfigResolver optionally resolves a cluster runtime

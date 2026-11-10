@@ -25,38 +25,35 @@ import (
 func TestCleanupUnexpectedAdmissionPods(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*corev1.Pod, *appsv1.ReplicaSet)
+		mutate func(*corev1.Pod)
 		remove bool
 	}{
 		{name: "owned admission failure", remove: true},
-		{name: "running Pod", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
+		{name: "running Pod", mutate: func(pod *corev1.Pod) {
 			pod.Status = corev1.PodStatus{Phase: corev1.PodRunning}
 		}},
-		{name: "pending Pod", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
+		{name: "pending Pod", mutate: func(pod *corev1.Pod) {
 			pod.Status = corev1.PodStatus{Phase: corev1.PodPending}
 		}},
-		{name: "other failure reason", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
+		{name: "other failure reason", mutate: func(pod *corev1.Pod) {
 			pod.Status.Reason = "Evicted"
 		}},
-		{name: "another namespace", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
+		{name: "another namespace", mutate: func(pod *corev1.Pod) {
 			pod.Namespace = "another-namespace"
 		}},
-		{name: "another Deployment", mutate: func(_ *corev1.Pod, replicaSet *appsv1.ReplicaSet) {
-			replicaSet.OwnerReferences[0].UID = "another-deployment-uid"
+		{name: "another Deployment", mutate: func(pod *corev1.Pod) {
+			pod.Labels["endpoint"] = "other-endpoint"
 		}},
-		{name: "recreated ReplicaSet with a different UID", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
-			pod.OwnerReferences[0].UID = "old-replicaset-uid"
-		}},
-		{name: "external Pod", mutate: func(pod *corev1.Pod, _ *appsv1.ReplicaSet) {
-			pod.OwnerReferences = nil
+		{name: "external Pod", mutate: func(pod *corev1.Pod) {
+			pod.Labels = nil
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, deployment, replicaSet, pod := admissionCleanupFixtures()
+			ctx, deployment, pod := admissionCleanupFixtures()
 			if tc.mutate != nil {
-				tc.mutate(pod, replicaSet)
+				tc.mutate(pod)
 			}
-			ctx.ctrClient = admissionCleanupClient(t, deployment, replicaSet, pod)
+			ctx.ctrClient = admissionCleanupClient(t, deployment, pod)
 			cleanupUnexpectedAdmissionPods(ctx)
 			err := ctx.ctrClient.Get(context.Background(), client.ObjectKeyFromObject(pod), &corev1.Pod{})
 			if tc.remove {
@@ -77,11 +74,11 @@ func TestCleanupUnexpectedAdmissionPodsDeleteFailures(t *testing.T) {
 		{name: "replacement Pod is protected by the UID precondition", replace: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, deployment, replicaSet, pod := admissionCleanupFixtures()
+			ctx, deployment, pod := admissionCleanupFixtures()
 			other := pod.DeepCopy()
 			other.Name = "second-failed-pod"
 			other.UID = "second-pod-uid"
-			base := admissionCleanupClient(t, deployment, replicaSet, pod, other)
+			base := admissionCleanupClient(t, deployment, pod, other)
 			ctx.ctrClient = interceptor.NewClient(base, interceptor.Funcs{
 				Delete: func(callCtx context.Context, c client.WithWatch, object client.Object, opts ...client.DeleteOption) error {
 					options := &client.DeleteOptions{}
@@ -118,22 +115,17 @@ func TestCleanupUnexpectedAdmissionPodsDeleteFailures(t *testing.T) {
 	}
 }
 
-func admissionCleanupFixtures() (*OrchestratorContext, *appsv1.Deployment, *appsv1.ReplicaSet, *corev1.Pod) {
+func admissionCleanupFixtures() (*OrchestratorContext, *appsv1.Deployment, *corev1.Pod) {
 	cluster := &v1.Cluster{Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"}}
 	namespace := util.ClusterNamespace(cluster)
-	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "endpoint", Namespace: namespace, UID: "deployment-uid"}}
-	replicaSet := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
-		Name: "endpoint-replicaset", Namespace: namespace, UID: "replicaset-uid",
-		OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(deployment, appsv1.SchemeGroupVersion.WithKind("Deployment"))},
-	}}
+	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "endpoint", Namespace: namespace, UID: "deployment-uid"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"endpoint": "endpoint"}}}}
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "failed-pod", Namespace: namespace, UID: "pod-uid",
-			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(replicaSet, appsv1.SchemeGroupVersion.WithKind("ReplicaSet"))}},
-		Status: corev1.PodStatus{Phase: corev1.PodFailed, Reason: "UnexpectedAdmissionError"},
+		ObjectMeta: metav1.ObjectMeta{Name: "failed-pod", Namespace: namespace, UID: "pod-uid", Labels: map[string]string{"endpoint": "endpoint"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodFailed, Reason: "UnexpectedAdmissionError"},
 	}
 	return &OrchestratorContext{
 		Cluster: cluster, Endpoint: &v1.Endpoint{Metadata: &v1.Metadata{Name: deployment.Name}}, logger: klog.Background(),
-	}, deployment, replicaSet, pod
+	}, deployment, pod
 }
 
 func admissionCleanupClient(t *testing.T, objects ...client.Object) client.WithWatch {

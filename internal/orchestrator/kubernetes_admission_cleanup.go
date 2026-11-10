@@ -6,7 +6,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/neutree-ai/neutree/internal/util"
@@ -25,29 +24,14 @@ func cleanupUnexpectedAdmissionPods(ctx *OrchestratorContext) {
 		return
 	}
 
-	replicaSets := &appsv1.ReplicaSetList{}
-	if err := ctx.ctrClient.List(callCtx, replicaSets, client.InNamespace(namespace)); err != nil {
-		ctx.logger.Error(err, "Failed to list ReplicaSets for admission Pod cleanup")
-		return
-	}
-
-	ownedReplicaSets := map[types.UID]struct{}{}
-
-	for index := range replicaSets.Items {
-		replicaSet := &replicaSets.Items[index]
-
-		owner := metav1.GetControllerOf(replicaSet)
-		if owner != nil && owner.Kind == deploymentKind && owner.UID == deployment.UID {
-			ownedReplicaSets[replicaSet.UID] = struct{}{}
-		}
-	}
-
-	if len(ownedReplicaSets) == 0 {
+	selector, err := metav1.LabelSelectorAsSelector(deployment.Spec.Selector)
+	if err != nil {
+		ctx.logger.Error(err, "Failed to read deployment selector for admission Pod cleanup")
 		return
 	}
 
 	pods := &corev1.PodList{}
-	if err := ctx.ctrClient.List(callCtx, pods, client.InNamespace(namespace)); err != nil {
+	if err := ctx.ctrClient.List(callCtx, pods, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
 		ctx.logger.Error(err, "Failed to list Pods for admission Pod cleanup")
 		return
 	}
@@ -58,14 +42,6 @@ func cleanupUnexpectedAdmissionPods(ctx *OrchestratorContext) {
 			continue
 		}
 
-		owner := metav1.GetControllerOf(pod)
-		if owner == nil || owner.Kind != "ReplicaSet" {
-			continue
-		}
-
-		if _, owned := ownedReplicaSets[owner.UID]; !owned {
-			continue
-		}
 		// The Pod name may have been reused since the list; delete only the observed UID.
 		if err := ctx.ctrClient.Delete(callCtx, pod, &client.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}}); err != nil {
 			if client.IgnoreNotFound(err) != nil {
