@@ -8,14 +8,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
-const (
-	nvidiaValidationPath  = accelerator.NvidiaValidationPath
-	nvidiaValidationImage = "docker.io/library/busybox:1.36"
-)
+const nvidiaValidationPath = accelerator.NvidiaValidationPath
 
 // ResolveKubernetesProfile applies the existing GPU Operator runtime gate to
 // the base profile. StaticNode callers do not invoke this method.
@@ -29,10 +27,10 @@ func (p *GPUAcceleratorPlugin) ResolveKubernetesProfile(ctx context.Context, clu
 		return nil, err
 	}
 
-	return resolveNvidiaKubernetesProfile(ctx, ctrlClient, profile)
+	return resolveNvidiaKubernetesProfile(ctx, ctrlClient, profile, cluster.GetVersion())
 }
 
-func resolveNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, profile *v1.AcceleratorProfile) (*v1.AcceleratorProfile, error) {
+func resolveNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, profile *v1.AcceleratorProfile, clusterVersion string) (*v1.AcceleratorProfile, error) {
 	policies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, reader)
 	if err != nil {
 		return nil, err
@@ -48,14 +46,25 @@ func resolveNvidiaKubernetesProfile(ctx context.Context, reader client.Reader, p
 		return nil, err
 	}
 
+	nodeAgentImage := ""
+
+	if managed {
+		selection, err := clusterversion.SelectNodeAgent(clusterVersion)
+		if err != nil {
+			return nil, err
+		}
+
+		nodeAgentImage = selection.Image
+	}
+
 	resolved := *profile
 	if profile.NodeAgentRuntime != nil {
-		resolved.NodeAgentRuntime = enrichNodeAgentRuntime(profile.NodeAgentRuntime, managed && containerd, runtimeClass, managed)
+		resolved.NodeAgentRuntime = enrichNodeAgentRuntime(profile.NodeAgentRuntime, managed && containerd, runtimeClass, managed, nodeAgentImage)
 	}
 
 	if profile.MetricsExporter != nil && profile.MetricsExporter.Runtime != nil {
 		exporter := *profile.MetricsExporter
-		exporter.Runtime = enrichExporterRuntime(profile.MetricsExporter.Runtime, managed && containerd, runtimeClass, managed)
+		exporter.Runtime = enrichExporterRuntime(profile.MetricsExporter.Runtime, managed && containerd, runtimeClass, managed, exporter.Image)
 		resolved.MetricsExporter = &exporter
 	}
 
@@ -71,7 +80,7 @@ func nvidiaClusterUsesContainerd(ctx context.Context, reader client.Reader) (boo
 	return accelerator.NvidiaNodesUseContainerd(nodes.Items), nil
 }
 
-func enrichNodeAgentRuntime(base *v1.NodeAgentRuntimeProfile, useRuntimeClass bool, runtimeClass string, managed bool) *v1.NodeAgentRuntimeProfile {
+func enrichNodeAgentRuntime(base *v1.NodeAgentRuntimeProfile, useRuntimeClass bool, runtimeClass string, managed bool, image string) *v1.NodeAgentRuntimeProfile {
 	resolved := *base
 	resolved.NodeSelector = maps.Clone(base.NodeSelector)
 	resolved.Env = maps.Clone(base.Env)
@@ -92,13 +101,15 @@ func enrichNodeAgentRuntime(base *v1.NodeAgentRuntimeProfile, useRuntimeClass bo
 
 		resolved.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
 		resolved.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
-		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts)
+		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts, image)
 	}
 
 	return &resolved
 }
 
-func enrichExporterRuntime(base *v1.AcceleratorExporterRuntimeProfile, useRuntimeClass bool, runtimeClass string, managed bool) *v1.AcceleratorExporterRuntimeProfile {
+func enrichExporterRuntime(
+	base *v1.AcceleratorExporterRuntimeProfile, useRuntimeClass bool, runtimeClass string, managed bool, image string,
+) *v1.AcceleratorExporterRuntimeProfile {
 	resolved := *base
 	resolved.NodeSelector = maps.Clone(base.NodeSelector)
 	resolved.Volumes = append([]v1.ComponentVolume(nil), base.Volumes...)
@@ -118,16 +129,16 @@ func enrichExporterRuntime(base *v1.AcceleratorExporterRuntimeProfile, useRuntim
 
 		resolved.NodeSelector[accelerator.NvidiaGPUClientLabel] = accelerator.NvidiaGPUDiscoveryLabelValue
 		resolved.NodeSelector[accelerator.NvidiaGPUDiscoveryLabelKey] = accelerator.NvidiaGPUDiscoveryLabelValue
-		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts)
+		appendToolkitValidation(&resolved.InitContainers, &resolved.Volumes, &resolved.VolumeMounts, image)
 	}
 
 	return &resolved
 }
 
-func appendToolkitValidation(initContainers *[]corev1.Container, volumes *[]v1.ComponentVolume, mounts *[]v1.ComponentVolumeMount) {
+func appendToolkitValidation(initContainers *[]corev1.Container, volumes *[]v1.ComponentVolume, mounts *[]v1.ComponentVolumeMount, image string) {
 	propagation := corev1.MountPropagationHostToContainer
 	*initContainers = append(*initContainers, corev1.Container{
-		Name: "toolkit-validation", Image: nvidiaValidationImage,
+		Name: "toolkit-validation", Image: image,
 		Command:      []string{"sh", "-c"},
 		Args:         []string{"until [ -f " + nvidiaValidationPath + "/toolkit-ready ]; do sleep 5; done"},
 		VolumeMounts: []corev1.VolumeMount{{Name: "nvidia-validations", MountPath: nvidiaValidationPath, ReadOnly: true, MountPropagation: &propagation}},

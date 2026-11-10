@@ -58,7 +58,7 @@ func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 				require.NotNil(t, daemonSet.RuntimeClassName)
 				require.Equal(t, "nvidia", *daemonSet.RuntimeClassName)
 				require.Len(t, daemonSet.InitContainers, 1)
-				require.Equal(t, "registry.example.com/neutree/library/busybox:1.36", daemonSet.InitContainers[0].Image)
+				require.Equal(t, daemonSet.Containers[0].Image, daemonSet.InitContainers[0].Image)
 				require.Equal(t, "true", daemonSet.NodeSelector[accelerator.NvidiaGPUClientLabel])
 			}
 			require.Equal(t, "all", envValue(agent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
@@ -112,10 +112,10 @@ func metricsNvidiaProfile(managed bool) *v1.AcceleratorProfile {
 	}
 	if managed {
 		profile.NodeAgentRuntime.Runtime = "nvidia"
-		profile.NodeAgentRuntime.InitContainers = []corev1.Container{{Name: "toolkit-validation", Image: "docker.io/library/busybox:1.36"}}
+		profile.NodeAgentRuntime.InitContainers = []corev1.Container{{Name: "toolkit-validation", Image: "neutree/neutree-node-agent:v1.2.0-rc.1"}}
 		profile.NodeAgentRuntime.NodeSelector = map[string]string{accelerator.NvidiaGPUClientLabel: "true"}
 		profile.MetricsExporter.Runtime.Runtime = "nvidia"
-		profile.MetricsExporter.Runtime.InitContainers = profile.NodeAgentRuntime.InitContainers
+		profile.MetricsExporter.Runtime.InitContainers = []corev1.Container{{Name: "toolkit-validation", Image: profile.MetricsExporter.Image}}
 		profile.MetricsExporter.Runtime.NodeSelector[accelerator.NvidiaGPUClientLabel] = "true"
 	}
 	return profile

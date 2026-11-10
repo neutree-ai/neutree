@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -43,12 +44,18 @@ func TestNvidiaKubernetesProfileRuntime(t *testing.T) {
 			reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(policy, node).Build()
 			profile, err := (&GPUAcceleratorPlugin{}).GetAcceleratorProfile(context.Background())
 			require.NoError(t, err)
-			resolved, err := resolveNvidiaKubernetesProfile(context.Background(), reader, profile)
+			resolved, err := resolveNvidiaKubernetesProfile(context.Background(), reader, profile, "v1.2.0")
 			require.NoError(t, err)
 			assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime, "base StaticNode profile is unchanged")
 			assert.Empty(t, profile.NodeAgentRuntime.InitContainers)
 			assert.Equal(t, tc.wantClass, resolved.NodeAgentRuntime.Runtime)
 			assert.Equal(t, tc.wantClass, resolved.MetricsExporter.Runtime.Runtime)
+			if tc.driver && tc.toolkit {
+				selection, err := clusterversion.SelectNodeAgent("v1.2.0")
+				require.NoError(t, err)
+				assert.Equal(t, selection.Image, resolved.NodeAgentRuntime.InitContainers[0].Image)
+				assert.Equal(t, profile.MetricsExporter.Image, resolved.MetricsExporter.Runtime.InitContainers[0].Image)
+			}
 			for _, runtime := range []struct {
 				selector map[string]string
 				init     []corev1.Container
