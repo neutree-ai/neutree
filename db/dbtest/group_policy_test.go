@@ -52,7 +52,7 @@ func setGroupPolicy(t *testing.T, kind, subject string, allowed, denied []map[st
 		INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 		VALUES ('v1', 'GroupPolicy',
 			ROW($1, NULL, NULL, NULL, NULL, NULL, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2, $3, $4::jsonb, $5::jsonb, NULL)::api.group_policy_spec)`,
+			ROW($2, $3, $4::jsonb, $5::jsonb, NULL, NULL, NULL)::api.group_policy_spec)`,
 		name, kind, subject, toJSON(allowed), toJSON(denied)); err != nil {
 		t.Fatalf("setting the policy of %s %s failed: %v", kind, subject, err)
 	}
@@ -457,7 +457,7 @@ func TestGroupPolicy_Write(t *testing.T) {
 		status                         int
 	}{
 		{"second policy for the group", http.MethodPost, "/group_policies", groupPolicyBody("Team", team, nil, nil), "23505", http.StatusConflict},
-		{"unknown kind", http.MethodPost, "/group_policies", groupPolicyBody("User", team, nil, nil), "10300", http.StatusBadRequest},
+		{"unknown kind", http.MethodPost, "/group_policies", groupPolicyBody("Bogus", team, nil, nil), "10300", http.StatusBadRequest},
 		{"unknown group", http.MethodPost, "/group_policies", groupPolicyBody("OrgUnit", team, nil, nil), "10294", http.StatusBadRequest},
 		{"bad entry", http.MethodPost, "/group_policies", groupPolicyBody("Team", team, []any{"a"}, nil), "10302", http.StatusBadRequest},
 		{"bad list", http.MethodPost, "/group_policies", groupPolicyBody("Team", team, nil, map[string]any{"model": "a"}), "10302", http.StatusBadRequest},
@@ -613,8 +613,8 @@ func TestGroupPolicy_PresetRolePermissions(t *testing.T) {
 			t.Fatalf("reading roles failed: %v", err)
 		}
 
-		// department-admin reads the policies of its subtree's users.
-		if !admin || dept != (p == "group_policy:read") || ws {
+		// department-admin writes the user policies of its subtree.
+		if !admin || !dept || ws {
 			t.Errorf("%s: admin %v, department-admin %v, workspace-user %v", p, admin, dept, ws)
 		}
 	}

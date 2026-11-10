@@ -155,7 +155,7 @@ func TestTeamAdmin_NoEscalation(t *testing.T) {
 		{"set the Team's group policy", `
 			INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 			VALUES ('v1', 'GroupPolicy', ROW('ta-gp', NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-			        ROW('Team', $1, NULL, NULL, '{"limit": 1000000}'::jsonb)::api.group_policy_spec)`, []any{f.team}, "row-level security"},
+			        ROW('Team', $1, NULL, NULL, '{"limit": 1000000}'::jsonb, NULL, NULL)::api.group_policy_spec)`, []any{f.team}, "row-level security"},
 		{"grant itself a role", `
 			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 			VALUES ('v1', 'RoleAssignment', ROW('ta-ra', NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
@@ -183,13 +183,15 @@ func TestTeamAdmin_NoEscalation(t *testing.T) {
 		}
 	})
 
-	t.Run("holds no permission on users, roles or policies", func(t *testing.T) {
+	// group_policy:* on its Team reaches the policies of its members and SAs
+	// only; the Team's own policy needs a global assignment (above).
+	t.Run("holds no permission on users or roles", func(t *testing.T) {
 		var perms string
 		if err := f.db.QueryRow(`SELECT (spec).permissions::text FROM api.roles WHERE (metadata).name = 'team-admin'`).Scan(&perms); err != nil {
 			t.Fatal(err)
 		}
 
-		for _, p := range []string{"user_profile:", "role:", "role_assignment:", "group_policy:", "team:create", "team:update", "team:delete"} {
+		for _, p := range []string{"user_profile:", "role:", "role_assignment:", "team:create", "team:update", "team:delete"} {
 			if strings.Contains(perms, p) {
 				t.Errorf("team-admin holds %s*: %s", p, perms)
 			}

@@ -252,8 +252,9 @@ type modelRules struct {
 	Allowed []v1.AllowedModel `json:"allowed_models"`
 	// Denied names models refused on any endpoint.
 	Denied []string `json:"denied_models"`
-	// GroupTokenPool is true when a group of the owner has a token pool, so
-	// the key needs the quota plugin even without a quota of its own.
+	// GroupTokenPool is true when a token pool applies to the owner (one of
+	// its groups', or one set on the owner itself), so the key needs the quota
+	// plugin even without a quota of its own.
 	GroupTokenPool bool `json:"group_token_pool"`
 }
 

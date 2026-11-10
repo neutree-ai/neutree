@@ -37,7 +37,7 @@ func setPool(t *testing.T, kind, subject string, limit int64, period string) str
 		INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 		VALUES ('v1', 'GroupPolicy',
 			ROW($1, NULL, NULL, NULL, NULL, NULL, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2, $3, NULL, NULL, jsonb_build_object('limit', $4::bigint, 'period', $5::text))::api.group_policy_spec)`,
+			ROW($2, $3, NULL, NULL, jsonb_build_object('limit', $4::bigint, 'period', $5::text), NULL, NULL)::api.group_policy_spec)`,
 		name, kind, subject, limit, period); err != nil {
 		t.Fatalf("setting the pool of %s %s failed: %v", kind, subject, err)
 	}
