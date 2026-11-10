@@ -360,3 +360,57 @@ func TestTeamAdmin_UsageByDimensionTeam(t *testing.T) {
 		t.Errorf("no filter: %v, want own key and the member's key", all)
 	}
 }
+
+// get_readable_usage_teams lists the Teams the caller may open as a usage
+// scope: a team-admin's own Teams, every Team for a global reader.
+func TestTeamAdmin_ReadableUsageTeams(t *testing.T) {
+	f := newTeamAdminFixture(t)
+
+	teamReader := rawUser(t, f.db, "ta-team-reader")
+	bindGlobal(t, f.db, teamReader, customRole(t, f.db, "team_usage:read"))
+
+	usageReader := rawUser(t, f.db, "ta-usage-reader")
+	bindGlobal(t, f.db, usageReader, customRole(t, f.db, "workspace:usage-read"))
+
+	readable := func(user string) map[int]bool {
+		t.Helper()
+
+		ids := map[int]bool{}
+		if err := asUser(t, f.db, user, nil, func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT id FROM api.get_readable_usage_teams()`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var id int
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				ids[id] = true
+			}
+
+			return rows.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		return ids
+	}
+
+	if got := readable(f.admin); len(got) != 2 || !got[f.teamID] || !got[f.syncedID] {
+		t.Errorf("team-admin: %v, want only Teams %d and %d", got, f.teamID, f.syncedID)
+	}
+
+	if got := readable(f.member); len(got) != 0 {
+		t.Errorf("member: %v, want none", got)
+	}
+
+	for name, user := range map[string]string{"team_usage:read": teamReader, "workspace:usage-read": usageReader} {
+		got := readable(user)
+		if !got[f.teamID] || !got[f.otherID] || !got[f.syncedID] {
+			t.Errorf("global %s: %v, want every Team", name, got)
+		}
+	}
+}

@@ -1,5 +1,43 @@
--- Restores get_usage_by_dimension of migration 132, and get_usage_by_group,
--- group_daily_usage_on_aggregated and the bucket index of migration 133.
+-- Restores get_usage_by_dimension and can_read_api_key_usage of migration
+-- 132, and get_usage_by_group, group_daily_usage_on_aggregated and the bucket
+-- index of migration 133.
+
+DROP FUNCTION IF EXISTS api.get_readable_usage_teams();
+
+CREATE OR REPLACE FUNCTION api.can_read_api_key_usage(p_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    v_owner UUID;
+    v_sa    UUID;
+    v_ws    TEXT;
+BEGIN
+    -- The gateway calls with a service_role token. PostgREST exposes claims via
+    -- request.jwt.claims (JSON); some setups also set request.jwt.claim.role.
+    IF (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role'
+       OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+        RETURN TRUE;
+    END IF;
+    -- No authenticated user -> deny. A NULL result here would slip past callers'
+    -- `IF NOT api.can_read_api_key_usage(...)` guards (NOT NULL is not TRUE).
+    IF auth.uid() IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    SELECT user_id, service_account_id, (metadata).workspace INTO v_owner, v_sa, v_ws FROM api.api_keys WHERE id = p_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    RETURN api.can_read_api_key_owner_usage(v_owner, v_sa)
+        OR api.has_permission(auth.uid(), 'workspace:usage-read', v_ws) IS TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS api.can_read_key_usage(UUID, UUID, TEXT);
+DROP FUNCTION IF EXISTS api.usage_filter_org_unit_ids(TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS api.usage_filter_team_id(TEXT);
+DROP FUNCTION IF EXISTS api.readable_usage_org_unit_ids(UUID);
+DROP FUNCTION IF EXISTS api.readable_usage_team_ids(UUID);
 
 DROP FUNCTION IF EXISTS api.get_usage_by_group(DATE, DATE, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN);
 
@@ -348,6 +386,8 @@ BEGIN
     RETURN NULL;
 END;
 $$;
+
+DROP INDEX IF EXISTS api.group_daily_usage_api_key_idx;
 
 DROP INDEX api.group_daily_usage_bucket_idx;
 

@@ -92,6 +92,160 @@ BEGIN
 END;
 $$;
 
+-- Per-key reads of group rows (get_usage_by_dimension).
+CREATE INDEX group_daily_usage_api_key_idx ON api.group_daily_usage (api_key_id, usage_date)
+    WHERE api_key_id IS NOT NULL;
+
+-- ----------------------
+-- Usage helpers
+-- ----------------------
+
+-- The Teams whose usage p_user reads; can_read_team_usage is the one-Team form.
+CREATE OR REPLACE FUNCTION api.readable_usage_team_ids(p_user UUID)
+RETURNS INTEGER[]
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF api.has_permission(p_user, 'team_usage:read', NULL) IS TRUE THEN
+        RETURN ARRAY(SELECT t.id FROM api.teams t);
+    END IF;
+
+    RETURN ARRAY(
+        SELECT t.id FROM api.teams t
+        WHERE api.has_team_scoped_permission(p_user, 'team_usage:read', t.id) IS TRUE);
+END;
+$$;
+
+-- The OrgUnits whose usage p_user reads.
+CREATE OR REPLACE FUNCTION api.readable_usage_org_unit_ids(p_user UUID)
+RETURNS INTEGER[]
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF api.has_permission(p_user, 'org_unit:usage-read', NULL) IS TRUE THEN
+        RETURN ARRAY(SELECT u.id FROM api.org_units u);
+    END IF;
+
+    -- Through api.check_org_role_binding: it is an extension point.
+    RETURN ARRAY(
+        SELECT u.id FROM api.org_units u
+        WHERE api.has_org_scoped_permission(p_user, 'org_unit:usage-read', u.id) IS TRUE);
+END;
+$$;
+
+-- The Team filter of the usage RPCs: NULL (no filter) for no name, 0 (no
+-- row) for an unknown one.
+CREATE OR REPLACE FUNCTION api.usage_filter_team_id(p_team TEXT)
+RETURNS INTEGER
+LANGUAGE sql
+STABLE
+STRICT
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+    SELECT COALESCE((SELECT t.id FROM api.teams t WHERE (t.metadata).name = p_team), 0);
+$$;
+
+-- The OrgUnit filter of the usage RPCs: the OrgUnit alone with p_direct,
+-- else its subtree; NULL (no filter) for no name, empty for an unknown one.
+CREATE OR REPLACE FUNCTION api.usage_filter_org_unit_ids(p_org_unit TEXT, p_direct BOOLEAN)
+RETURNS INTEGER[]
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    IF p_org_unit IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    IF p_direct THEN
+        RETURN ARRAY(SELECT r.id FROM api.org_units r WHERE (r.metadata).name = p_org_unit);
+    END IF;
+
+    RETURN ARRAY(
+        SELECT s.id
+        FROM api.org_units r
+        CROSS JOIN LATERAL api.org_unit_subtree(r.id) s
+        WHERE (r.metadata).name = p_org_unit);
+END;
+$$;
+
+-- May the caller read the usage of a key of the user p_user_id or the SA
+-- p_service_account_id in p_workspace? For a deleted key, pass the owner and
+-- workspace its usage was recorded with.
+CREATE OR REPLACE FUNCTION api.can_read_key_usage(
+    p_user_id UUID,
+    p_service_account_id UUID,
+    p_workspace TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+    SELECT api.can_read_api_key_owner_usage(p_user_id, p_service_account_id)
+        OR api.has_permission(auth.uid(), 'workspace:usage-read', p_workspace) IS TRUE;
+$$;
+
+CREATE OR REPLACE FUNCTION api.can_read_api_key_usage(p_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    v_owner UUID;
+    v_sa    UUID;
+    v_ws    TEXT;
+BEGIN
+    -- The gateway calls with a service_role token. PostgREST exposes claims via
+    -- request.jwt.claims (JSON); some setups also set request.jwt.claim.role.
+    IF (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role'
+       OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+        RETURN TRUE;
+    END IF;
+    -- No authenticated user -> deny. A NULL result here would slip past callers'
+    -- `IF NOT api.can_read_api_key_usage(...)` guards (NOT NULL is not TRUE).
+    IF auth.uid() IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    SELECT user_id, service_account_id, (metadata).workspace INTO v_owner, v_sa, v_ws FROM api.api_keys WHERE id = p_id;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    RETURN api.can_read_key_usage(v_owner, v_sa, v_ws);
+END;
+$$;
+
+-- The Teams the caller may open as a usage scope. A global
+-- workspace:usage-read reads every Team, as in get_usage_by_group.
+CREATE OR REPLACE FUNCTION api.get_readable_usage_teams()
+RETURNS TABLE (
+    id INTEGER,
+    api_version TEXT,
+    kind TEXT,
+    metadata api.metadata,
+    status api.org_status
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+    SELECT t.id, t.api_version, t.kind, t.metadata, t.status
+    FROM api.teams t
+    WHERE (SELECT api.has_permission(auth.uid(), 'workspace:usage-read', NULL)) IS TRUE
+       OR t.id = ANY ((SELECT api.readable_usage_team_ids(auth.uid()))::INTEGER[])
+    ORDER BY t.id;
+$$;
+
 -- ----------------------
 -- Usage by key
 -- ----------------------
@@ -142,57 +296,33 @@ DECLARE
     v_uid UUID := auth.uid();
     v_scoped BOOLEAN := p_team IS NOT NULL OR p_org_unit IS NOT NULL;
     -- Teams and OrgUnits whose usage the caller reads.
-    v_teams INTEGER[];
-    v_units INTEGER[];
+    v_teams INTEGER[] := api.readable_usage_team_ids(v_uid);
+    v_units INTEGER[] := api.readable_usage_org_unit_ids(v_uid);
     -- NULL = no filter; an unknown name matches no row.
-    v_filter_team INTEGER;
-    v_filter_units INTEGER[];
+    v_filter_team INTEGER := api.usage_filter_team_id(p_team);
+    v_filter_units INTEGER[] := api.usage_filter_org_unit_ids(p_org_unit, FALSE);
 BEGIN
-    IF api.has_permission(v_uid, 'team_usage:read', NULL) IS TRUE THEN
-        v_teams := ARRAY(SELECT t.id FROM api.teams t);
-    ELSE
-        v_teams := ARRAY(
-            SELECT t.id FROM api.teams t
-            WHERE api.has_team_scoped_permission(v_uid, 'team_usage:read', t.id) IS TRUE);
-    END IF;
-
-    IF api.has_permission(v_uid, 'org_unit:usage-read', NULL) IS TRUE THEN
-        v_units := ARRAY(SELECT u.id FROM api.org_units u);
-    ELSE
-        v_units := ARRAY(
-            SELECT u.id FROM api.org_units u
-            WHERE api.has_org_scoped_permission(v_uid, 'org_unit:usage-read', u.id) IS TRUE);
-    END IF;
-
-    IF p_team IS NOT NULL THEN
-        SELECT t.id INTO v_filter_team FROM api.teams t WHERE (t.metadata).name = p_team;
-        v_filter_team := COALESCE(v_filter_team, 0);
-    END IF;
-
-    IF p_org_unit IS NOT NULL THEN
-        v_filter_units := ARRAY(
-            SELECT s.id
-            FROM api.org_units r
-            CROSS JOIN LATERAL api.org_unit_subtree(r.id) s
-            WHERE (r.metadata).name = p_org_unit);
-    END IF;
-
     RETURN QUERY
-    WITH user_api_keys AS (
+    WITH g AS (
+        SELECT u.*
+        FROM api.group_daily_usage u
+        WHERE u.api_key_id IS NOT NULL
+          AND u.usage_date BETWEEN p_start_date AND p_end_date
+          AND (p_api_key_id IS NULL OR u.api_key_id = p_api_key_id)
+          AND (v_filter_team IS NULL OR v_filter_team = ANY (u.team_ids))
+          AND (v_filter_units IS NULL OR u.org_unit_id = ANY (v_filter_units))
+    ), keys AS MATERIALIZED (
+        -- Scoped reads use group rows only, so only their keys are needed.
         SELECT
             ak.id,
             (ak.metadata).name AS key_name,
             (ak.metadata).display_name AS key_display_name,
             (ak.spec).description AS key_description,
-            (ak.metadata).workspace AS key_workspace
+            (ak.metadata).workspace AS key_workspace,
+            api.can_read_key_usage(ak.user_id, ak.service_account_id, (ak.metadata).workspace) AS readable
         FROM api.api_keys ak
-        WHERE (
-            api.can_read_api_key_owner_usage(ak.user_id, ak.service_account_id)
-            OR api.has_permission(
-                v_uid, 'workspace:usage-read', (ak.metadata).workspace
-            )
-        )
-        AND (p_api_key_id IS NULL OR ak.id = p_api_key_id)
+        WHERE (p_api_key_id IS NULL OR ak.id = p_api_key_id)
+          AND (NOT v_scoped OR ak.id IN (SELECT g.api_key_id FROM g))
     ), old_dimension_data AS (
         SELECT
             (u.spec).usage_date,
@@ -212,9 +342,10 @@ BEGIN
             NULL::bigint AS r_tokens,
             NULL::numeric AS cost
         FROM api.api_daily_usage u
-        JOIN user_api_keys k ON (u.spec).api_key_id = k.id,
+        JOIN keys k ON (u.spec).api_key_id = k.id,
              jsonb_each((u.spec).dimensional_usage) kv
         WHERE NOT v_scoped
+          AND k.readable IS TRUE
           AND (u.spec).usage_date BETWEEN p_start_date AND p_end_date
           AND (u.spec).detailed_dimensional_usage IS NULL
     ), new_dimension_data AS (
@@ -236,34 +367,26 @@ BEGIN
             (kv.value->>'reasoning')::bigint AS r_tokens,
             (kv.value->>'cost_usd')::numeric AS cost
         FROM api.api_daily_usage u
-        JOIN user_api_keys k ON (u.spec).api_key_id = k.id,
+        JOIN keys k ON (u.spec).api_key_id = k.id,
              jsonb_each((u.spec).detailed_dimensional_usage) kv
         WHERE NOT v_scoped
+          AND k.readable IS TRUE
           AND (u.spec).usage_date BETWEEN p_start_date AND p_end_date
           AND (u.spec).detailed_dimensional_usage IS NOT NULL
-    ), g AS (
-        SELECT u.*
-        FROM api.group_daily_usage u
-        WHERE u.api_key_id IS NOT NULL
-          AND u.usage_date BETWEEN p_start_date AND p_end_date
-          AND (p_api_key_id IS NULL OR u.api_key_id = p_api_key_id)
-          AND (v_filter_team IS NULL OR v_filter_team = ANY (u.team_ids))
-          AND (v_filter_units IS NULL OR u.org_unit_id = ANY (v_filter_units))
     ), deleted_keys AS MATERIALIZED (
-        -- Checked once per key, not per row.
+        -- A key's rows share one owner and workspace: checked once per key.
         SELECT d.api_key_id
-        FROM (SELECT DISTINCT g.api_key_id, g.user_id, g.service_account_id, g.workspace
-              FROM g
-              WHERE NOT EXISTS (SELECT 1 FROM api.api_keys ak WHERE ak.id = g.api_key_id)) d
-        WHERE api.can_read_api_key_owner_usage(d.user_id, d.service_account_id)
-           OR api.has_permission(v_uid, 'workspace:usage-read', d.workspace) IS TRUE
+        FROM (SELECT DISTINCT ON (g.api_key_id) g.api_key_id, g.user_id, g.service_account_id, g.workspace
+              FROM g) d
+        WHERE NOT EXISTS (SELECT 1 FROM keys k WHERE k.id = d.api_key_id)
+          AND api.can_read_key_usage(d.user_id, d.service_account_id, d.workspace)
     ), group_data AS (
         SELECT
             g.usage_date,
             g.api_key_id,
-            (ak.metadata).name AS key_name,
-            (ak.metadata).display_name AS key_display_name,
-            (ak.spec).description AS key_description,
+            k.key_name,
+            k.key_display_name,
+            k.key_description,
             NULLIF(g.endpoint_type, '') AS endpoint_type,
             g.endpoint_name,
             NULLIF(g.model_name, '') AS model_name,
@@ -276,23 +399,16 @@ BEGIN
             SUM(g.reasoning_tokens)::bigint AS r_tokens,
             SUM(g.cost_usd) AS cost
         FROM g
-        LEFT JOIN api.api_keys ak ON ak.id = g.api_key_id
-        LEFT JOIN user_api_keys k ON k.id = g.api_key_id
+        LEFT JOIN keys k ON k.id = g.api_key_id
         WHERE CASE
-            WHEN v_scoped THEN
-                k.id IS NOT NULL
-                OR g.api_key_id IN (SELECT dk.api_key_id FROM deleted_keys dk)
-                OR g.team_ids && v_teams
-                OR COALESCE(g.org_unit_id = ANY (v_units), FALSE)
-            ELSE
-                -- Directly readable keys come from api_daily_usage above.
-                k.id IS NULL
-                AND (g.api_key_id IN (SELECT dk.api_key_id FROM deleted_keys dk)
-                     OR g.team_ids && v_teams
-                     OR COALESCE(g.org_unit_id = ANY (v_units), FALSE))
+            -- Unscoped, directly readable keys come from api_daily_usage above.
+            WHEN k.readable IS TRUE THEN v_scoped
+            ELSE g.api_key_id IN (SELECT dk.api_key_id FROM deleted_keys dk)
+                 OR g.team_ids && v_teams
+                 OR COALESCE(g.org_unit_id = ANY (v_units), FALSE)
         END
-        GROUP BY g.usage_date, g.api_key_id, (ak.metadata).name, (ak.metadata).display_name,
-                 (ak.spec).description, g.endpoint_type, g.endpoint_name, g.model_name, g.workspace
+        GROUP BY g.usage_date, g.api_key_id, k.key_name, k.key_display_name, k.key_description,
+                 g.endpoint_type, g.endpoint_name, g.model_name, g.workspace
     ), dimension_data AS (
         SELECT * FROM old_dimension_data
         UNION ALL
@@ -368,12 +484,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
 DECLARE
+    v_direct BOOLEAN := COALESCE(p_direct, FALSE);
     -- NULL = every row; otherwise only rows recorded under these OrgUnits.
     v_units INTEGER[];
     -- NULL = no filter; an unknown name matches no row.
     v_filter_units INTEGER[];
     v_filter_team INTEGER;
-    v_unassigned BOOLEAN := COALESCE(p_direct, FALSE) AND p_org_unit IS NULL;
+    v_unassigned BOOLEAN := v_direct AND p_org_unit IS NULL;
 BEGIN
     IF api.has_permission(auth.uid(), 'workspace:usage-read', NULL) IS NOT TRUE THEN
         IF v_unassigned THEN
@@ -390,13 +507,8 @@ BEGIN
                 RAISE insufficient_privilege
                     USING message = 'global workspace:usage-read is required to read usage by Team, or team_usage:read on that Team';
             END IF;
-        ELSIF api.has_permission(auth.uid(), 'org_unit:usage-read', NULL) IS TRUE THEN
-            v_units := ARRAY(SELECT u.id FROM api.org_units u);
         ELSE
-            -- Through api.check_org_role_binding: it is an extension point.
-            v_units := ARRAY(
-                SELECT u.id FROM api.org_units u
-                WHERE api.has_org_scoped_permission(auth.uid(), 'org_unit:usage-read', u.id) IS TRUE);
+            v_units := api.readable_usage_org_unit_ids(auth.uid());
         END IF;
 
         IF v_units IS NOT NULL AND cardinality(v_units) = 0 THEN
@@ -410,21 +522,8 @@ BEGIN
             USING message = 'p_kind must be User, Team, OrgUnit or ServiceAccount';
     END IF;
 
-    IF p_org_unit IS NOT NULL AND COALESCE(p_direct, FALSE) THEN
-        v_filter_units := ARRAY(
-            SELECT r.id FROM api.org_units r WHERE (r.metadata).name = p_org_unit);
-    ELSIF p_org_unit IS NOT NULL THEN
-        v_filter_units := ARRAY(
-            SELECT s.id
-            FROM api.org_units r
-            CROSS JOIN LATERAL api.org_unit_subtree(r.id) s
-            WHERE (r.metadata).name = p_org_unit);
-    END IF;
-
-    IF p_team IS NOT NULL THEN
-        SELECT t.id INTO v_filter_team FROM api.teams t WHERE (t.metadata).name = p_team;
-        v_filter_team := COALESCE(v_filter_team, 0);
-    END IF;
+    v_filter_units := api.usage_filter_org_unit_ids(p_org_unit, v_direct);
+    v_filter_team := api.usage_filter_team_id(p_team);
 
     RETURN QUERY
     WITH g AS (
