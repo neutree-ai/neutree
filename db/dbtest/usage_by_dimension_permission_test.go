@@ -132,3 +132,113 @@ func TestGetUsageByDimensionPermissionScope(t *testing.T) {
 		}
 	})
 }
+
+// dimensionUsage sums get_usage_by_dimension per key as userID, after prelude.
+func dimensionUsage(t *testing.T, db *sql.DB, userID string, prelude func(tx *sql.Tx), workspace, team, orgUnit any) map[string]int64 {
+	t.Helper()
+
+	out := map[string]int64{}
+	if err := asUser(t, db, userID, prelude, func(tx *sql.Tx) error {
+		rows, err := tx.Query(`
+			SELECT api_key_id::text, usage FROM api.get_usage_by_dimension(
+			    p_start_date => '1970-01-01', p_end_date => '2999-12-31',
+			    p_workspace => $1, p_team => $2, p_org_unit => $3)`, workspace, team, orgUnit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var key string
+			var n int64
+			if err := rows.Scan(&key, &n); err != nil {
+				return err
+			}
+			out[key] += n
+		}
+
+		return rows.Err()
+	}); err != nil {
+		t.Fatalf("get_usage_by_dimension as %s failed: %v", userID, err)
+	}
+
+	return out
+}
+
+// A team-admin reads a member's own key from the usage recorded while the
+// member was in the Team; another member reads none of it.
+func TestGetUsageByDimension_TeamAdmin(t *testing.T) {
+	db := GetTestDB(t)
+	const ws = "ud-team-ws"
+
+	team := newOrgName("ud-team")
+	teamID := manualTeam(t, db, team)
+	admin := rawUser(t, db, "ud-admin")
+	member := rawUser(t, db, "ud-member")
+	peer := rawUser(t, db, "ud-peer")
+
+	bindTeam(t, db, admin, "team-admin", team)
+	mustExec(t, db, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, teamID, peer)
+
+	key := createTestAPIKey(t, member, ws, 0)
+	recordUsage(t, key, "m1", 10, 0, nil)
+	aggregateUsage(t)
+
+	mustExec(t, db, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, teamID, member)
+	recordUsage(t, key, "m1", 20, 5, nil)
+	aggregateUsage(t)
+
+	if got := dimensionUsage(t, db, admin, nil, ws, nil, nil); len(got) != 1 || got[key] != 25 {
+		t.Errorf("team-admin: %v, want the member's key with 25 (usage after joining)", got)
+	}
+
+	if got := dimensionUsage(t, db, peer, nil, ws, nil, nil); len(got) != 0 {
+		t.Errorf("another member: %v, want nothing", got)
+	}
+
+	if got := dimensionUsage(t, db, member, nil, ws, nil, nil); got[key] != 35 {
+		t.Errorf("owner: %v, want 35", got)
+	}
+
+	var name sql.NullString
+	if err := asUser(t, db, admin, nil, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT api_key_name FROM api.get_usage_by_dimension('1970-01-01', '2999-12-31', $1) LIMIT 1`, key).Scan(&name)
+	}); err != nil || !name.Valid || name.String == "" {
+		t.Errorf("team-admin key name = %v, %v; want the key's name", name, err)
+	}
+}
+
+// Usage of a deleted key stays visible to whoever read the key directly.
+func TestGetUsageByDimension_DeletedKey(t *testing.T) {
+	db := GetTestDB(t)
+	const ws = "ud-deleted-ws"
+
+	owner := rawUser(t, db, "ud-del-owner")
+	stranger := rawUser(t, db, "ud-del-stranger")
+	reader := rawUser(t, db, "ud-del-reader")
+	bindGlobal(t, db, reader, customRole(t, db, "workspace:usage-read"))
+
+	key := createTestAPIKey(t, owner, ws, 0)
+	recordUsage(t, key, "m1", 10, 2, nil)
+	aggregateUsage(t)
+
+	mustExec(t, db, `DELETE FROM api.api_keys WHERE id = $1`, key)
+
+	var daily int
+	if err := db.QueryRow(`SELECT count(*) FROM api.api_daily_usage WHERE (spec).api_key_id = $1`, key).Scan(&daily); err != nil || daily != 0 {
+		t.Fatalf("api_daily_usage rows after delete = %d, %v; want 0", daily, err)
+	}
+
+	for who, want := range map[string]int64{owner: 12, reader: 12, stranger: 0} {
+		if got := dimensionUsage(t, db, who, nil, ws, nil, nil); got[key] != want {
+			t.Errorf("%s: %v, want %d", who, got, want)
+		}
+	}
+
+	var name sql.NullString
+	if err := asUser(t, db, owner, nil, func(tx *sql.Tx) error {
+		return tx.QueryRow(`SELECT api_key_name FROM api.get_usage_by_dimension('1970-01-01', '2999-12-31', $1) LIMIT 1`, key).Scan(&name)
+	}); err != nil || name.Valid {
+		t.Errorf("deleted key name = %v, %v; want NULL", name, err)
+	}
+}

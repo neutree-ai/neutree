@@ -320,3 +320,43 @@ func TestTeamAdmin_ReadsUserProfiles(t *testing.T) {
 		}
 	})
 }
+
+// p_team reads a Team's usage by key: the same total as the Team's usage by
+// group, without the caller's own usage outside the Team.
+func TestTeamAdmin_UsageByDimensionTeam(t *testing.T) {
+	f := newTeamAdminFixture(t)
+	const ws = "ta-dim-ws"
+
+	memberKey := createTestAPIKey(t, f.member, ws, 0)
+	adminKey := createTestAPIKey(t, f.admin, ws, 0)
+	outsiderKey := createTestAPIKey(t, f.outsider, ws, 0)
+
+	recordUsage(t, memberKey, "m1", 10, 5, nil)
+	recordUsage(t, memberKey, "m2", 7, 0, nil)
+	recordUsage(t, adminKey, "m1", 100, 0, nil)
+	recordUsage(t, outsiderKey, "m1", 1000, 0, nil)
+	aggregateUsage(t)
+
+	got := dimensionUsage(t, f.db, f.admin, nil, ws, f.team, nil)
+	if len(got) != 1 || got[memberKey] != 22 {
+		t.Fatalf("p_team: %v, want the member's key with 22", got)
+	}
+
+	var byGroup int64
+	if err := asUser(t, f.db, f.admin, nil, func(tx *sql.Tx) error {
+		return tx.QueryRow(`
+			SELECT COALESCE(SUM(usage), 0) FROM api.get_usage_by_group(
+			    p_start_date => '1970-01-01', p_end_date => '2999-12-31', p_kind => 'Team',
+			    p_name => $1, p_workspace => $2)`, f.team, ws).Scan(&byGroup)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if byGroup != got[memberKey] {
+		t.Errorf("p_team total %d, usage by group %d", got[memberKey], byGroup)
+	}
+
+	if all := dimensionUsage(t, f.db, f.admin, nil, ws, nil, nil); len(all) != 2 || all[adminKey] != 100 || all[memberKey] != 22 {
+		t.Errorf("no filter: %v, want own key and the member's key", all)
+	}
+}
