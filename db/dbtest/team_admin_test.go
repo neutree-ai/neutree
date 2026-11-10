@@ -320,3 +320,97 @@ func TestTeamAdmin_ReadsUserProfiles(t *testing.T) {
 		}
 	})
 }
+
+// p_team reads a Team's usage by key: the same total as the Team's usage by
+// group, without the caller's own usage outside the Team.
+func TestTeamAdmin_UsageByDimensionTeam(t *testing.T) {
+	f := newTeamAdminFixture(t)
+	const ws = "ta-dim-ws"
+
+	memberKey := createTestAPIKey(t, f.member, ws, 0)
+	adminKey := createTestAPIKey(t, f.admin, ws, 0)
+	outsiderKey := createTestAPIKey(t, f.outsider, ws, 0)
+
+	recordUsage(t, memberKey, "m1", 10, 5, nil)
+	recordUsage(t, memberKey, "m2", 7, 0, nil)
+	recordUsage(t, adminKey, "m1", 100, 0, nil)
+	recordUsage(t, outsiderKey, "m1", 1000, 0, nil)
+	aggregateUsage(t)
+
+	got := dimensionUsage(t, f.db, f.admin, nil, ws, f.team, nil)
+	if len(got) != 1 || got[memberKey] != 22 {
+		t.Fatalf("p_team: %v, want the member's key with 22", got)
+	}
+
+	var byGroup int64
+	if err := asUser(t, f.db, f.admin, nil, func(tx *sql.Tx) error {
+		return tx.QueryRow(`
+			SELECT COALESCE(SUM(usage), 0) FROM api.get_usage_by_group(
+			    p_start_date => '1970-01-01', p_end_date => '2999-12-31', p_kind => 'Team',
+			    p_name => $1, p_workspace => $2)`, f.team, ws).Scan(&byGroup)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if byGroup != got[memberKey] {
+		t.Errorf("p_team total %d, usage by group %d", got[memberKey], byGroup)
+	}
+
+	if all := dimensionUsage(t, f.db, f.admin, nil, ws, nil, nil); len(all) != 2 || all[adminKey] != 100 || all[memberKey] != 22 {
+		t.Errorf("no filter: %v, want own key and the member's key", all)
+	}
+}
+
+// get_readable_usage_teams lists the Teams the caller may open as a usage
+// scope: a team-admin's own Teams, every Team for a global reader.
+func TestTeamAdmin_ReadableUsageTeams(t *testing.T) {
+	f := newTeamAdminFixture(t)
+
+	teamReader := rawUser(t, f.db, "ta-team-reader")
+	bindGlobal(t, f.db, teamReader, customRole(t, f.db, "team_usage:read"))
+
+	usageReader := rawUser(t, f.db, "ta-usage-reader")
+	bindGlobal(t, f.db, usageReader, customRole(t, f.db, "workspace:usage-read"))
+
+	readable := func(user string) map[int]bool {
+		t.Helper()
+
+		ids := map[int]bool{}
+		if err := asUser(t, f.db, user, nil, func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT id FROM api.get_readable_usage_teams()`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var id int
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				ids[id] = true
+			}
+
+			return rows.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		return ids
+	}
+
+	if got := readable(f.admin); len(got) != 2 || !got[f.teamID] || !got[f.syncedID] {
+		t.Errorf("team-admin: %v, want only Teams %d and %d", got, f.teamID, f.syncedID)
+	}
+
+	if got := readable(f.member); len(got) != 0 {
+		t.Errorf("member: %v, want none", got)
+	}
+
+	for name, user := range map[string]string{"team_usage:read": teamReader, "workspace:usage-read": usageReader} {
+		got := readable(user)
+		if !got[f.teamID] || !got[f.otherID] || !got[f.syncedID] {
+			t.Errorf("global %s: %v, want every Team", name, got)
+		}
+	}
+}

@@ -340,3 +340,51 @@ func TestGroupDailyUsage_OrgUnitUsageRead(t *testing.T) {
 		})
 	}
 }
+
+// Each key has its own buckets; Team totals and pool usage are their sum.
+func TestGroupDailyUsage_KeyAttribution(t *testing.T) {
+	f := newOrgFixture(t)
+	team := f.createTeam()
+
+	user := createGoTrueTestUser(t, "gu-keys", "password123")
+	addToTeam(t, f, team, user.ID)
+
+	dropGroupUsage(t, user)
+	k1 := createTestAPIKey(t, user.ID, "gu-ws", 0)
+	k2 := createTestAPIKey(t, user.ID, "gu-ws", 0)
+
+	recordUsage(t, k1, "m1", 10, 0, nil)
+	recordUsage(t, k1, "m1", 5, 0, nil)
+	recordUsage(t, k2, "m1", 20, 0, nil)
+	aggregateUsage(t)
+
+	rows, err := GetTestDB(t).Query(`
+		SELECT api_key_id::text, requests, total_tokens FROM api.group_daily_usage WHERE user_id = $1`, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	buckets := map[string]groupUsageTotal{}
+	for rows.Next() {
+		var key string
+		var tot groupUsageTotal
+		if err := rows.Scan(&key, &tot.requests, &tot.usage); err != nil {
+			t.Fatal(err)
+		}
+		buckets[key] = tot
+	}
+
+	if len(buckets) != 2 || buckets[k1] != (groupUsageTotal{2, 15}) || buckets[k2] != (groupUsageTotal{1, 20}) {
+		t.Errorf("buckets: %+v", buckets)
+	}
+
+	if got := groupTotals(t, "Team")[team.Metadata.Name]; got != (groupUsageTotal{3, 35}) {
+		t.Errorf("Team total: %+v, want {3 35}", got)
+	}
+
+	var pool int64
+	if err := GetTestDB(t).QueryRow(`SELECT api.group_token_pool_usage('Team', $1, 'daily')`, team.Metadata.Name).Scan(&pool); err != nil || pool != 35 {
+		t.Errorf("pool usage = %d, %v; want 35", pool, err)
+	}
+}
