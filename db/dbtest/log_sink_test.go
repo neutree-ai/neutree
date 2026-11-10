@@ -462,21 +462,31 @@ func TestLogSinkS3Validation(t *testing.T) {
 		{name: "missing s3", wantCode: "10305"},
 		{name: "s3 not an object", s3: `"bucket"`, wantCode: "10305"},
 		{name: "bucket not a string", s3: `{"region": "r", "bucket": 1, ` + auth + `}`, wantCode: "10305"},
-		{name: "path style not a boolean", s3: `{"region": "r", "bucket": "b", "force_path_style": "true", ` + auth + `}`, wantCode: "10305"},
-		{name: "auth not an object", s3: `{"region": "r", "bucket": "b", "auth": "ak:sk"}`, wantCode: "10305"},
+		{name: "path style not a boolean", s3: `{"region": "r", "bucket": "logs", "force_path_style": "true", ` + auth + `}`, wantCode: "10305"},
+		{name: "auth not an object", s3: `{"region": "r", "bucket": "logs", "auth": "ak:sk"}`, wantCode: "10305"},
 		{name: "missing bucket", s3: `{"region": "r", ` + auth + `}`, wantCode: "10306"},
 		{name: "blank bucket", s3: `{"region": "r", "bucket": " ", ` + auth + `}`, wantCode: "10306"},
-		{name: "missing region", s3: `{"bucket": "b", ` + auth + `}`, wantCode: "10307"},
-		{name: "endpoint without scheme", s3: `{"endpoint": "minio:9000", "region": "r", "bucket": "b", ` + auth + `}`, wantCode: "10308"},
-		{name: "unknown compression", s3: `{"region": "r", "bucket": "b", "compression": "lz4", ` + auth + `}`, wantCode: "10309"},
-		{name: "zero flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 0, ` + auth + `}`, wantCode: "10310"},
-		{name: "fractional flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 1.5, ` + auth + `}`, wantCode: "10310"},
-		{name: "huge flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 1e30, ` + auth + `}`, wantCode: "10310"},
-		{name: "flush interval as string", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": "60", ` + auth + `}`, wantCode: "10310"},
-		{name: "missing auth", s3: `{"region": "r", "bucket": "b"}`, wantCode: "10311"},
-		{name: "missing secret key", s3: `{"region": "r", "bucket": "b", "auth": {"access_key_id": "ak"}}`, wantCode: "10311"},
+		{name: "bucket with a space", s3: `{"region": "r", "bucket": "invalid bucket", ` + auth + `}`, wantCode: "10327"},
+		{name: "bucket with a space and an endpoint", s3: `{"endpoint": "http://minio:9000", "region": "r", "bucket": "invalid bucket", ` + auth + `}`, wantCode: "10327"},
+		{name: "bucket with a slash", s3: `{"endpoint": "http://minio:9000", "region": "r", "bucket": "logs/traces", ` + auth + `}`, wantCode: "10327"},
+		{name: "bucket with a control character", s3: `{"endpoint": "http://minio:9000", "region": "r", "bucket": "logs\u0001", ` + auth + `}`, wantCode: "10327"},
+		{name: "bucket too long", s3: `{"endpoint": "http://minio:9000", "region": "r", "bucket": "` + strings.Repeat("a", 64) + `", ` + auth + `}`, wantCode: "10327"},
+		{name: "upper-case bucket on AWS", s3: `{"region": "r", "bucket": "Logs", ` + auth + `}`, wantCode: "10327"},
+		{name: "bucket too short on AWS", s3: `{"region": "r", "bucket": "lo", ` + auth + `}`, wantCode: "10327"},
+		{name: "upper-case bucket with an endpoint", s3: `{"endpoint": "http://minio:9000", "region": "r", "bucket": "My_Logs", ` + auth + `}`},
+		{name: "63-character bucket on AWS", s3: `{"region": "r", "bucket": "` + strings.Repeat("a", 63) + `", ` + auth + `}`},
+		{name: "dotted bucket on AWS", s3: `{"region": "r", "bucket": "logs.example-1", ` + auth + `}`},
+		{name: "missing region", s3: `{"bucket": "logs", ` + auth + `}`, wantCode: "10307"},
+		{name: "endpoint without scheme", s3: `{"endpoint": "minio:9000", "region": "r", "bucket": "logs", ` + auth + `}`, wantCode: "10308"},
+		{name: "unknown compression", s3: `{"region": "r", "bucket": "logs", "compression": "lz4", ` + auth + `}`, wantCode: "10309"},
+		{name: "zero flush interval", s3: `{"region": "r", "bucket": "logs", "flush_interval_seconds": 0, ` + auth + `}`, wantCode: "10310"},
+		{name: "fractional flush interval", s3: `{"region": "r", "bucket": "logs", "flush_interval_seconds": 1.5, ` + auth + `}`, wantCode: "10310"},
+		{name: "huge flush interval", s3: `{"region": "r", "bucket": "logs", "flush_interval_seconds": 1e30, ` + auth + `}`, wantCode: "10310"},
+		{name: "flush interval as string", s3: `{"region": "r", "bucket": "logs", "flush_interval_seconds": "60", ` + auth + `}`, wantCode: "10310"},
+		{name: "missing auth", s3: `{"region": "r", "bucket": "logs"}`, wantCode: "10311"},
+		{name: "missing secret key", s3: `{"region": "r", "bucket": "logs", "auth": {"access_key_id": "ak"}}`, wantCode: "10311"},
 		{name: "minimal valid", s3: validLogSinkS3},
-		{name: "all fields", s3: `{"endpoint": "HTTP://minio:9000", "region": "r", "bucket": "b", "key_prefix": "x/%Y/",
+		{name: "all fields", s3: `{"endpoint": "HTTP://minio:9000", "region": "r", "bucket": "logs", "key_prefix": "x/%Y/",
 			"force_path_style": false, "compression": "none", "flush_interval_seconds": 10, ` + auth + `}`},
 	}
 
@@ -540,7 +550,7 @@ func TestLogSinkS3Normalization(t *testing.T) {
 
 	t.Run("only the two keys are kept in auth", func(t *testing.T) {
 		_, s3, err := run(t, "s3", "",
-			`{"region": "r", "bucket": "b", "auth": {"access_key_id": "ak", "secret_access_key": "sk", "type": "x"}}`, "")
+			`{"region": "r", "bucket": "logs", "auth": {"access_key_id": "ak", "secret_access_key": "sk", "type": "x"}}`, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -583,9 +593,75 @@ func TestLogSinkS3Normalization(t *testing.T) {
 	})
 
 	t.Run("update dropping auth is rejected", func(t *testing.T) {
-		_, _, err := run(t, "s3", "", validLogSinkS3, `spec.s3 = '{"region": "r", "bucket": "b"}'::jsonb`)
+		_, _, err := run(t, "s3", "", validLogSinkS3, `spec.s3 = '{"region": "r", "bucket": "logs"}'::jsonb`)
 		if err == nil || !strings.Contains(err.Error(), `"code": "10311"`) {
 			t.Fatalf("expected error code 10311, got: %v", err)
+		}
+	})
+}
+
+// Rows stored before the bucket name rule must stay writable for the
+// controller and deletable; only a changed bucket or endpoint is checked.
+func TestLogSinkS3StoredInvalidBucket(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	const name = "log-sink-s3-stored-bucket"
+
+	run := func(t *testing.T, s3, update string) error {
+		t.Helper()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Stores the row the way the previous rule allowed it.
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE api.log_sinks DISABLE TRIGGER validate_log_sink_spec_on_log_sinks`); err != nil {
+			t.Fatalf("failed to disable trigger: %v", err)
+		}
+		if err := insertLogSinkSpec(ctx, tx, name, "s3", "", s3, ""); err != nil {
+			t.Fatalf("failed to insert: %v", err)
+		}
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE api.log_sinks ENABLE TRIGGER validate_log_sink_spec_on_log_sinks`); err != nil {
+			t.Fatalf("failed to enable trigger: %v", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `UPDATE api.log_sinks SET `+update+` WHERE (metadata).name = $1`, name)
+
+		return err
+	}
+
+	const auth = `"auth": {"access_key_id": "ak", "secret_access_key": "sk"}`
+	spaced := `{"region": "r", "bucket": "invalid bucket", ` + auth + `}`
+
+	t.Run("status update succeeds", func(t *testing.T) {
+		if err := run(t, spaced, `status.phase = 'Failed'`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("soft delete succeeds", func(t *testing.T) {
+		if err := run(t, spaced, `metadata.deletion_timestamp = now()`); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("changing the bucket to another invalid name is rejected", func(t *testing.T) {
+		err := run(t, spaced, `spec.s3 = '{"region": "r", "bucket": "still invalid", `+auth+`}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10327"`) {
+			t.Fatalf("expected error code 10327, got: %v", err)
+		}
+	})
+
+	t.Run("clearing the endpoint of an upper-case bucket is rejected", func(t *testing.T) {
+		err := run(t, `{"endpoint": "http://minio:9000", "region": "r", "bucket": "Logs", `+auth+`}`,
+			`spec.s3 = '{"region": "r", "bucket": "Logs", `+auth+`}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10327"`) {
+			t.Fatalf("expected error code 10327, got: %v", err)
 		}
 	})
 }
