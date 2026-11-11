@@ -140,6 +140,8 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 
 	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:])
 	if err != nil {
+		klog.V(2).ErrorS(err, "SSH command failed", "nodeID", s.nodeID, "command", cmd)
+
 		message := "SSH command failed"
 		if exitOnFail {
 			message = "command failed"
