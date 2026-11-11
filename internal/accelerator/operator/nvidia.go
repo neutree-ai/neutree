@@ -122,6 +122,8 @@ func (n *NvidiaAcceleratorOperator) Delete(ctx context.Context, opCtx *OperatorC
 	}
 
 	nodes := &corev1.NodeList{}
+	// A Kubernetes cluster maps to one Neutree Cluster by design, so this
+	// client ownership annotation is intentionally scoped to the Kubernetes cluster.
 	if err := opCtx.Client.List(ctx, nodes); err != nil {
 		return err
 	}
