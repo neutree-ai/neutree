@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
@@ -34,10 +35,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorPlan, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
-		plan, ok, err := m.buildAcceleratorPlan(ctx, acceleratorType)
-		if err != nil {
-			return nil, err
-		}
+		plan, ok := m.buildAcceleratorPlan(ctx, acceleratorType)
 
 		if ok {
 			candidates = append(candidates, plan)
@@ -50,14 +48,16 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 func (m *MetricsComponent) buildAcceleratorPlan(
 	ctx context.Context,
 	acceleratorType string,
-) (metricsAcceleratorPlan, bool, error) {
+) (metricsAcceleratorPlan, bool) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType, Cluster: m.cluster})
 	if err != nil {
-		return metricsAcceleratorPlan{}, false, err
+		klog.Warningf("Skipping accelerator metrics plan for %s: %v", acceleratorType, err)
+
+		return metricsAcceleratorPlan{}, false
 	}
 
 	if profile == nil {
-		return metricsAcceleratorPlan{}, false, nil
+		return metricsAcceleratorPlan{}, false
 	}
 
 	_, operatorManaged := m.acceleratorOperators[acceleratorType]
@@ -79,10 +79,10 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 
 	if profile.MetricsExporter == nil {
 		if !external || plan.ExporterTarget == nil {
-			return metricsAcceleratorPlan{}, false, nil
+			return metricsAcceleratorPlan{}, false
 		}
 
-		return plan, true, nil
+		return plan, true
 	}
 
 	plan.Exporter = buildManagedAcceleratorExporter(
@@ -98,7 +98,7 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		}
 	}
 
-	return plan, true, nil
+	return plan, true
 }
 
 func (m *MetricsComponent) selectClusterAcceleratorPlan(

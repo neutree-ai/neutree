@@ -1610,8 +1610,8 @@ func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 		name         string
 		profileError error
 	}{
-		{name: "unavailable profile stops rendering", profileError: errors.New("profile endpoint returned 404")},
-		{name: "Kubernetes dependency discovery error stops rendering", profileError: errors.New("ClusterPolicy API forbidden")},
+		{name: "unavailable profile skips that accelerator plan", profileError: errors.New("profile endpoint returned 404")},
+		{name: "Kubernetes dependency discovery error skips that accelerator plan", profileError: errors.New("ClusterPolicy API forbidden")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			acceleratorMgr := &acceleratormocks.MockManager{}
@@ -1653,8 +1653,8 @@ func TestBuildMetricsResourcesHandlesAcceleratorProfileErrors(t *testing.T) {
 			}
 
 			objs, err := metricsCmpt.GetMetricsResources(context.Background())
-			require.ErrorIs(t, err, test.profileError)
-			require.Nil(t, objs, "failed profile discovery must not produce partial resources")
+			require.NoError(t, err)
+			findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
 		})
 	}
 }
