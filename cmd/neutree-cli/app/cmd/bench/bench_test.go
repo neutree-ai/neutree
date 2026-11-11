@@ -12,7 +12,7 @@ func TestNewBenchCmdRegistersFlags(t *testing.T) {
 	require.Equal(t, "bench ENDPOINT", cmd.Use)
 
 	for _, flag := range []string{
-		"workspace", "input-lens", "output-lens", "concurrencies",
+		"workspace", "cases", "input-lens", "output-lens", "concurrencies",
 		"num-prompts", "request-rate", "output-dir", "timeout",
 	} {
 		require.NotNil(t, cmd.Flags().Lookup(flag), flag)

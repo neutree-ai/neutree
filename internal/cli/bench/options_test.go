@@ -50,6 +50,47 @@ func TestParsePositiveIntegerList(t *testing.T) {
 	}
 }
 
+func TestParseCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  []string
+		want    []Case
+		wantErr string
+	}{
+		{
+			name:   "comma separated and repeated values",
+			values: []string{"8:32:2,4:16:1", "8:32:2"},
+			want: []Case{
+				{InputLen: 4, OutputLen: 16, Concurrency: 1},
+				{InputLen: 8, OutputLen: 32, Concurrency: 2},
+			},
+		},
+		{
+			name:    "missing concurrency is invalid",
+			values:  []string{"4:16"},
+			wantErr: "input:output:concurrency",
+		},
+		{
+			name:    "zero is invalid",
+			values:  []string{"4:0:1"},
+			wantErr: "positive integers",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCases(tt.values)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestOptionsValidate(t *testing.T) {
 	valid := Options{
 		Workspace:     "default",
@@ -108,6 +149,22 @@ func TestOptionsValidate(t *testing.T) {
 				o.OutputDir = ""
 			},
 			wantErr: "output-dir",
+		},
+		{
+			name: "explicit cases replace the lists",
+			mutate: func(o *Options) {
+				o.Cases = []Case{{InputLen: 4, OutputLen: 16, Concurrency: 1}}
+				o.InputLens = nil
+				o.OutputLens = nil
+				o.Concurrencies = nil
+			},
+		},
+		{
+			name: "explicit case concurrency above prompt count",
+			mutate: func(o *Options) {
+				o.Cases = []Case{{InputLen: 4, OutputLen: 16, Concurrency: 32}}
+			},
+			wantErr: "concurrency 32 exceeds num-prompts 20",
 		},
 	}
 

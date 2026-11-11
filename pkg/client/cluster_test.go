@@ -21,7 +21,7 @@ func TestClientGetsClusterCredentials(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	cluster, err := NewClient(server.URL, WithAPIKey("test-api-key")).GetClusterCredentialsContext(context.Background(), "default", "cluster-a")
+	cluster, err := NewClient(server.URL, WithAPIKey("test-api-key")).GetClusterCredentialsWithCtx(context.Background(), "default", "cluster-a")
 	require.NoError(t, err)
 	require.Equal(t, "default", cluster.Metadata.Workspace)
 	require.Equal(t, "cluster-a", cluster.Metadata.Name)

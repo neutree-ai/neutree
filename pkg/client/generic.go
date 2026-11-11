@@ -247,11 +247,11 @@ func (s *GenericService) List(kind, workspace string) ([]json.RawMessage, error)
 
 // Get retrieves a single resource of the given kind by workspace and name.
 func (s *GenericService) Get(kind, workspace, name string) (json.RawMessage, error) {
-	return s.GetContext(context.Background(), kind, workspace, name)
+	return s.GetWithCtx(context.Background(), kind, workspace, name)
 }
 
-// GetContext retrieves a single resource with a cancelable request.
-func (s *GenericService) GetContext(ctx context.Context, kind, workspace, name string) (json.RawMessage, error) {
+// GetWithCtx retrieves a single resource with a cancelable request.
+func (s *GenericService) GetWithCtx(ctx context.Context, kind, workspace, name string) (json.RawMessage, error) {
 	ep, err := s.readEndpointForKind(kind)
 	if err != nil {
 		return nil, err
@@ -267,7 +267,7 @@ func (s *GenericService) GetContext(ctx context.Context, kind, workspace, name s
 	}
 
 	var items []json.RawMessage
-	if err := rs.listContext(ctx, params, &items); err != nil {
+	if err := rs.listWithCtx(ctx, params, &items); err != nil {
 		return nil, fmt.Errorf("failed to get %s %s: %w", kind, name, err)
 	}
 

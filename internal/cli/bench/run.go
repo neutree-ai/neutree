@@ -32,7 +32,7 @@ func run(ctx context.Context, api *client.Client, options Options) (string, erro
 		return "", err
 	}
 
-	benchmarkCases := expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
+	benchmarkCases := expandConfiguredCases(options)
 	klog.Infof(
 		"benchmark starting: endpoint=%s/%s cases=%d",
 		options.Workspace,
@@ -92,7 +92,7 @@ func resolveRunTarget(ctx context.Context, api *client.Client, options Options) 
 	klog.Infof("benchmark cluster resolved: type=%s", cluster.Spec.Type)
 	klog.Infof("benchmark credentials resolving: cluster=%s", endpoint.Spec.Cluster)
 
-	credentialCluster, err := api.GetClusterCredentialsContext(ctx, options.Workspace, endpoint.Spec.Cluster)
+	credentialCluster, err := api.GetClusterCredentialsWithCtx(ctx, options.Workspace, endpoint.Spec.Cluster)
 	if err := contextOrError(ctx, err); err != nil {
 		return nil, BenchTarget{}, fmt.Errorf("get cluster credentials: %w", err)
 	}
@@ -131,7 +131,7 @@ func resolveRunTarget(ctx context.Context, api *client.Client, options Options) 
 }
 
 func loadEndpoint(ctx context.Context, api *client.Client, workspace, name string) (*v1.Endpoint, error) {
-	raw, err := api.Generic.GetContext(ctx, "Endpoint", workspace, name)
+	raw, err := api.Generic.GetWithCtx(ctx, "Endpoint", workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("get Endpoint %q: %w", name, err)
 	}
@@ -145,7 +145,7 @@ func loadEndpoint(ctx context.Context, api *client.Client, workspace, name strin
 }
 
 func loadCluster(ctx context.Context, api *client.Client, workspace, name string) (*v1.Cluster, error) {
-	raw, err := api.Generic.GetContext(ctx, "Cluster", workspace, name)
+	raw, err := api.Generic.GetWithCtx(ctx, "Cluster", workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("get Cluster %q: %w", name, err)
 	}
@@ -246,7 +246,7 @@ func resolveModelVersion(
 		return "", fmt.Errorf("resolve version of model %q: Neutree API client is required", endpoint.Spec.Model.Name)
 	}
 
-	detail, err := api.Models.GetContext(ctx, workspace, endpoint.Spec.Model.Registry, endpoint.Spec.Model.Name, version)
+	detail, err := api.Models.GetWithCtx(ctx, workspace, endpoint.Spec.Model.Registry, endpoint.Spec.Model.Name, version)
 	if err != nil {
 		return "", fmt.Errorf("resolve version of model %q: %w", endpoint.Spec.Model.Name, err)
 	}
@@ -265,7 +265,7 @@ func loadEndpointModelRegistry(ctx context.Context, api *client.Client, workspac
 		return nil, nil
 	}
 
-	raw, err := api.Generic.GetContext(ctx, "ModelRegistry", workspace, endpoint.Spec.Model.Registry)
+	raw, err := api.Generic.GetWithCtx(ctx, "ModelRegistry", workspace, endpoint.Spec.Model.Registry)
 	if err != nil {
 		return nil, fmt.Errorf("get ModelRegistry %q: %w", endpoint.Spec.Model.Registry, err)
 	}

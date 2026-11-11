@@ -294,6 +294,18 @@ func TestResolveModelVersion(t *testing.T) {
 			want:     "main",
 		},
 		{
+			name:     "huggingface empty version keeps provider default semantics",
+			endpoint: modelSpec(""),
+			registry: huggingFace,
+			want:     "",
+		},
+		{
+			name:     "huggingface latest keeps the logical alias",
+			endpoint: modelSpec(v1.LatestVersion),
+			registry: huggingFace,
+			want:     v1.LatestVersion,
+		},
+		{
 			name:     "modelscope normalizes latest",
 			endpoint: modelSpec(v1.LatestVersion),
 			registry: modelScope,

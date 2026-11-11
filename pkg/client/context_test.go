@@ -20,7 +20,7 @@ func TestReadRequestsRespectContextCancellation(t *testing.T) {
 			name: "generic resource",
 			path: "/api/v1/endpoints",
 			read: func(ctx context.Context, client *Client) error {
-				_, err := client.Generic.GetContext(ctx, "Endpoint", "default", "endpoint-a")
+				_, err := client.Generic.GetWithCtx(ctx, "Endpoint", "default", "endpoint-a")
 				return err
 			},
 		},
@@ -28,7 +28,7 @@ func TestReadRequestsRespectContextCancellation(t *testing.T) {
 			name: "cluster credentials",
 			path: "/api/v1/credentials/clusters",
 			read: func(ctx context.Context, client *Client) error {
-				_, err := client.GetClusterCredentialsContext(ctx, "default", "cluster-a")
+				_, err := client.GetClusterCredentialsWithCtx(ctx, "default", "cluster-a")
 				return err
 			},
 		},
@@ -36,7 +36,7 @@ func TestReadRequestsRespectContextCancellation(t *testing.T) {
 			name: "model version",
 			path: "/api/v1/workspaces/default/model_registries/hub/models/Qwen/Qwen3",
 			read: func(ctx context.Context, client *Client) error {
-				_, err := client.Models.GetContext(ctx, "default", "hub", "Qwen/Qwen3", "latest")
+				_, err := client.Models.GetWithCtx(ctx, "default", "hub", "Qwen/Qwen3", "latest")
 				return err
 			},
 		},

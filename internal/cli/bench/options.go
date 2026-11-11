@@ -14,6 +14,7 @@ import (
 type Options struct {
 	Workspace     string
 	Endpoint      string
+	Cases         []Case
 	InputLens     []int
 	OutputLens    []int
 	Concurrencies []int
@@ -45,15 +46,19 @@ func (o Options) Validate() error {
 		return fmt.Errorf("endpoint is required")
 	}
 
-	if err := validatePositiveValues(o.InputLens, "input-lens"); err != nil {
-		return err
-	}
+	if len(o.Cases) == 0 {
+		if err := validatePositiveValues(o.InputLens, "input-lens"); err != nil {
+			return err
+		}
 
-	if err := validatePositiveValues(o.OutputLens, "output-lens"); err != nil {
-		return err
-	}
+		if err := validatePositiveValues(o.OutputLens, "output-lens"); err != nil {
+			return err
+		}
 
-	if err := validatePositiveValues(o.Concurrencies, "concurrencies"); err != nil {
+		if err := validatePositiveValues(o.Concurrencies, "concurrencies"); err != nil {
+			return err
+		}
+	} else if err := validateCases(o.Cases); err != nil {
 		return err
 	}
 
@@ -63,9 +68,17 @@ func (o Options) Validate() error {
 
 	// vLLM never exceeds --num-prompts in flight, so a higher value would only
 	// mislabel the case.
-	for _, concurrency := range o.Concurrencies {
-		if concurrency > o.NumPrompts {
-			return fmt.Errorf("concurrency %d exceeds num-prompts %d", concurrency, o.NumPrompts)
+	if len(o.Cases) > 0 {
+		for _, benchmarkCase := range o.Cases {
+			if benchmarkCase.Concurrency > o.NumPrompts {
+				return fmt.Errorf("concurrency %d exceeds num-prompts %d", benchmarkCase.Concurrency, o.NumPrompts)
+			}
+		}
+	} else {
+		for _, concurrency := range o.Concurrencies {
+			if concurrency > o.NumPrompts {
+				return fmt.Errorf("concurrency %d exceeds num-prompts %d", concurrency, o.NumPrompts)
+			}
 		}
 	}
 
@@ -153,6 +166,96 @@ func parsePositiveIntegerList(values []string, name string) ([]int, error) {
 // a stable positive integer set.
 func ParsePositiveIntegerList(values []string, name string) ([]int, error) {
 	return parsePositiveIntegerList(values, name)
+}
+
+func parseCases(values []string) ([]Case, error) {
+	seen := make(map[Case]struct{})
+
+	for _, raw := range values {
+		for _, item := range strings.Split(raw, ",") {
+			parts := strings.Split(item, ":")
+			if len(parts) != 3 {
+				return nil, fmt.Errorf("invalid cases value %q: expected input:output:concurrency", item)
+			}
+
+			parsePositive := func(part string) (int, error) {
+				value, err := strconv.Atoi(strings.TrimSpace(part))
+				if err != nil || value <= 0 {
+					return 0, fmt.Errorf("invalid cases value %q: all values must be positive integers", item)
+				}
+
+				return value, nil
+			}
+
+			inputLen, err := parsePositive(parts[0])
+			if err != nil {
+				return nil, err
+			}
+
+			outputLen, err := parsePositive(parts[1])
+			if err != nil {
+				return nil, err
+			}
+
+			concurrency, err := parsePositive(parts[2])
+			if err != nil {
+				return nil, err
+			}
+
+			seen[Case{InputLen: inputLen, OutputLen: outputLen, Concurrency: concurrency}] = struct{}{}
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil, fmt.Errorf("cases must not be empty")
+	}
+
+	result := make([]Case, 0, len(seen))
+	for benchmarkCase := range seen {
+		result = append(result, benchmarkCase)
+	}
+
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].InputLen != result[right].InputLen {
+			return result[left].InputLen < result[right].InputLen
+		}
+
+		if result[left].OutputLen != result[right].OutputLen {
+			return result[left].OutputLen < result[right].OutputLen
+		}
+
+		return result[left].Concurrency < result[right].Concurrency
+	})
+
+	return result, nil
+}
+
+// ParseCases converts explicit input:output:concurrency values into a stable case set.
+func ParseCases(values []string) ([]Case, error) {
+	return parseCases(values)
+}
+
+func validateCases(cases []Case) error {
+	if len(cases) == 0 {
+		return fmt.Errorf("cases must not be empty")
+	}
+
+	for _, benchmarkCase := range cases {
+		if benchmarkCase.InputLen <= 0 || benchmarkCase.OutputLen <= 0 || benchmarkCase.Concurrency <= 0 {
+			return fmt.Errorf("cases values must be > 0")
+		}
+	}
+
+	return nil
+}
+
+func expandConfiguredCases(options Options) []Case {
+	if len(options.Cases) > 0 {
+		result := append([]Case(nil), options.Cases...)
+		return result
+	}
+
+	return expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
 }
 
 func expandCases(inputLens, outputLens, concurrencies []int) []Case {

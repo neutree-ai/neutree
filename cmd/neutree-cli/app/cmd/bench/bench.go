@@ -12,6 +12,7 @@ import (
 
 type benchOptions struct {
 	workspace     string
+	cases         []string
 	inputLens     []string
 	outputLens    []string
 	concurrencies []string
@@ -37,6 +38,10 @@ single inference replica.
 The command derives the engine from the Endpoint. This experimental release
 supports vLLM Endpoints only.
 
+Use --cases to run an explicit set of input:output:concurrency points. When
+--cases is omitted, the input, output, and concurrency lists form a Cartesian
+product.
+
 This command requires the default Admin API key because it reads the target
 Cluster's kubeconfig or SSH credential through the existing credentials API.
 The command does not perform special Admin-role validation; insufficient
@@ -58,9 +63,10 @@ benchmark running on the GPU.`,
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace containing the Endpoint")
-	flags.StringSliceVar(&opts.inputLens, "input-lens", []string{"16384"}, "Input token lengths, comma-separated or repeated")
+	flags.StringSliceVar(&opts.cases, "cases", nil, "Explicit benchmark cases as input:output:concurrency, comma-separated or repeated")
+	flags.StringSliceVar(&opts.inputLens, "input-lens", []string{"16384"}, "Input token lengths, comma-separated or repeated when --cases is not set")
 	flags.StringSliceVar(&opts.outputLens, "output-lens", []string{"2048"}, "Output token lengths, comma-separated or repeated")
-	flags.StringSliceVar(&opts.concurrencies, "concurrencies", []string{"2"}, "Maximum request concurrencies, comma-separated or repeated")
+	flags.StringSliceVar(&opts.concurrencies, "concurrencies", []string{"2"}, "Maximum request concurrencies, comma-separated or repeated when --cases is not set")
 	flags.IntVar(&opts.numPrompts, "num-prompts", 20, "Number of prompts per benchmark case")
 	flags.StringVar(&opts.requestRate, "request-rate", "inf", "Request rate per second, or inf")
 	flags.StringVarP(&opts.outputDir, "output-dir", "o", ".", "Directory on the CLI host in which to create the benchmark result directory")
@@ -70,24 +76,34 @@ benchmark running on the GPU.`,
 }
 
 func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
-	inputLens, err := internalbench.ParsePositiveIntegerList(raw.inputLens, "input-lens")
+	cases, err := parseBenchCases(raw.cases)
 	if err != nil {
 		return err
 	}
 
-	outputLens, err := internalbench.ParsePositiveIntegerList(raw.outputLens, "output-lens")
-	if err != nil {
-		return err
-	}
+	var inputLens, outputLens, concurrencies []int
 
-	concurrencies, err := internalbench.ParsePositiveIntegerList(raw.concurrencies, "concurrencies")
-	if err != nil {
-		return err
+	if len(cases) == 0 {
+		inputLens, err = internalbench.ParsePositiveIntegerList(raw.inputLens, "input-lens")
+		if err != nil {
+			return err
+		}
+
+		outputLens, err = internalbench.ParsePositiveIntegerList(raw.outputLens, "output-lens")
+		if err != nil {
+			return err
+		}
+
+		concurrencies, err = internalbench.ParsePositiveIntegerList(raw.concurrencies, "concurrencies")
+		if err != nil {
+			return err
+		}
 	}
 
 	options := internalbench.Options{
 		Workspace:     raw.workspace,
 		Endpoint:      endpoint,
+		Cases:         cases,
 		InputLens:     inputLens,
 		OutputLens:    outputLens,
 		Concurrencies: concurrencies,
@@ -111,4 +127,12 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 	}
 
 	return runErr
+}
+
+func parseBenchCases(values []string) ([]internalbench.Case, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+
+	return internalbench.ParseCases(values)
 }

@@ -232,12 +232,12 @@ type ModelDetail struct {
 
 // Get retrieves detailed information about a specific model version
 func (s *ModelsService) Get(workspace, registry, modelName, version string) (*ModelDetail, error) {
-	return s.GetContext(context.Background(), workspace, registry, modelName, version)
+	return s.GetWithCtx(context.Background(), workspace, registry, modelName, version)
 }
 
-// GetContext retrieves detailed information about a specific model version with
+// GetWithCtx retrieves detailed information about a specific model version with
 // a cancelable request.
-func (s *ModelsService) GetContext(ctx context.Context, workspace, registry, modelName, version string) (*ModelDetail, error) {
+func (s *ModelsService) GetWithCtx(ctx context.Context, workspace, registry, modelName, version string) (*ModelDetail, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s",
 		s.client.baseURL, workspace, registry, modelName)
 	if version != "" && version != v1.LatestVersion {
