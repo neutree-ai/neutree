@@ -171,9 +171,6 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileDeleteComps := []component.Component{}
 
 	operatorErr := c.reconcileAcceleratorOperators(reconcileCtx)
-	if operatorErr != nil && reconcileCtx.acceleratorOperators == nil {
-		return operatorErr
-	}
 
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
