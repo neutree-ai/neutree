@@ -77,25 +77,6 @@ func newTeamAdminFixture(t *testing.T) *teamAdminFixture {
 	return f
 }
 
-func (f *teamAdminFixture) exec(t *testing.T, query string, args ...any) (int64, error) {
-	t.Helper()
-
-	var n int64
-
-	err := asUser(t, f.db, f.admin, nil, func(tx *sql.Tx) error {
-		res, err := tx.Exec(query, args...)
-		if err != nil {
-			return err
-		}
-
-		n, err = res.RowsAffected()
-
-		return err
-	})
-
-	return n, err
-}
-
 func TestTeamAdmin_TeamAndMembers(t *testing.T) {
 	f := newTeamAdminFixture(t)
 
@@ -110,33 +91,33 @@ func TestTeamAdmin_TeamAndMembers(t *testing.T) {
 	})
 
 	t.Run("adds and removes members of its Team", func(t *testing.T) {
-		if _, err := f.exec(t, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.teamID, f.outsider); err != nil {
+		if _, err := execAs(t, f.db, f.admin, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.teamID, f.outsider); err != nil {
 			t.Fatalf("adding a member failed: %v", err)
 		}
 
-		if n, err := f.exec(t, `DELETE FROM api.team_members WHERE team_id = $1 AND user_id = $2`, f.teamID, f.member); err != nil || n != 1 {
+		if n, err := execAs(t, f.db, f.admin, `DELETE FROM api.team_members WHERE team_id = $1 AND user_id = $2`, f.teamID, f.member); err != nil || n != 1 {
 			t.Fatalf("removing a member: %d rows, %v", n, err)
 		}
 	})
 
 	t.Run("cannot add members to another Team", func(t *testing.T) {
-		_, err := f.exec(t, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.otherID, f.outsider)
+		_, err := execAs(t, f.db, f.admin, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.otherID, f.outsider)
 		wantErr(t, "adding to another Team", err, "row-level security")
 
-		if n, err := f.exec(t, `DELETE FROM api.team_members WHERE team_id = $1`, f.otherID); err != nil || n != 0 {
+		if n, err := execAs(t, f.db, f.admin, `DELETE FROM api.team_members WHERE team_id = $1`, f.otherID); err != nil || n != 0 {
 			t.Fatalf("removing from another Team: %d rows, %v", n, err)
 		}
 	})
 
 	t.Run("members of a synced Team stay read-only", func(t *testing.T) {
-		_, err := f.exec(t, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.syncedID, f.outsider)
+		_, err := execAs(t, f.db, f.admin, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.syncedID, f.outsider)
 		wantErr(t, "adding to a synced Team", err, "10290")
 	})
 
 	t.Run("cannot add a member who would gain a role assignment", func(t *testing.T) {
 		assignGroup(t, "Team", f.team, "workspace-user")
 
-		_, err := f.exec(t, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.teamID, f.outsider)
+		_, err := execAs(t, f.db, f.admin, `INSERT INTO api.team_members (team_id, user_id) VALUES ($1, $2)`, f.teamID, f.outsider)
 		wantErr(t, "adding to a Team with a role assignment", err, "10296")
 	})
 }
@@ -155,7 +136,7 @@ func TestTeamAdmin_NoEscalation(t *testing.T) {
 		{"set the Team's group policy", `
 			INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 			VALUES ('v1', 'GroupPolicy', ROW('ta-gp', NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-			        ROW('Team', $1, NULL, NULL, '{"limit": 1000000}'::jsonb)::api.group_policy_spec)`, []any{f.team}, "row-level security"},
+			        ROW('Team', $1, NULL, NULL, '{"limit": 1000000}'::jsonb, NULL, NULL)::api.group_policy_spec)`, []any{f.team}, "row-level security"},
 		{"grant itself a role", `
 			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 			VALUES ('v1', 'RoleAssignment', ROW('ta-ra', NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
@@ -168,28 +149,30 @@ func TestTeamAdmin_NoEscalation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run("cannot "+tc.name, func(t *testing.T) {
-			_, err := f.exec(t, tc.query, tc.args...)
+			_, err := execAs(t, f.db, f.admin, tc.query, tc.args...)
 			wantErr(t, tc.name, err, tc.want)
 		})
 	}
 
 	t.Run("cannot rename or delete the Team", func(t *testing.T) {
-		if n, err := f.exec(t, `UPDATE api.teams SET metadata.display_name = 'x' WHERE id = $1`, f.teamID); err != nil || n != 0 {
+		if n, err := execAs(t, f.db, f.admin, `UPDATE api.teams SET metadata.display_name = 'x' WHERE id = $1`, f.teamID); err != nil || n != 0 {
 			t.Fatalf("update: %d rows, %v", n, err)
 		}
 
-		if n, err := f.exec(t, `DELETE FROM api.teams WHERE id = $1`, f.teamID); err != nil || n != 0 {
+		if n, err := execAs(t, f.db, f.admin, `DELETE FROM api.teams WHERE id = $1`, f.teamID); err != nil || n != 0 {
 			t.Fatalf("delete: %d rows, %v", n, err)
 		}
 	})
 
-	t.Run("holds no permission on users, roles or policies", func(t *testing.T) {
+	// group_policy:* on its Team reaches the policies of its members and SAs
+	// only; the Team's own policy needs a global assignment (above).
+	t.Run("holds no permission on users or roles", func(t *testing.T) {
 		var perms string
 		if err := f.db.QueryRow(`SELECT (spec).permissions::text FROM api.roles WHERE (metadata).name = 'team-admin'`).Scan(&perms); err != nil {
 			t.Fatal(err)
 		}
 
-		for _, p := range []string{"user_profile:", "role:", "role_assignment:", "group_policy:", "team:create", "team:update", "team:delete"} {
+		for _, p := range []string{"user_profile:", "role:", "role_assignment:", "team:create", "team:update", "team:delete"} {
 			if strings.Contains(perms, p) {
 				t.Errorf("team-admin holds %s*: %s", p, perms)
 			}

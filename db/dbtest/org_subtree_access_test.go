@@ -466,7 +466,7 @@ func TestSubtreeRead_GroupPolicy(t *testing.T) {
 	mustExec(t, db, `
 		INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 		VALUES ('v1', 'GroupPolicy', ROW(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-		        ROW('OrgUnit', $1, '[{"model": "m"}]'::jsonb, NULL, '{"limit": 100}'::jsonb)::api.group_policy_spec)`, o.unit("root"))
+		        ROW('OrgUnit', $1, '[{"model": "m"}]'::jsonb, NULL, '{"limit": 100}'::jsonb, NULL, NULL)::api.group_policy_spec)`, o.unit("root"))
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.group_policies WHERE (spec).subject_name = $1`, o.unit("root"))
@@ -510,7 +510,7 @@ func TestSubtreeRead_GroupPolicy(t *testing.T) {
 			_, err := tx.Exec(`
 				INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 				VALUES ('v1', 'GroupPolicy', ROW(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-				        ROW('OrgUnit', $1, NULL, '[{"model": "m"}]'::jsonb, NULL)::api.group_policy_spec)`, o.unit("a1"))
+				        ROW('OrgUnit', $1, NULL, '[{"model": "m"}]'::jsonb, NULL, NULL, NULL)::api.group_policy_spec)`, o.unit("a1"))
 			return err
 		})
 		wantErr(t, "dadmin creating a policy on a1", err, "row-level security")
@@ -647,7 +647,7 @@ func TestGroupPolicy_NotBySubtree(t *testing.T) {
 	unit := o.unit("a1")
 	insert := `INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 		VALUES ('v1', 'GroupPolicy', ROW(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-		        ROW('OrgUnit', $1, '[{"model": "a"}]'::jsonb, NULL, NULL)::api.group_policy_spec)`
+		        ROW('OrgUnit', $1, '[{"model": "a"}]'::jsonb, NULL, NULL, NULL, NULL)::api.group_policy_spec)`
 	withPolicy := func(tx *sql.Tx) { mustTxExec(t, tx, insert, unit) }
 	update := `UPDATE api.group_policies SET spec.denied_models = '[{"model": "b"}]'::jsonb WHERE (spec).subject_name = $1`
 	remove := `DELETE FROM api.group_policies WHERE (spec).subject_name = $1`
@@ -725,7 +725,7 @@ func TestGroupPolicy_OrgUnitSubtreeAndInactive(t *testing.T) {
 		mustExec(t, db, `
 			INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 			VALUES ('v1', 'GroupPolicy', ROW(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-			        ROW('OrgUnit', $1, $2::jsonb, NULL, NULL)::api.group_policy_spec)`, o.unit(unit), allowed)
+			        ROW('OrgUnit', $1, $2::jsonb, NULL, NULL, NULL, NULL)::api.group_policy_spec)`, o.unit(unit), allowed)
 	}
 
 	allowed := func(user string) string {
@@ -776,7 +776,7 @@ func TestGroupTokenPool_Subtree(t *testing.T) {
 	mustExec(t, db, `
 		INSERT INTO api.group_policies (api_version, kind, metadata, spec)
 		VALUES ('v1', 'GroupPolicy', ROW(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::api.metadata,
-		        ROW('OrgUnit', $1, NULL, NULL, '{"limit": 100}'::jsonb)::api.group_policy_spec)`, o.unit("a"))
+		        ROW('OrgUnit', $1, NULL, NULL, '{"limit": 100}'::jsonb, NULL, NULL)::api.group_policy_spec)`, o.unit("a"))
 
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM api.group_policies WHERE (spec).subject_name = $1`, o.unit("a"))

@@ -6,8 +6,9 @@
 -- (api.get_api_key_remaining) at request time, cached briefly in kong.cache.
 --   remaining <= 0      -> 429 quota_exceeded
 --   fetch fails/uncertain -> allowed (FAIL-OPEN: prefer inference availability)
--- The plugin is attached only when the key has a token quota or its owner is in
--- a group with a token pool; the remaining count is already the min of both.
+-- The plugin is attached only when the key has a token quota or a token pool
+-- applies to its owner (a group's, or one set on the owner); the remaining count
+-- is already the min of them all.
 --
 -- A key's quota can be per-model rather than a single pool for the whole key, so
 -- the remaining count is resolved against the model and the IE/EE endpoint this

@@ -7,8 +7,8 @@ import (
 )
 
 // GroupPolicy holds the model access rules of one group (a Team or an
-// OrgUnit); a group has at most one. Rules bind every member, also while the
-// group is Inactive.
+// OrgUnit), or of one user or ServiceAccount in one scope. A user or
+// ServiceAccount policy only narrows what the others allow.
 type GroupPolicy struct {
 	ID         int              `json:"id,omitempty"`
 	APIVersion string           `json:"api_version,omitempty"`
@@ -20,18 +20,29 @@ type GroupPolicy struct {
 const (
 	GroupPolicySubjectTeam    = "Team"
 	GroupPolicySubjectOrgUnit = "OrgUnit"
+	// SubjectName is the user's id.
+	GroupPolicySubjectUser = "User"
+	// SubjectName is the ServiceAccount's id.
+	GroupPolicySubjectServiceAccount = "ServiceAccount"
 )
 
 // GroupPolicySpec is replaced as a whole on PATCH: send every field.
 type GroupPolicySpec struct {
-	// SubjectKind is Team or OrgUnit; SubjectName the group's metadata.name.
-	// Neither changes after creation.
+	// SubjectKind is Team, OrgUnit, User or ServiceAccount; SubjectName the
+	// group's metadata.name, or the id of the user or ServiceAccount. Neither
+	// changes after creation.
 	SubjectKind string `json:"subject_kind,omitempty"`
 	SubjectName string `json:"subject_name,omitempty"`
+	// ScopeKind (Team or OrgUnit) and ScopeName name who manages a User or
+	// ServiceAccount policy; empty for a global one and for group policies.
+	// Neither changes after creation.
+	ScopeKind string `json:"scope_kind,omitempty"`
+	ScopeName string `json:"scope_name,omitempty"`
 	// Empty means no rule.
 	AllowedModels []GroupPolicyModel `json:"allowed_models,omitempty"`
 	DeniedModels  []GroupPolicyModel `json:"denied_models,omitempty"`
-	// TokenQuota is one pool shared by all members; nil means no pool.
+	// TokenQuota is one pool shared by all members (for a User or
+	// ServiceAccount, all its keys); nil means no pool.
 	TokenQuota *GroupTokenQuota `json:"token_quota,omitempty"`
 }
 

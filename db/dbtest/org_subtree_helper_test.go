@@ -179,6 +179,26 @@ func countAs(t *testing.T, db *sql.DB, userID string, prelude func(tx *sql.Tx), 
 	return n
 }
 
+// execAs runs a write as userID (rolled back) and returns the rows it touched.
+func execAs(t *testing.T, db *sql.DB, userID, query string, args ...any) (int64, error) {
+	t.Helper()
+
+	var n int64
+
+	err := asUser(t, db, userID, nil, func(tx *sql.Tx) error {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
+			return err
+		}
+
+		n, err = res.RowsAffected()
+
+		return err
+	})
+
+	return n, err
+}
+
 func wantErr(t *testing.T, what string, err error, contains string) {
 	t.Helper()
 
