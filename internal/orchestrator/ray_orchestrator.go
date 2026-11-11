@@ -487,6 +487,38 @@ func mapDeployingPhase(endpoint *v1.Endpoint, status dashboard.RayServeApplicati
 	return v1.EndpointPhaseDEPLOYING
 }
 
+func rayReadyReplicas(status dashboard.RayServeApplicationStatus, proxyReady bool) int {
+	if !proxyReady || len(status.Deployments) == 0 {
+		return 0
+	}
+
+	ready := 0
+
+	for _, dep := range status.Deployments {
+		if dep.Status == dashboard.DeploymentStatusUnhealthy {
+			return 0
+		}
+
+		running := 0
+
+		for _, replica := range dep.Replicas {
+			if replica.State == dashboard.ReplicaStateRunning {
+				running++
+			}
+		}
+
+		if running == 0 {
+			return 0
+		}
+
+		if running > ready {
+			ready = running
+		}
+	}
+
+	return ready
+}
+
 func modelDownloadStateFromLog(logText string) modelDownloadMarkerState {
 	if strings.Contains(logText, modelDownloadFailedMarker) {
 		return modelDownloadMarkerFailed
@@ -847,6 +879,10 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	errorMsg := buildRayApplicationErrorMessage(phase, status, errorMessages)
+
+	if phase == v1.EndpointPhaseDEPLOYING {
+		resources = withReadyReplicas(resources, rayReadyReplicas(status, proxyReady))
+	}
 
 	endpointStatus := &v1.EndpointStatus{
 		Phase:        phase,

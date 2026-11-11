@@ -17,6 +17,7 @@ const (
 	DeploymentStatusUnhealthy = "UNHEALTHY"
 	ProxyStatusHealthy        = "HEALTHY"
 	ProxyStatusUnhealthy      = "UNHEALTHY"
+	ReplicaStateRunning       = "RUNNING"
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
