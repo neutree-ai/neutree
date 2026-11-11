@@ -12,29 +12,23 @@ type validationError struct {
 	HTTPStatus int    `json:"-"`
 }
 
-type codedValidationError interface {
+type structuredValidationError interface {
 	error
 	ErrorCode() string
-}
-
-type hintedValidationError interface {
-	error
 	ErrorHint() string
 }
 
 func providerValidationError(err error, defaultCode string) *validationError {
 	code := defaultCode
-
-	var coded codedValidationError
-	if errors.As(err, &coded) && coded.ErrorCode() != "" {
-		code = coded.ErrorCode()
-	}
-
 	hint := ""
 
-	var hinted hintedValidationError
-	if errors.As(err, &hinted) {
-		hint = hinted.ErrorHint()
+	var structured structuredValidationError
+	if errors.As(err, &structured) {
+		if structured.ErrorCode() != "" {
+			code = structured.ErrorCode()
+		}
+
+		hint = structured.ErrorHint()
 	}
 
 	return &validationError{

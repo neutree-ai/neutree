@@ -3403,7 +3403,7 @@ func TestClusterCacheAdmission(t *testing.T) {
 		providers := &clustercache.Providers{}
 		require.NoError(t, providers.Register("example", &rejectingCacheProvider{
 			err: fmt.Errorf("wrapped: %w", codedCacheError{
-				code:    "21111",
+				code:    "CLUSTER_CACHE_INVALID_TARGET_NODE",
 				message: `invalid cache target node "worker..a"`,
 				hint:    "worker..a",
 			}),
@@ -3422,7 +3422,7 @@ func TestClusterCacheAdmission(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		var resp validationError
 		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
-		assert.Equal(t, "21111", resp.Code)
+		assert.Equal(t, "CLUSTER_CACHE_INVALID_TARGET_NODE", resp.Code)
 		assert.Equal(t, "worker..a", resp.Hint)
 		assert.Contains(t, resp.Message, "invalid cache target node")
 	})

@@ -2867,7 +2867,7 @@ func TestValidateEndpointKVCacheErrorForwarding(t *testing.T) {
 		router := gin.New()
 		router.POST("/endpoints", validateEndpoint(store, kvcache.Providers{
 			"custom": fakeKVCacheProvider{err: fmt.Errorf("cache check: %w", codedCacheError{
-				code:    "21108",
+				code:    "ENDPOINT_CACHE_CUSTOM_OVERRIDE",
 				message: "remove custom LMCACHE_CONFIG_FILE before enabling managed cache",
 				hint:    "LMCACHE_CONFIG_FILE",
 			})},
@@ -2881,7 +2881,7 @@ func TestValidateEndpointKVCacheErrorForwarding(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		var resp validationError
 		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
-		assert.Equal(t, "21108", resp.Code)
+		assert.Equal(t, "ENDPOINT_CACHE_CUSTOM_OVERRIDE", resp.Code)
 		assert.Equal(t, "LMCACHE_CONFIG_FILE", resp.Hint)
 		assert.Contains(t, resp.Message, "remove custom LMCACHE_CONFIG_FILE")
 	})
