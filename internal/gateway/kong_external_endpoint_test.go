@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -254,8 +255,9 @@ func TestGenerateExternalEndpointAIGatewayPluginPreservesEmptyModelRoutes(t *tes
 // fakeKongForExternalEndpoint serves the minimum admin API surface
 // SyncExternalEndpoint touches, and records the upstream list of the pushed
 // ai-gateway plugin.
-func fakeKongForExternalEndpoint(t *testing.T, pushed *[]interface{}) *httptest.Server {
+func fakeKongForExternalEndpoint(t *testing.T, pushed *kong.Configuration) *httptest.Server {
 	t.Helper()
+	plugins := make(map[string]kong.Plugin)
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -282,19 +284,23 @@ func fakeKongForExternalEndpoint(t *testing.T, pushed *[]interface{}) *httptest.
 			route.ID = pointy.String("route-1")
 			require.NoError(t, json.NewEncoder(w).Encode(route))
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/plugins/"):
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not found"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/plugins":
+			if plugin, ok := plugins[strings.TrimPrefix(r.URL.Path, "/plugins/")]; ok {
+				require.NoError(t, json.NewEncoder(w).Encode(plugin))
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Not found"}`))
+			}
+		case r.Method == http.MethodPost && r.URL.Path == "/plugins", r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/plugins/"):
 			var body kong.Plugin
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 
 			if body.Name != nil && *body.Name == "neutree-ai-gateway" {
-				ups, ok := body.Config["upstreams"].([]interface{})
-				require.True(t, ok)
-				*pushed = ups
+				*pushed = body.Config
 			}
 
-			_, _ = w.Write([]byte(`{"id":"plugin-1"}`))
+			body.ID = body.InstanceName
+			plugins[*body.InstanceName] = body
+			require.NoError(t, json.NewEncoder(w).Encode(body))
 		default:
 			t.Fatalf("unexpected Kong request: %s %s", r.Method, r.URL.Path)
 		}
@@ -305,7 +311,7 @@ func fakeKongForExternalEndpoint(t *testing.T, pushed *[]interface{}) *httptest.
 // endpoint_ref whose internal endpoint was deleted must not stop the remaining
 // upstreams from being pushed to Kong.
 func TestSyncExternalEndpointPartialUpstreamFailure(t *testing.T) {
-	var pushed []interface{}
+	var pushed kong.Configuration
 
 	server := fakeKongForExternalEndpoint(t, &pushed)
 	defer server.Close()
@@ -327,8 +333,9 @@ func TestSyncExternalEndpointPartialUpstreamFailure(t *testing.T) {
 	statuses, err := k.SyncExternalEndpoint(ee)
 	require.NoError(t, err, "a single broken upstream must not fail the sync")
 
-	require.Len(t, pushed, 1, "the healthy upstream is still pushed to Kong")
-	healthy, ok := pushed[0].(map[string]interface{})
+	upstreams := pushed["upstreams"].([]interface{})
+	require.Len(t, upstreams, 1, "the healthy upstream is still pushed to Kong")
+	healthy, ok := upstreams[0].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "api.openai.com", healthy["host"])
 
@@ -340,22 +347,63 @@ func TestSyncExternalEndpointPartialUpstreamFailure(t *testing.T) {
 	assert.Equal(t, v1.ExternalEndpointUpstreamPhaseReady, statuses[1].Phase)
 }
 
-// TestSyncExternalEndpointAllUpstreamsFailed keeps the hard-failure contract:
-// with nothing left to route to, the sync fails and the caller marks the
-// endpoint Failed rather than Degraded.
-func TestSyncExternalEndpointAllUpstreamsFailed(t *testing.T) {
-	s := storagemocks.NewMockStorage(t)
-	s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil)
-
-	k := &Kong{storage: s}
-	ee := testExternalEndpoint(endpointRefUpstream("ep-deleted", map[string]string{"gone": "m"}))
-
-	statuses, err := k.SyncExternalEndpoint(ee)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "no resolvable upstream")
-	// the per-upstream detail is still returned so the status explains why
-	require.Len(t, statuses, 1)
-	assert.Equal(t, v1.ExternalEndpointUpstreamPhaseFailed, statuses[0].Phase)
+// Exercise both accepted config formats through create, failover, total outage
+// and recovery. The fake Admin API retains plugin state to exercise PATCH as
+// well as initial creation, including replacement with empty arrays.
+func TestSyncExternalEndpointAvailabilityLifecycle(t *testing.T) {
+	for _, modelRoutes := range []bool{false, true} {
+		t.Run(fmt.Sprintf("model_routes=%v", modelRoutes), func(t *testing.T) {
+			var pushed kong.Configuration
+			server := fakeKongForExternalEndpoint(t, &pushed)
+			defer server.Close()
+			client, err := kong.NewClient(pointy.String(server.URL), server.Client())
+			require.NoError(t, err)
+			primary := v1.Endpoint{Metadata: &v1.Metadata{Name: "primary"}, Spec: &v1.EndpointSpec{Cluster: "c"}}
+			backup := v1.Endpoint{Metadata: &v1.Metadata{Name: "backup"}, Spec: &v1.EndpointSpec{Cluster: "c"}}
+			s := storagemocks.NewMockStorage(t)
+			s.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+				Spec:   &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+				Status: &v1.ClusterStatus{Phase: v1.ClusterPhaseUpdating, DashboardURL: "http://router:8000"},
+			}}, nil)
+			k := &Kong{kongClient: client, storage: s}
+			ee := testExternalEndpoint(endpointRefUpstream("primary", map[string]string{"chat": "a"}),
+				endpointRefUpstream("backup", map[string]string{"chat": "b"}))
+			ee.Spec.Upstreams[0].Name, ee.Spec.Upstreams[1].Name = "primary", "backup"
+			if modelRoutes {
+				ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{Model: "chat", Targets: []v1.ExternalEndpointModelRouteTarget{
+					{Upstream: "primary", UpstreamModel: "a"}, {Upstream: "backup", UpstreamModel: "b", Priority: 1},
+				}}}
+			}
+			for _, step := range []struct {
+				primary, backup *v1.EndpointStatus
+				models          []string
+			}{
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}, &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING}, []string{}},
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, []string{"a", "b"}},
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1}, ErrorMessage: "Endpoint deploying in progress: Deployment: 1/2 replicas ready"}, &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, []string{"a", "b"}},
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}, &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, []string{"b"}},
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}, &v1.EndpointStatus{Phase: v1.EndpointPhasePAUSED}, []string{}},
+				{&v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, &v1.EndpointStatus{Phase: v1.EndpointPhasePAUSED}, []string{"a"}},
+			} {
+				primary.Status, backup.Status = step.primary, step.backup
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{primary}, nil).Once()
+				s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{backup}, nil).Once()
+				statuses, err := k.SyncExternalEndpoint(ee)
+				require.NoError(t, err)
+				require.Len(t, statuses, 2)
+				assert.Len(t, pushed["upstreams"], len(step.models))
+				routes := pushed["model_routes"].([]interface{})
+				require.Len(t, routes, 1)
+				route := routes[0].(map[string]interface{})
+				assert.Equal(t, "chat", route["model"])
+				models := []string{}
+				for _, target := range route["targets"].([]interface{}) {
+					models = append(models, target.(map[string]interface{})["upstream_model"].(string))
+				}
+				assert.Equal(t, step.models, models)
+			}
+		})
+	}
 }
 
 // An endpoint with no upstreams at all is a spec problem, and must keep saying
@@ -369,15 +417,60 @@ func TestSyncExternalEndpointNoUpstreamsConfigured(t *testing.T) {
 	assert.Empty(t, statuses)
 }
 
-func TestJoinUpstreamErrors(t *testing.T) {
-	statuses := []v1.ExternalEndpointUpstreamStatus{
-		{Phase: v1.ExternalEndpointUpstreamPhaseFailed, ErrorMessage: "first failed"},
-		{Phase: v1.ExternalEndpointUpstreamPhaseReady},
-		{Phase: v1.ExternalEndpointUpstreamPhaseFailed, ErrorMessage: "second failed"},
+func TestResolveEndpointRefAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		replicas        *int
+		status          *v1.EndpointStatus
+		endpointDeleted bool
+		wantOK          bool
+		wantErr         string
+	}{
+		{name: "no observation", wantErr: "has no observed status"},
+		{name: "paused", status: &v1.EndpointStatus{Phase: v1.EndpointPhasePAUSED}, wantErr: "is not Running (phase: Paused)"},
+		{name: "deploying with 0 ready replicas (cold start or probe failed)", status: &v1.EndpointStatus{
+			Phase: v1.EndpointPhaseDEPLOYING,
+		}, wantErr: "has no ready replicas (phase: Deploying)"},
+		{name: "pausing while still Running (replicas=0)", replicas: pointy.Int(0), status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseRUNNING,
+			Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
+		}, wantErr: "is paused"},
+		{name: "deploying while pausing (replicas=0)", replicas: pointy.Int(0), status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseDEPLOYING,
+			Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
+		}, wantErr: "is paused"},
+		{name: "deploying scaling with ready replicas (ReadyReplicas > 0)", status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseDEPLOYING,
+			Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
+		}, wantOK: true},
+		{name: "deleting endpoint", status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, endpointDeleted: true, wantErr: "is deleting"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ep := v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep", Workspace: "ws"},
+				Spec:     &v1.EndpointSpec{Cluster: "c", Replicas: v1.ReplicaSpec{Num: tc.replicas}},
+				Status:   tc.status,
+			}
+			cluster := v1.Cluster{
+				Metadata: &v1.Metadata{},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+				Status:   &v1.ClusterStatus{DashboardURL: "http://router:8000"},
+			}
+			if tc.endpointDeleted {
+				ep.Metadata.DeletionTimestamp = "2026-11-09T00:00:00Z"
+			}
+			s := storagemocks.NewMockStorage(t)
+			s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{ep}, nil)
+			if tc.wantOK {
+				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+			}
+			_, _, _, _, err := (&Kong{storage: s}).resolveEndpointRef("ws", "ep")
+			if tc.wantOK {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tc.wantErr)
+			}
+		})
 	}
-
-	assert.Equal(t, "first failed; second failed", joinUpstreamErrors(statuses))
-	assert.Empty(t, joinUpstreamErrors([]v1.ExternalEndpointUpstreamStatus{
-		{Phase: v1.ExternalEndpointUpstreamPhaseReady},
-	}))
 }

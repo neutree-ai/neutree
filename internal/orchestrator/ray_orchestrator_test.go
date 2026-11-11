@@ -4326,3 +4326,91 @@ func TestRayOrchestratorKeepDeployedOnUnreadyDependency(t *testing.T) {
 			newContext(deployed, nil), errors.New("deploy cluster is not ssh type")))
 	})
 }
+
+func TestRayOrchestrator_EndpointReadyReplicas(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "chat-model"},
+		Spec: &v1.EndpointSpec{
+			Model:    &v1.ModelSpec{Registry: "reg", Name: "m", Version: "v1"},
+			Replicas: v1.ReplicaSpec{Num: pointy.Int(2)},
+		},
+	}
+	appName := EndpointToServeApplicationName(endpoint)
+
+	for _, tc := range []struct {
+		name      string
+		appStatus dashboard.RayServeApplicationStatus
+		wantPhase v1.EndpointPhase
+		wantReady int
+	}{
+		{
+			name: "cold start with STARTING backend replica reports 0 ready",
+			appStatus: dashboard.RayServeApplicationStatus{
+				Status: dashboard.ApplicationStatusDeploying,
+				Deployments: map[string]dashboard.Deployment{
+					"Controller": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{{ReplicaID: "c1", State: dashboard.ReplicaStateRunning}}},
+					"Backend":    {Status: "UPDATING", Replicas: []dashboard.Replica{{ReplicaID: "b1", State: "STARTING"}}},
+				},
+			},
+			wantPhase: v1.EndpointPhaseDEPLOYING,
+			wantReady: 0,
+		},
+		{
+			name: "scale up with 1 RUNNING and 1 STARTING backend replica reports 1 ready",
+			appStatus: dashboard.RayServeApplicationStatus{
+				Status: dashboard.ApplicationStatusDeploying,
+				Deployments: map[string]dashboard.Deployment{
+					"Controller": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{{ReplicaID: "c1", State: dashboard.ReplicaStateRunning}}},
+					"Backend": {Status: "UPDATING", Replicas: []dashboard.Replica{
+						{ReplicaID: "b1", State: dashboard.ReplicaStateRunning},
+						{ReplicaID: "b2", State: "STARTING"},
+					}},
+				},
+			},
+			wantPhase: v1.EndpointPhaseDEPLOYING,
+			wantReady: 1,
+		},
+		{
+			name: "running clears deploying ready count",
+			appStatus: dashboard.RayServeApplicationStatus{
+				Status: dashboard.ApplicationStatusRunning,
+				Deployments: map[string]dashboard.Deployment{
+					"Controller": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{{ReplicaID: "c1", State: dashboard.ReplicaStateRunning}}},
+					"Backend": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{
+						{ReplicaID: "b1", State: dashboard.ReplicaStateRunning},
+						{ReplicaID: "b2", State: dashboard.ReplicaStateRunning},
+					}},
+				},
+			},
+			wantPhase: v1.EndpointPhaseRUNNING,
+			wantReady: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDashboard := dashboardmocks.NewMockDashboardService(t)
+			mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{appName: tc.appStatus},
+				Proxies:      map[string]dashboard.ProxyStatus{"proxy": {Status: dashboard.ProxyStatusHealthy}},
+			}, nil)
+			prevFactory := dashboard.NewDashboardService
+			dashboard.NewDashboardService = func(string) dashboard.DashboardService { return mockDashboard }
+			t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
+			o := &RayOrchestrator{
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "c", Workspace: "production"},
+					Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType},
+					Status:   &v1.ClusterStatus{DashboardURL: "http://127.0.0.1:8265"},
+				},
+			}
+			status, err := o.GetEndpointStatus(endpoint)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPhase, status.Phase)
+			gotReady := 0
+			if status.Resources != nil {
+				gotReady = status.Resources.ReadyReplicas
+			}
+			assert.Equal(t, tc.wantReady, gotReady)
+		})
+	}
+}
