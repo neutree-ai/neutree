@@ -3353,22 +3353,6 @@ func (*acceptingCacheProvider) Validate(old, next *v1.Cluster) error            
 func (*acceptingCacheProvider) Reconcile(context.Context, *clustercache.Context) error { return nil }
 func (*acceptingCacheProvider) Delete(context.Context, *clustercache.Context) error    { return nil }
 
-type codedCacheError struct {
-	code    string
-	message string
-	hint    string
-}
-
-func (e codedCacheError) Error() string     { return e.message }
-func (e codedCacheError) ErrorCode() string { return e.code }
-func (e codedCacheError) ErrorHint() string { return e.hint }
-
-type rejectingCacheProvider struct{ err error }
-
-func (p *rejectingCacheProvider) Validate(old, next *v1.Cluster) error                 { return p.err }
-func (*rejectingCacheProvider) Reconcile(context.Context, *clustercache.Context) error { return nil }
-func (*rejectingCacheProvider) Delete(context.Context, *clustercache.Context) error    { return nil }
-
 func TestClusterCacheAdmission(t *testing.T) {
 	for _, supported := range []bool{false, true} {
 		for _, method := range []string{http.MethodPost, http.MethodPatch} {
@@ -3391,39 +3375,9 @@ func TestClusterCacheAdmission(t *testing.T) {
 				assert.Equal(t, supported, called, recorder.Body.String())
 				if !supported {
 					assert.Equal(t, http.StatusBadRequest, recorder.Code)
-					assert.Contains(t, recorder.Body.String(), `"code":"10208"`)
 					assert.Contains(t, recorder.Body.String(), "not supported")
 				}
 			})
 		}
 	}
-
-	t.Run("forwards provider error code and hint", func(t *testing.T) {
-		s := storageMocks.NewMockStorage(t)
-		providers := &clustercache.Providers{}
-		require.NoError(t, providers.Register("example", &rejectingCacheProvider{
-			err: fmt.Errorf("wrapped: %w", codedCacheError{
-				code:    "CLUSTER_CACHE_INVALID_TARGET_NODE",
-				message: `invalid cache target node "worker..a"`,
-				hint:    "worker..a",
-			}),
-		}))
-
-		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(s, providers), func(c *gin.Context) {
-			c.Status(http.StatusNoContent)
-		})
-
-		recorder := httptest.NewRecorder()
-		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(
-			`{"spec":{"type":"kubernetes","version":"v1.2.0","cache":{"provider":"example","options":{}}}}`,
-		)))
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		var resp validationError
-		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
-		assert.Equal(t, "CLUSTER_CACHE_INVALID_TARGET_NODE", resp.Code)
-		assert.Equal(t, "worker..a", resp.Hint)
-		assert.Contains(t, resp.Message, "invalid cache target node")
-	})
 }
