@@ -125,7 +125,7 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0`,
 
 				wantHealthy := initialHealth
 				if testCase.evaluated {
-					wantHealthy = testCase.healthy
+					wantHealthy = initialHealth && testCase.healthy
 				}
 
 				require.Len(t, result.Accelerator.Devices, 2)

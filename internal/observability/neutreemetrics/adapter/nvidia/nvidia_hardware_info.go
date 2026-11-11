@@ -16,4 +16,5 @@ type nvidiaHardwareInfo struct {
 	PCIEGeneration    string
 	PCIEWidth         string
 	NUMANode          string
+	Unhealthy         bool
 }

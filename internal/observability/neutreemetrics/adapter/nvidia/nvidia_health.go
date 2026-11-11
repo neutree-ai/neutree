@@ -24,7 +24,7 @@ func (*accelerator) EvaluateHardwareHealth(hardware adapter.HardwareSnapshot, ev
 	result := hardware.Clone()
 	for deviceIndex, device := range result.Accelerator.Devices {
 		if healthy, found := HealthStatusByUUID[device.UUID]; found {
-			result.Accelerator.Devices[deviceIndex].Healthy = healthy
+			result.Accelerator.Devices[deviceIndex].Healthy = device.Healthy && healthy
 		}
 	}
 

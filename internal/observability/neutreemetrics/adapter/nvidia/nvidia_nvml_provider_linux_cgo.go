@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 type realNvidiaNVMLHardwareClient struct {
@@ -21,21 +22,21 @@ func newNvidiaNVMLHardwareClient() nvidiaNVMLHardwareClient {
 }
 
 func (c *realNvidiaNVMLHardwareClient) Init() bool {
-	return c.api.Init() == nvml.SUCCESS
+	return nvidiaNVMLCallSucceeded("nvmlInit", c.api.Init())
 }
 
 func (c *realNvidiaNVMLHardwareClient) Shutdown() {
-	_ = c.api.Shutdown()
+	nvidiaNVMLCallSucceeded("nvmlShutdown", c.api.Shutdown())
 }
 
 func (c *realNvidiaNVMLHardwareClient) DeviceCount() (int, bool) {
 	count, ret := c.api.DeviceGetCount()
-	return count, ret == nvml.SUCCESS
+	return count, nvidiaNVMLCallSucceeded("nvmlDeviceGetCount", ret)
 }
 
 func (c *realNvidiaNVMLHardwareClient) Device(index int) (nvidiaNVMLHardwareDevice, bool) {
 	device, ret := c.api.DeviceGetHandleByIndex(index)
-	if ret != nvml.SUCCESS {
+	if !nvidiaNVMLCallSucceeded("nvmlDeviceGetHandleByIndex", ret) {
 		return nil, false
 	}
 
@@ -44,55 +45,90 @@ func (c *realNvidiaNVMLHardwareClient) Device(index int) (nvidiaNVMLHardwareDevi
 
 func (c *realNvidiaNVMLHardwareClient) DriverVersion() (string, bool) {
 	version, ret := c.api.SystemGetDriverVersion()
-	return version, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlSystemGetDriverVersion", version, ret, "")
 }
 
 func (c *realNvidiaNVMLHardwareClient) CUDADriverVersion() (string, bool) {
 	version, ret := c.api.SystemGetCudaDriverVersion_v2()
 	if ret != nvml.SUCCESS {
+		v2Ret := ret
 		version, ret = c.api.SystemGetCudaDriverVersion()
+
+		if ret != nvml.SUCCESS && ret != nvml.ERROR_NOT_SUPPORTED {
+			klog.Warningf("NVIDIA NVML CUDA driver version queries failed: nvmlSystemGetCudaDriverVersion_v2: %v (ret=%d); nvmlSystemGetCudaDriverVersion: %v (ret=%d)",
+				v2Ret, v2Ret, ret, ret)
+
+			return "", false
+		}
 	}
 
-	if ret != nvml.SUCCESS {
-		return "", false
+	if ret == nvml.ERROR_NOT_SUPPORTED {
+		return "", true
 	}
 
 	return nvidiaFormatCUDADriverVersion(float64(version)), true
 }
 
+// Unsupported properties are absent, not failures; numeric callers supply a sentinel that cannot be mistaken for a valid value.
+func nvidiaNVMLProperty[T any](operation string, value T, ret nvml.Return, empty T) (T, bool) {
+	if ret == nvml.ERROR_NOT_SUPPORTED {
+		return empty, true
+	}
+
+	return value, nvidiaNVMLCallSucceeded(operation, ret)
+}
+
+func nvidiaNVMLCallSucceeded(operation string, ret nvml.Return) bool {
+	if ret == nvml.SUCCESS {
+		return true
+	}
+
+	klog.Warningf("NVIDIA NVML call failed: %s: %v (ret=%d)", operation, ret, ret)
+
+	return false
+}
+
 func (d realNvidiaNVMLHardwareDevice) UUID() (string, bool) {
 	value, ret := d.device.GetUUID()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetUUID", value, ret, "")
 }
 
 func (d realNvidiaNVMLHardwareDevice) Index() (int, bool) {
 	value, ret := d.device.GetIndex()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetIndex", value, ret, -1)
 }
 
 func (d realNvidiaNVMLHardwareDevice) MinorNumber() (int, bool) {
 	value, ret := d.device.GetMinorNumber()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetMinorNumber", value, ret, -1)
 }
 
 func (d realNvidiaNVMLHardwareDevice) Product() (string, bool) {
 	value, ret := d.device.GetName()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetName", value, ret, "")
 }
 
 func (d realNvidiaNVMLHardwareDevice) Architecture() (uint32, bool) {
 	value, ret := d.device.GetArchitecture()
-	return uint32(value), ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetArchitecture", uint32(value), ret, 0)
 }
 
 func (d realNvidiaNVMLHardwareDevice) CUDACapability() (int, int, bool) {
 	major, minor, ret := d.device.GetCudaComputeCapability()
-	return major, minor, ret == nvml.SUCCESS
+	if ret == nvml.ERROR_NOT_SUPPORTED {
+		return -1, -1, true
+	}
+
+	return major, minor, nvidiaNVMLCallSucceeded("nvmlDeviceGetCudaComputeCapability", ret)
 }
 
 func (d realNvidiaNVMLHardwareDevice) PCIEBusID() (string, bool) {
 	value, ret := d.device.GetPciInfo()
-	if ret != nvml.SUCCESS {
+	if ret == nvml.ERROR_NOT_SUPPORTED {
+		return "", true
+	}
+
+	if !nvidiaNVMLCallSucceeded("nvmlDeviceGetPciInfo", ret) {
 		return "", false
 	}
 
@@ -106,22 +142,22 @@ func (d realNvidiaNVMLHardwareDevice) PCIEBusID() (string, bool) {
 
 func (d realNvidiaNVMLHardwareDevice) PCIEGeneration() (int, bool) {
 	value, ret := d.device.GetMaxPcieLinkGeneration()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetMaxPcieLinkGeneration", value, ret, -1)
 }
 
 func (d realNvidiaNVMLHardwareDevice) PCIEWidth() (int, bool) {
 	value, ret := d.device.GetMaxPcieLinkWidth()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetMaxPcieLinkWidth", value, ret, -1)
 }
 
 func (d realNvidiaNVMLHardwareDevice) MemoryTotalBytes() (uint64, bool) {
 	value, ret := d.device.GetMemoryInfo()
-	return value.Total, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetMemoryInfo", value.Total, ret, 0)
 }
 
 func (d realNvidiaNVMLHardwareDevice) NUMANode() (int, bool) {
 	value, ret := d.device.GetNumaNodeId()
-	return value, ret == nvml.SUCCESS
+	return nvidiaNVMLProperty("nvmlDeviceGetNumaNodeId", value, ret, -1)
 }
 
 func nvidiaCStringFromInt8(value []int8) string {

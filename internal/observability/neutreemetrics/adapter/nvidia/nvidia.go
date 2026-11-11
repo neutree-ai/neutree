@@ -66,9 +66,7 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 
 	infos, err := provider.GPUHardwareInfos(ctx)
 	if err != nil {
-		return adapter.HardwareSnapshot{
-			Accelerator: v1.StaticNodeAcceleratorStatus{Type: a.Type()},
-		}, nil
+		return adapter.HardwareSnapshot{Accelerator: v1.StaticNodeAcceleratorStatus{Type: a.Type()}}, err
 	}
 
 	snapshot := adapter.HardwareSnapshot{
@@ -85,7 +83,7 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 			UUID:         info.UUID,
 			ProductName:  info.Product,
 			ProductModel: info.Product,
-			Healthy:      true, // Preserve the discovery default unless DCGM health metrics can be evaluated.
+			Healthy:      !info.Unhealthy,
 		}
 
 		if info.MemoryTotalMiB != "" {
