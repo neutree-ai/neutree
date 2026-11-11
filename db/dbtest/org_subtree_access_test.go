@@ -916,7 +916,7 @@ func TestSubtreeRead_UsageByDimension(t *testing.T) {
 	}
 
 	t.Run("department admin without a filter: keys recorded in its subtree", func(t *testing.T) {
-		got := dimensionUsage(t, db, dadmin, usage, ws, nil, nil)
+		got := dimensionUsage(t, db, dadmin, usage, dimFilter{workspace: ws})
 		if len(got) != 2 || got[keys["ua"]] != 10 || got[keys["ua1"]] != 20 {
 			t.Errorf("got %v", got)
 		}
@@ -933,7 +933,7 @@ func TestSubtreeRead_UsageByDimension(t *testing.T) {
 		{"global admin, the root", admin, o.unit("root"), 155},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := sum(dimensionUsage(t, db, c.who, usage, ws, nil, c.unit))
+			got := sum(dimensionUsage(t, db, c.who, usage, dimFilter{workspace: ws, orgUnit: c.unit}))
 			if got != c.want {
 				t.Errorf("p_org_unit total %d, want %d", got, c.want)
 			}
@@ -947,7 +947,7 @@ func TestSubtreeRead_UsageByDimension(t *testing.T) {
 	}
 
 	t.Run("an owner reads its own key under any OrgUnit", func(t *testing.T) {
-		got := dimensionUsage(t, db, o.users["ua"], usage, ws, nil, o.unit("b"))
+		got := dimensionUsage(t, db, o.users["ua"], usage, dimFilter{workspace: ws, orgUnit: o.unit("b")})
 		if len(got) != 1 || got[keys["ua"]] != 5 {
 			t.Errorf("got %v", got)
 		}
