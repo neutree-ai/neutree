@@ -27,11 +27,10 @@ type MetricsComponent struct {
 	ctrlClient client.Client
 	logger     klog.Logger
 
-	inferenceScrapeRules    InferenceScrapeRules
-	cacheProviders          *clustercache.Providers
-	metricsTargets          metricsconfig.Registry
-	acceleratorOperators    map[string]acceleratoroperator.AcceleratorOperator
-	acceleratorOperatorsSet bool
+	inferenceScrapeRules InferenceScrapeRules
+	cacheProviders       *clustercache.Providers
+	metricsTargets       metricsconfig.Registry
+	acceleratorOperators map[string]acceleratoroperator.AcceleratorOperator
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -62,7 +61,6 @@ func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *
 // reconcile so Metrics does not repeat cluster matching and node discovery.
 func (m *MetricsComponent) WithAcceleratorOperators(operators map[string]acceleratoroperator.AcceleratorOperator) *MetricsComponent {
 	m.acceleratorOperators = operators
-	m.acceleratorOperatorsSet = true
 
 	return m
 }

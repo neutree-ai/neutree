@@ -60,21 +60,7 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		return metricsAcceleratorPlan{}, false, nil
 	}
 
-	operatorManaged := false
-	if m.acceleratorOperatorsSet {
-		_, operatorManaged = m.acceleratorOperators[acceleratorType]
-	} else {
-		// Direct component callers without a cluster reconcile context retain
-		// local discovery for backwards-compatible standalone use and tests.
-		plugin, _ := m.acceleratorMgr.GetPlugin(acceleratorType)
-		operatorManaged, err = publicaccelerator.IsOperatorSupported(ctx, plugin, &publicaccelerator.OperatorContext{
-			Cluster: m.cluster, Client: m.ctrlClient, Namespace: m.namespace,
-		})
-
-		if err != nil {
-			return metricsAcceleratorPlan{}, false, err
-		}
-	}
+	_, operatorManaged := m.acceleratorOperators[acceleratorType]
 
 	plan := metricsAcceleratorPlan{
 		AcceleratorType:             acceleratorType,

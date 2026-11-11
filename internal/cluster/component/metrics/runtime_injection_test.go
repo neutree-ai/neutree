@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -10,20 +9,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 	for _, test := range []struct {
-		name, clientLabel                       string
-		managed, operator, matchError, external bool
+		name, clientLabel           string
+		managed, operator, external bool
 	}{
 		{name: "legacy keeps shared agent"},
 		{name: "operator with OS dependencies splits agents", operator: true},
@@ -31,17 +28,14 @@ func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 		{name: "external exporter keeps both agents", managed: true, operator: true, external: true, clientLabel: "true"},
 		{name: "managed GPU recovering", managed: true, operator: true, clientLabel: "false"},
 		{name: "managed client label not initialized", managed: true, operator: true},
-		{name: "hardware discovery error stops rendering", operator: true, matchError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			manager := acceleratormocks.NewMockManager(t)
 			manager.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()})
 			profile := metricsNvidiaProfile(test.managed)
 			if test.operator {
-				manager.On("GetPlugin", accelerator.NvidiaAcceleratorType).Return(&plugin.GPUAcceleratorPlugin{}, true)
 			} else {
 				profile.NodeAgentRuntime.NodeSelector = nil
-				manager.On("GetPlugin", accelerator.NvidiaAcceleratorType).Return(metricsLegacyPlugin{resource: accelerator.NvidiaAcceleratorType}, true)
 			}
 			manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(profile, nil)
 			nodeLabels := map[string]string{accelerator.NvidiaGPUDiscoveryLabelKey: accelerator.NvidiaGPUDiscoveryLabelValue}
@@ -54,25 +48,18 @@ func TestMetricsRendersProfileInitContainersAndRuntime(t *testing.T) {
 				namespace:   "neutree-system", imagePullSecret: "pull-secret", metricsRemoteWriteURL: "https://metrics.example/write",
 				acceleratorMgr: manager, ctrlClient: fake.NewClientBuilder().WithObjects(
 					metricsTestNode("gpu", nodeLabels), metricsTestNode("cpu", nil),
-				).WithInterceptorFuncs(interceptor.Funcs{
-					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if test.matchError {
-							return errors.New("node discovery denied")
-						}
-						return c.List(ctx, list, opts...)
-					},
-				}).Build(),
+				).Build(),
+			}
+			if test.operator {
+				component.WithAcceleratorOperators(map[string]acceleratoroperator.AcceleratorOperator{
+					accelerator.NvidiaAcceleratorType: acceleratoroperator.NewNvidiaAcceleratorOperator(),
+				})
 			}
 
 			if test.external {
 				component.cluster.Spec.Config = &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: v1.ClusterAcceleratorExporterModeExternal}}}
 			}
 			resources, err := component.GetMetricsResources(context.Background())
-			if test.matchError {
-				require.ErrorContains(t, err, "node discovery denied")
-				require.Nil(t, resources)
-				return
-			}
 			require.NoError(t, err)
 			agent := findMetricsDaemonSet(t, resources, neutreeNodeAgentMetricsName)
 			pods := []*corev1.PodSpec{&agent.Spec.Template.Spec}

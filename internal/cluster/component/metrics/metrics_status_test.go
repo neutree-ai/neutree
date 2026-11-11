@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -15,11 +14,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -223,7 +221,7 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 		gpuDesired, cpuDesired           int32
 		missingCPU, missingAccelerator   bool
 		cpuNotReady, acceleratorNotReady bool
-		matchError, expectedReady        bool
+		expectedReady                    bool
 		external, missingExporter        bool
 		wantError                        string
 	}{
@@ -239,7 +237,6 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 		{name: "CPU agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, cpuNotReady: true, wantError: "cpu node-agent DaemonSet/neutree-node-agent-cpu is not ready (0/1)"},
 		{name: "accelerator agent missing", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, missingAccelerator: true, wantError: "accelerator node-agent DaemonSet/neutree-node-agent check failed"},
 		{name: "accelerator agent not ready", operator: true, managed: true, gpuDesired: 1, cpuDesired: 1, acceleratorNotReady: true, wantError: "accelerator node-agent DaemonSet/neutree-node-agent is not ready (0/1)"},
-		{name: "discovery error stops status planning", operator: true, gpuDesired: 1, cpuDesired: 1, matchError: true, wantError: "node discovery denied"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			objects := []client.Object{
@@ -279,18 +276,13 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 				}
 				manager := acceleratormocks.NewMockManager(t)
 				manager.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()})
-				manager.On("GetPlugin", publicaccelerator.NvidiaAcceleratorType).Return(&plugin.GPUAcceleratorPlugin{}, true)
 				manager.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(metricsNvidiaProfile(test.managed), nil)
 				component.acceleratorMgr = manager
+				component.WithAcceleratorOperators(map[string]acceleratoroperator.AcceleratorOperator{
+					publicaccelerator.NvidiaAcceleratorType: acceleratoroperator.NewNvidiaAcceleratorOperator(),
+				})
 			}
-			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
-				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-					if test.matchError {
-						return errors.New("node discovery denied")
-					}
-					return c.List(ctx, list, opts...)
-				},
-			}).Build()
+			component.ctrlClient = fake.NewClientBuilder().WithObjects(objects...).Build()
 
 			if test.external {
 				component.cluster.Spec.Config = &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: v1.ClusterAcceleratorExporterModeExternal}}}
@@ -300,16 +292,11 @@ func TestCheckResourcesStatusChecksPlannedNodeAgents(t *testing.T) {
 			assert.True(t, status.NeutreeNodeAgentMetricsRequired)
 			assert.Equal(t, test.expectedReady, status.NeutreeNodeAgentMetricsDaemonSetReady)
 			assert.Equal(t, test.expectedReady && !test.missingExporter, status.Ready())
-			assert.Equal(t, test.operator && !test.external && !test.matchError, status.AcceleratorExporterRequired)
+			assert.Equal(t, test.operator && !test.external, status.AcceleratorExporterRequired)
 			if test.wantError != "" {
 				assert.Contains(t, status.String(), test.wantError)
 			} else {
 				assert.Empty(t, status.Errors)
-			}
-			if test.matchError {
-				assert.Zero(t, status.NeutreeNodeAgentMetricsPodsReady)
-				assert.Zero(t, status.NeutreeNodeAgentMetricsTotalPods)
-				return
 			}
 			expectedPods := int(test.gpuDesired + test.cpuDesired)
 			expectedTotal := expectedPods
