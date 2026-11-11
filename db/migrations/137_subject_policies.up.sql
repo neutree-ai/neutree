@@ -363,16 +363,23 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
+    WITH g AS MATERIALIZED (
+        SELECT * FROM api.user_groups(p_principal)
+    )
     SELECT g.kind, g.name, g.active, TRUE, (p.metadata).name, p.spec
-    FROM api.user_groups(p_principal) g
+    FROM g
     JOIN api.group_policies p
       ON (p.spec).subject_kind = g.kind
      AND (p.spec).subject_name = g.name
     UNION ALL
+    -- Same rule as api.group_policy_in_scope, with user_groups read once.
     SELECT (p.spec).subject_kind, (p.spec).subject_name, TRUE,
-           api.group_policy_in_scope(p.spec, p_principal), (p.metadata).name, p.spec
+           (p.spec).scope_kind IS NULL
+               OR EXISTS (SELECT 1 FROM g
+                          WHERE g.kind = (p.spec).scope_kind AND g.name = (p.spec).scope_name),
+           (p.metadata).name, p.spec
     FROM api.group_policies p
-    WHERE api.is_subject_policy_kind((p.spec).subject_kind)
+    WHERE (p.spec).subject_kind IN ('User', 'ServiceAccount')
       AND (p.spec).subject_name = p_principal::text;
 $$;
 
@@ -664,13 +671,6 @@ BEGIN
 
     WITH g AS (
         SELECT * FROM api.principal_group_policies(p_user_id)
-    ), pools AS (
-        SELECT g.kind, g.name, (g.spec).scope_kind AS scope_kind, (g.spec).scope_name AS scope_name,
-               ((g.spec).token_quota ->> 'limit')::BIGINT AS token_limit,
-               (g.spec).token_quota ->> 'period' AS period,
-               api.group_token_pool_usage(g.kind, g.name, (g.spec).token_quota ->> 'period') AS used
-        FROM g
-        WHERE g.in_scope AND (g.spec).token_quota IS NOT NULL
     )
     SELECT jsonb_build_object(
         'groups', COALESCE((
@@ -711,7 +711,7 @@ BEGIN
                     'remaining', t.token_limit - t.used,
                     'resets_at', api.api_key_period_reset(t.period))
                 ORDER BY t.kind, t.name, t.scope_kind NULLS FIRST, t.scope_name)
-            FROM pools t), '[]'::jsonb))
+            FROM api.user_group_token_pools(p_user_id) t), '[]'::jsonb))
     INTO v_out;
 
     RETURN jsonb_build_object('allowed_models', to_jsonb(v_allowed), 'denied_models', to_jsonb(v_denied)) || v_out;
@@ -761,7 +761,7 @@ BEGIN
         WHERE g.in_scope AND (g.spec).token_quota IS NOT NULL
     ), pu AS (
         -- Once per pool: a Team's or OrgUnit's is shared by its subjects.
-        SELECT DISTINCT ON (k.kind, k.name, k.period) k.kind, k.name, k.period,
+        SELECT k.kind, k.name, k.period,
                api.group_token_pool_usage(k.kind, k.name, k.period) AS used
         FROM (SELECT DISTINCT sp.kind, sp.name, sp.period FROM sp) k
     ), eff AS (

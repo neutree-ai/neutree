@@ -79,18 +79,8 @@ func changeAs(t *testing.T, db *sql.DB, actor, name string) (updated, deleted in
 	t.Helper()
 
 	run := func(query string) int64 {
-		var n int64
-
-		if err := asUser(t, db, actor, nil, func(tx *sql.Tx) error {
-			res, err := tx.Exec(query, name)
-			if err != nil {
-				return err
-			}
-
-			n, err = res.RowsAffected()
-
-			return err
-		}); err != nil {
+		n, err := execAs(t, db, actor, query, name)
+		if err != nil {
 			t.Fatalf("%s as %s: %v", query, actor, err)
 		}
 
