@@ -256,6 +256,10 @@ func (c *NativeKubernetesClusterReconciler) reconcileAcceleratorOperators(reconc
 	// Publish matching only after discovery succeeds; an API error must not select Legacy.
 	reconcileCtx.acceleratorOperators = candidates
 
+	if len(candidates) == 0 {
+		return nil
+	}
+
 	var errs []error
 
 	for acceleratorType, acceleratorOperator := range candidates {
