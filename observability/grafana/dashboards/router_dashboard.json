@@ -172,7 +172,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "avg by (endpoint) (router:avg_latency{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"})",
+          "expr": "avg by (endpoint) (router:avg_latency{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"} >= 0)",
           "legendFormat": "{{endpoint}}",
           "range": false,
           "refId": "A"
@@ -399,16 +399,13 @@
         "type": "query"
       },
       {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_ready{neutree_cluster=~\"${Cluster:regex}\",workspace!=\"\"}, workspace)",
+        "includeAll": false,
         "name": "Workspace",
-        "type": "textbox",
-        "query": "",
-        "current": {
-          "text": "",
-          "value": ""
-        },
-        "hide": 2,
-        "multi": false,
-        "includeAll": false
+        "query": "label_values(neutree_node_ready{neutree_cluster=~\"${Cluster:regex}\",workspace!=\"\"}, workspace)",
+        "refresh": 1,
+        "type": "query"
       },
       {
         "name": "Endpoint",
