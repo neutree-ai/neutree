@@ -155,9 +155,11 @@ func validateContext(opCtx *OperatorContext) error {
 
 func reconcileClientLabel(node *corev1.Node, running bool) bool {
 	_, labelled := node.Labels[accelerator.NvidiaGPUClientLabel]
-	annotation, annotated := node.Annotations[accelerator.NeutreeOwnerAnnotation]
+	_, annotated := node.Annotations[accelerator.NeutreeOwnerAnnotation]
 
-	if labelled != annotated || (annotated && annotation != accelerator.NeutreeOwnerValue) {
+	// An annotation key is the ownership marker. Removing it releases the
+	// label; its value is not a second opt-out switch.
+	if !annotated && labelled {
 		return false
 	}
 
@@ -179,7 +181,9 @@ func reconcileClientLabel(node *corev1.Node, running bool) bool {
 	}
 
 	node.Labels[accelerator.NvidiaGPUClientLabel] = desired
-	node.Annotations[accelerator.NeutreeOwnerAnnotation] = accelerator.NeutreeOwnerValue
+	if !annotated {
+		node.Annotations[accelerator.NeutreeOwnerAnnotation] = accelerator.NeutreeOwnerValue
+	}
 
 	return true
 }
