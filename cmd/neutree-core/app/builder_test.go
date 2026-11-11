@@ -14,6 +14,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func TestNewBuilder(t *testing.T) {
@@ -172,7 +173,7 @@ func (internalTestPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) 
 	return v1.RuntimeConfig{}, nil
 }
 
-func (internalTestPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+func (internalTestPlugin) GetAcceleratorProfile(context.Context, publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	return nil, nil
 }
 

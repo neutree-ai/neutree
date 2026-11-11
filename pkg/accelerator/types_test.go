@@ -37,7 +37,7 @@ func (contractPlugin) DetectStaticNodeAccelerator(context.Context, *v1.DetectSta
 func (contractPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 	return v1.RuntimeConfig{}, nil
 }
-func (contractPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+func (contractPlugin) GetAcceleratorProfile(context.Context, AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	return nil, nil
 }
 func (contractPlugin) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error) {

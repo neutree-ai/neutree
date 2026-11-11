@@ -190,6 +190,9 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
+	// Admission failures accumulate while GPU dependencies recover, so cleanup must precede dependency gates.
+	cleanupUnexpectedAdmissionPods(ctx)
+
 	if err := k.validateDependencies(ctx); err != nil {
 		if k.keepDeployedOnUnreadyDependency(ctx, err) {
 			return nil
@@ -397,6 +400,8 @@ func (k *kubernetesOrchestrator) PauseEndpoint(endpoint *v1.Endpoint) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare orchestrator context for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
+
+	cleanupUnexpectedAdmissionPods(ctx)
 
 	if err := k.validateClusterForPauseDelete(ctx); err != nil {
 		return errors.Wrapf(err, "failed to validate cluster for endpoint %s", endpoint.Metadata.WorkspaceName())

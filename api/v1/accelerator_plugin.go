@@ -152,17 +152,22 @@ type NodeAgentRuntimeProfile struct {
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector constrains Kubernetes NodeAgent placement. StaticNode ignores it.
+	// For Operator-managed deployments, the CPU agent requires every entry to be NotIn;
+	// plugins must provide accelerator scope labels rather than shared placement labels.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
 	// Env declares NodeAgent-only environment variables. Exporter environment
 	// variables are not implicitly inherited by the NodeAgent.
 	Env map[string]string `json:"env,omitempty"`
 	// Capabilities declares Linux capabilities required by the NodeAgent only.
 	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
+	// InitContainers are Kubernetes-only containers required before the NodeAgent starts.
+	InitContainers []corev1.Container `json:"init_containers,omitempty"`
 	// Volumes declares structured host volumes required by the NodeAgent runtime.
 	Volumes []ComponentVolume `json:"volumes,omitempty"`
 	// VolumeMounts declares the matching container mounts for Volumes.
 	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
-	// Runtime selects the Docker runtime handler on StaticNode.
+	// Runtime selects the backend runtime handler. Kubernetes maps it to
+	// runtimeClassName; StaticNode maps it to the Docker runtime handler.
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions are StaticNode-only Docker options; Kubernetes does not parse them.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
@@ -217,6 +222,8 @@ type AcceleratorExporterRuntimeProfile struct {
 	HostPID bool `json:"host_pid,omitempty"`
 	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
 	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
+	// InitContainers are Kubernetes-only containers required before the exporter starts.
+	InitContainers []corev1.Container `json:"init_containers,omitempty"`
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
@@ -225,15 +232,9 @@ type AcceleratorExporterRuntimeProfile struct {
 	Volumes []ComponentVolume `json:"volumes,omitempty"`
 	// VolumeMounts declares the matching container mounts for Volumes.
 	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
-	// Runtime selects the Docker runtime handler (e.g. "nvidia") on StaticNode.
-	// Kubernetes does not parse it. Without this, exporter/node-agent
-	// containers only received `--gpus all` and no `--runtime=`, which left GPU
-	// injection to the default Docker device-request hook instead of the
-	// nvidia runtime. Selecting the handler explicitly keeps device access in
-	// the runtime shim's OCI rewrite (systemd-rebuildable) on modern toolkits.
-	// omitempty is deliberate: unlike RuntimeConfig.Runtime (which is always
-	// set for accelerator runtimes), an empty handler here is meaningful —
-	// it means the exporter does not select a special runtime.
+	// Runtime selects the backend runtime handler (for example, "nvidia").
+	// Kubernetes maps it to runtimeClassName and StaticNode maps it to the
+	// Docker runtime handler. An empty value means no special runtime.
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
@@ -243,9 +244,10 @@ type AcceleratorExporterRuntimeProfile struct {
 type ComponentHostPathType string
 
 const (
-	ComponentHostPathTypeDirectory ComponentHostPathType = "directory"
-	ComponentHostPathTypeSocket    ComponentHostPathType = "socket"
-	ComponentHostPathTypeFile      ComponentHostPathType = "file"
+	ComponentHostPathTypeDirectory         ComponentHostPathType = "directory"
+	ComponentHostPathTypeDirectoryOrCreate ComponentHostPathType = "directory_or_create"
+	ComponentHostPathTypeSocket            ComponentHostPathType = "socket"
+	ComponentHostPathTypeFile              ComponentHostPathType = "file"
 )
 
 // ComponentVolume declares a backend-neutral component volume.

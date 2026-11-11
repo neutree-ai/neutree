@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -61,7 +62,8 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	require.NoError(t, json.Unmarshal([]byte(profileJSON), profile))
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
 	acceleratorMgr.EXPECT().SupportPlugins().Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.EXPECT().GetAcceleratorProfile(mock.Anything, "vendor_accelerator").Return(profile, nil).Maybe()
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
+	acceleratorMgr.EXPECT().GetAcceleratorProfile(mock.Anything, metricsProfileInput("vendor_accelerator")).Return(profile, nil).Maybe()
 
 	component := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -192,4 +194,47 @@ func hasMetricsDaemonSet(objects *unstructured.UnstructuredList, name string) bo
 	}
 
 	return false
+}
+
+func TestPlanMetricsNodeAgentsUsesProfileScope(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		operatorManaged bool
+		nodeLabels      map[string]string
+		wantCPU         bool
+	}{
+		{name: "Legacy keeps its single agent"},
+		{name: "Operator covers CPU nodes", operatorManaged: true, wantCPU: true},
+		{name: "recovering accelerator stays outside CPU scope", operatorManaged: true, nodeLabels: map[string]string{"vendor.example/device": "present", "vendor.example/client": "pending"}},
+		{name: "ready accelerator stays outside CPU scope", operatorManaged: true, nodeLabels: map[string]string{"vendor.example/device": "present", "vendor.example/client": "ready"}},
+		{name: "client-only node stays outside CPU scope", operatorManaged: true, nodeLabels: map[string]string{"vendor.example/client": "ready"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			component := &MetricsComponent{cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: "v1.2.0"}}}
+			selector := map[string]string{"vendor.example/device": "present", "vendor.example/client": "ready"}
+			plans, err := component.planMetricsNodeAgents([]metricsAcceleratorPlan{{
+				AcceleratorType: "vendor_accelerator", OperatorManaged: tc.operatorManaged,
+				Exporter:         &metricsAcceleratorExporter{Name: "vendor-exporter", Port: 8082, NodeSelector: selector},
+				NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{NodeSelector: selector},
+				ExporterTarget:   &v1.MetricsTargetProfile{Port: 8082, MetricsPath: "/metrics"},
+			}})
+			require.NoError(t, err)
+			if !tc.operatorManaged {
+				require.Len(t, plans, 1)
+				require.Empty(t, plans[0].NodeAgent.Type)
+				require.Equal(t, selector, plans[0].NodeAgent.NodeSelector)
+				return
+			}
+			require.Len(t, plans, 2)
+			cpu, acceleratorAgent := plans[0], plans[1]
+			require.Equal(t, cpuNodeAgentMetricsName, cpu.Name)
+			require.Equal(t, "cpu", cpu.NodeAgent.Type)
+			require.Empty(t, cpu.NodeAgent.AcceleratorType)
+			require.Equal(t, neutreeNodeAgentMetricsName, acceleratorAgent.Name)
+			require.Equal(t, "accelerator", acceleratorAgent.NodeAgent.Type)
+			require.Equal(t, "vendor_accelerator", acceleratorAgent.NodeAgent.AcceleratorType)
+			require.Equal(t, selector, acceleratorAgent.NodeAgent.NodeSelector)
+			require.Equal(t, tc.wantCPU, cpuAgentAffinitySelector(t, cpu.NodeAgent.Affinity).Matches(labels.Set(tc.nodeLabels)))
+		})
+	}
 }

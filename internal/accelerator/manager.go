@@ -20,7 +20,7 @@ type Manager interface {
 	plugin.AcceleratorPluginProvider
 
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
-	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
+	GetAcceleratorProfile(ctx context.Context, input publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
 	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
@@ -276,18 +276,18 @@ func (a *manager) GetNodeRuntimeConfig(ctx context.Context, acceleratorType stri
 
 func (a *manager) GetAcceleratorProfile(
 	ctx context.Context,
-	acceleratorType string,
+	input publicaccelerator.AcceleratorProfileInput,
 ) (*v1.AcceleratorProfile, error) {
-	if acceleratorType == "" {
+	if input.AcceleratorType == "" {
 		return nil, errors.New("accelerator type is required")
 	}
 
-	p, ok := a.GetPlugin(acceleratorType)
+	p, ok := a.GetPlugin(input.AcceleratorType)
 	if !ok {
-		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+		return nil, errors.Errorf("accelerator plugin %s not found", input.AcceleratorType)
 	}
 
-	profile, err := p.Handle().GetAcceleratorProfile(ctx)
+	profile, err := p.Handle().GetAcceleratorProfile(ctx, input)
 	if err != nil {
 		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
 	}

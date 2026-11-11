@@ -144,9 +144,9 @@ func (_c *MockManager_DetectAccelerator_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// GetAcceleratorProfile provides a mock function with given fields: ctx, acceleratorType
-func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error) {
-	ret := _m.Called(ctx, acceleratorType)
+// GetAcceleratorProfile provides a mock function with given fields: ctx, input
+func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, input accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
+	ret := _m.Called(ctx, input)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAcceleratorProfile")
@@ -154,19 +154,19 @@ func (_m *MockManager) GetAcceleratorProfile(ctx context.Context, acceleratorTyp
 
 	var r0 *v1.AcceleratorProfile
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*v1.AcceleratorProfile, error)); ok {
-		return rf(ctx, acceleratorType)
+	if rf, ok := ret.Get(0).(func(context.Context, accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)); ok {
+		return rf(ctx, input)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *v1.AcceleratorProfile); ok {
-		r0 = rf(ctx, acceleratorType)
+	if rf, ok := ret.Get(0).(func(context.Context, accelerator.AcceleratorProfileInput) *v1.AcceleratorProfile); ok {
+		r0 = rf(ctx, input)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.AcceleratorProfile)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, acceleratorType)
+	if rf, ok := ret.Get(1).(func(context.Context, accelerator.AcceleratorProfileInput) error); ok {
+		r1 = rf(ctx, input)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -181,14 +181,14 @@ type MockManager_GetAcceleratorProfile_Call struct {
 
 // GetAcceleratorProfile is a helper method to define mock.On call
 //   - ctx context.Context
-//   - acceleratorType string
-func (_e *MockManager_Expecter) GetAcceleratorProfile(ctx interface{}, acceleratorType interface{}) *MockManager_GetAcceleratorProfile_Call {
-	return &MockManager_GetAcceleratorProfile_Call{Call: _e.mock.On("GetAcceleratorProfile", ctx, acceleratorType)}
+//   - input accelerator.AcceleratorProfileInput
+func (_e *MockManager_Expecter) GetAcceleratorProfile(ctx interface{}, input interface{}) *MockManager_GetAcceleratorProfile_Call {
+	return &MockManager_GetAcceleratorProfile_Call{Call: _e.mock.On("GetAcceleratorProfile", ctx, input)}
 }
 
-func (_c *MockManager_GetAcceleratorProfile_Call) Run(run func(ctx context.Context, acceleratorType string)) *MockManager_GetAcceleratorProfile_Call {
+func (_c *MockManager_GetAcceleratorProfile_Call) Run(run func(ctx context.Context, input accelerator.AcceleratorProfileInput)) *MockManager_GetAcceleratorProfile_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(accelerator.AcceleratorProfileInput))
 	})
 	return _c
 }
@@ -198,7 +198,7 @@ func (_c *MockManager_GetAcceleratorProfile_Call) Return(_a0 *v1.AcceleratorProf
 	return _c
 }
 
-func (_c *MockManager_GetAcceleratorProfile_Call) RunAndReturn(run func(context.Context, string) (*v1.AcceleratorProfile, error)) *MockManager_GetAcceleratorProfile_Call {
+func (_c *MockManager_GetAcceleratorProfile_Call) RunAndReturn(run func(context.Context, accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)) *MockManager_GetAcceleratorProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }

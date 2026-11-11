@@ -58,6 +58,9 @@ metadata:
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
     neutree.ai/metrics-target: node-agent
+{{ if .NodeAgent.Type }}
+    neutree.ai/node-agent-type: {{ .NodeAgent.Type }}
+{{ end }}
     neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   selector:
@@ -70,17 +73,31 @@ spec:
       labels:
         app: {{ .NeutreeNodeAgentMetricsName }}
         neutree.ai/metrics-target: node-agent
+{{ if .NodeAgent.Type }}
+        neutree.ai/node-agent-type: {{ .NodeAgent.Type }}
+{{ end }}
         cluster: {{ .ClusterName | quote }}
         workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
+{{ if .NodeAgent.RuntimeClassName }}
+      runtimeClassName: {{ .NodeAgent.RuntimeClassName }}
+{{ end }}
 {{ if .NodeAgent.NodeSelector }}
       nodeSelector:
 {{ .NodeAgent.NodeSelector | toYaml | indent 8 }}
 {{ end }}
+{{ if .NodeAgent.Affinity }}
+      affinity:
+{{ .NodeAgent.Affinity | toYaml | indent 8 }}
+{{ end }}
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
+{{ if .NodeAgent.InitContainers }}
+      initContainers:
+{{ .NodeAgent.InitContainers | toYaml | indent 6 }}
+{{ end }}
       containers:
       - name: neutree-node-agent
         image: {{ .NeutreeNodeAgentMetricsImage }}
@@ -139,3 +156,5 @@ spec:
 {{ .NodeAgent.Volumes | toYaml | indent 6 }}
 {{ end }}
 `
+
+const NodeAgentTemplate = nodeAgentRBACManifestTemplate + nodeAgentDeploymentManifestTemplate

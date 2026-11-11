@@ -170,7 +170,7 @@ func (p *AMDGPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig,
 	return amdGPUContainerRuntimeConfig(), nil
 }
 
-func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+func (p *AMDGPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context, _ accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	engineRuntime, err := p.GetContainerRuntimeConfig()
 	if err != nil {
 		return nil, err

@@ -47,6 +47,9 @@ spec:
         checksum/config: {{ .ConfigChecksum }}
 {{ end }}
     spec:
+{{ if .RuntimeClassName }}
+      runtimeClassName: {{ .RuntimeClassName }}
+{{ end }}
       tolerations:
       - operator: Exists
 {{ if .NodeSelector }}
@@ -55,6 +58,10 @@ spec:
 {{ end }}
       imagePullSecrets:
       - name: {{ $.ImagePullSecret }}
+{{ if .InitContainers }}
+      initContainers:
+{{ .InitContainers | toYaml | indent 6 }}
+{{ end }}
       containers:
       - name: {{ .ContainerName }}
         image: {{ .Image }}

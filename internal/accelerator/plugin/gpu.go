@@ -10,9 +10,13 @@ import (
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/util"
+	accelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -83,21 +87,26 @@ DCGM_FI_DRIVER_VERSION, label, Driver Version.
 `
 	NvidiaGPUMemoryNodeLabelKey      string = "nvidia.com/gpu.memory"
 	NvidiaGPUVirtualizationLabelKey  string = "neutree.ai/nvidia-vgpu-enabled"
-	NvidiaGPUDiscoveryLabelKey       string = "nvidia.com/gpu.present"
-	NvidiaGPUDiscoveryLabelValue     string = "true"
+	NvidiaGPUDiscoveryLabelKey       string = accelerator.NvidiaGPUDiscoveryLabelKey
+	NvidiaGPUDiscoveryLabelValue     string = accelerator.NvidiaGPUDiscoveryLabelValue
 	NvidiaGPUTopologyAwarePolicy     string = "topology-aware"
 	NvidiaGPUDefaultDeviceSplitCount int    = 100
-	NvidiaGPUOperatorDriverRoot      string = "/run/nvidia/driver"
+	NvidiaGPUOperatorDriverRoot      string = accelerator.NvidiaGPUOperatorDriverRoot
 )
 
 func init() { //nolint:gochecknoinits
-	registerAcceleratorPlugin(&GPUAcceleratorPlugin{
+	gpuPlugin := &GPUAcceleratorPlugin{
 		executor: &command.OSExecutor{},
-	})
+	}
+	registerAcceleratorPlugin(gpuPlugin)
 }
 
 type GPUAcceleratorPlugin struct {
 	executor command.Executor
+}
+
+func (p *GPUAcceleratorPlugin) NewKubernetesOperator(_ *v1.Cluster, _ accelerator.PluginProvider) (accelerator.AcceleratorOperator, error) {
+	return operator.NewNvidiaAcceleratorOperator(), nil
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {
@@ -220,7 +229,7 @@ func (p *GPUAcceleratorPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, er
 	return nvidiaGPUContainerRuntimeConfig(), nil
 }
 
-func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
+func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context, input accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	engineRuntime, err := p.GetContainerRuntimeConfig()
 	if err != nil {
 		return nil, err
@@ -228,7 +237,7 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 
 	clusterRuntime := nvidiaGPUNodeRuntimeConfig()
 
-	return &v1.AcceleratorProfile{
+	profile := &v1.AcceleratorProfile{
 		AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
 		ClusterRuntime:  &clusterRuntime,
 		EngineRuntime:   &engineRuntime,
@@ -293,7 +302,21 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				DockerRunOptions: []string{"--gpus all"},
 			},
 		},
-	}, nil
+	}
+	if input.Cluster == nil {
+		return profile, nil
+	}
+
+	ctrlClient, err := util.GetClientFromCluster(input.Cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := enrichNvidiaKubernetesProfile(ctx, ctrlClient, input.Cluster, profile); err != nil {
+		return nil, err
+	}
+
+	return profile, nil
 }
 
 func nvidiaGPUNodeRuntimeConfig() v1.RuntimeConfig {
@@ -315,6 +338,15 @@ func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 
 func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
+}
+
+func (p *GPUAcceleratorPlugin) MatchCluster(ctx context.Context, opCtx *accelerator.OperatorContext) (bool, error) {
+	nodes := &corev1.NodeList{}
+	if err := opCtx.Client.List(ctx, nodes, client.MatchingLabels{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue}); err != nil {
+		return false, err
+	}
+
+	return len(nodes.Items) > 0, nil
 }
 
 func (p *GPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
