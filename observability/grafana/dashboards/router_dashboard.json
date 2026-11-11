@@ -47,7 +47,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Healthy inference replicas discovered in the selected workspace and cluster.",
+      "description": "Healthy inference replicas discovered in the selected workspace and cluster, deduplicated across Router replicas.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -80,7 +80,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"})",
+          "expr": "sum(max by (neutree_cluster, workspace, endpoint, server, replica) (router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"}))",
           "legendFormat": "",
           "range": false,
           "refId": "A"
