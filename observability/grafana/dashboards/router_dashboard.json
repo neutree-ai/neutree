@@ -47,7 +47,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Inference backends in Router service discovery, deduplicated across Router pods by endpoint and backend URL. This is discovery membership, not an active HTTP health check.",
+      "description": "Healthy inference replicas discovered in the selected workspace and cluster.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -80,8 +80,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count by (endpoint) (max by (endpoint, server) (router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"}))",
-          "legendFormat": "{{endpoint}}",
+          "expr": "sum(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"})",
+          "legendFormat": "",
           "range": false,
           "refId": "A"
         }
@@ -125,22 +125,22 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (endpoint) (router:current_qps{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"})",
-          "legendFormat": "{{endpoint}}",
+          "expr": "sum(router:current_qps{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"})",
+          "legendFormat": "",
           "range": false,
           "refId": "A"
         }
       ],
       "title": "Current QPS",
       "type": "stat",
-      "description": "Current request arrival rate summed across Router pods for each endpoint. Covers JSON and multipart forwarding; this is already a rate gauge."
+      "description": "Current request arrival rate across the selected workspace and cluster."
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Current average request latency, averaged across Router pods and inference replicas for each endpoint.",
+      "description": "Current average request latency across the selected workspace and cluster.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -172,8 +172,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "avg by (endpoint) (router:avg_latency{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"} >= 0)",
-          "legendFormat": "{{endpoint}}",
+          "expr": "avg(router:avg_latency{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"} >= 0)",
+          "legendFormat": "",
           "range": false,
           "refId": "A"
         }
@@ -266,8 +266,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (endpoint, replica) (router:connection_pool_waiting{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"})",
-          "legendFormat": "{{replica}}",
+          "expr": "sum by (endpoint, replica) (router:connection_pool_waiting{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"})",
+          "legendFormat": "{{endpoint}} / {{replica}}",
           "range": true,
           "refId": "A"
         }
@@ -360,8 +360,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (endpoint, replica) (router:num_requests_running{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica=~\"${Replicas:regex}\"})",
-          "legendFormat": "{{replica}}",
+          "expr": "sum by (endpoint, replica) (router:num_requests_running{job=\"neutree-router\",neutree_cluster=~\"$Cluster\",workspace=~\"$Workspace\"})",
+          "legendFormat": "{{endpoint}} / {{replica}}",
           "range": true,
           "refId": "A"
         }
@@ -390,38 +390,20 @@
         "hide": 2
       },
       {
-        "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_ready, neutree_cluster)",
-        "includeAll": true,
-        "name": "Cluster",
-        "query": "label_values(neutree_node_ready, neutree_cluster)",
-        "refresh": 1,
-        "type": "query"
-      },
-      {
-        "datasource": "${datasource}",
-        "definition": "label_values(neutree_node_ready{neutree_cluster=~\"${Cluster:regex}\",workspace!=\"\"}, workspace)",
-        "includeAll": false,
         "name": "Workspace",
-        "query": "label_values(neutree_node_ready{neutree_cluster=~\"${Cluster:regex}\",workspace!=\"\"}, workspace)",
-        "refresh": 1,
-        "type": "query"
-      },
-      {
-        "name": "Endpoint",
-        "label": "Endpoint",
+        "label": "Workspace",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\"}, endpoint)",
+        "definition": "label_values(neutree_node_ready{workspace!=\"\"}, workspace)",
         "query": {
           "qryType": 1,
-          "query": "label_values(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\"}, endpoint)",
-          "refId": "EndpointVariable"
+          "query": "label_values(neutree_node_ready{workspace!=\"\"}, workspace)",
+          "refId": "WorkspaceVariable"
         },
-        "refresh": 2,
+        "refresh": 1,
         "sort": 1,
         "regex": "",
         "multi": true,
@@ -436,20 +418,20 @@
         "hide": 0
       },
       {
-        "name": "Replicas",
-        "label": "Replicas",
+        "name": "Cluster",
+        "label": "Cluster",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica!=\"\"}, replica)",
+        "definition": "label_values(neutree_node_ready{workspace=~\"$Workspace\"}, neutree_cluster)",
         "query": {
           "qryType": 1,
-          "query": "label_values(router:healthy_pods_total{job=\"neutree-router\",neutree_cluster=~\"${Cluster:regex}\",workspace=~\"${Workspace:regex}\",endpoint=~\"${Endpoint:regex}\",replica!=\"\"}, replica)",
-          "refId": "ReplicasVariable"
+          "query": "label_values(neutree_node_ready{workspace=~\"$Workspace\"}, neutree_cluster)",
+          "refId": "ClusterVariable"
         },
-        "refresh": 2,
+        "refresh": 1,
         "sort": 1,
         "regex": "",
         "multi": true,
