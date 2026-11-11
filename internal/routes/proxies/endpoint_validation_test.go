@@ -3,6 +3,7 @@ package proxies
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +13,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
+	appsv1 "k8s.io/api/apps/v1"
 )
 
 func TestValidateEndpointVGPUResourceShape(t *testing.T) {
@@ -2822,5 +2825,64 @@ func TestValidateEndpointPatchEngineScope(t *testing.T) {
 			assert.Equal(t, "10233", err.Code)
 			assert.Contains(t, err.Hint, "engine team-a/no-such-engine not found")
 		}
+	})
+}
+
+type fakeKVCacheProvider struct{ err error }
+
+func (p fakeKVCacheProvider) Validate(*v1.Endpoint, *v1.Cluster) error { return p.err }
+func (fakeKVCacheProvider) Configure(*v1.Endpoint, *v1.Cluster, *appsv1.Deployment) error {
+	return nil
+}
+
+func TestValidateEndpointKVCacheErrorForwarding(t *testing.T) {
+	store := &fakeClusterStorage{
+		clusters: []v1.Cluster{{
+			Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "team-a"},
+			Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+		}},
+	}
+	body := `{"metadata":{"name":"ep","workspace":"team-a"},"spec":{"cluster":"cluster-a","engine":{"engine":"vllm","version":"v0.1"},"kv_cache":{"provider":"custom"}}}`
+
+	t.Run("defaults to INVALID_CACHE_CONFIGURATION when provider error has no code", func(t *testing.T) {
+		router := gin.New()
+		router.POST("/endpoints", validateEndpoint(store, kvcache.Providers{
+			"custom": fakeKVCacheProvider{err: errors.New("cache not ready")},
+		}), func(c *gin.Context) {
+			c.Status(http.StatusCreated)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/endpoints", strings.NewReader(body)))
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		var resp validationError
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+		assert.Equal(t, "INVALID_CACHE_CONFIGURATION", resp.Code)
+		assert.Equal(t, "cache not ready", resp.Message)
+		assert.Empty(t, resp.Hint)
+	})
+
+	t.Run("forwards provider error code and hint", func(t *testing.T) {
+		router := gin.New()
+		router.POST("/endpoints", validateEndpoint(store, kvcache.Providers{
+			"custom": fakeKVCacheProvider{err: fmt.Errorf("cache check: %w", codedCacheError{
+				code:    "21108",
+				message: "remove custom LMCACHE_CONFIG_FILE before enabling managed cache",
+				hint:    "LMCACHE_CONFIG_FILE",
+			})},
+		}), func(c *gin.Context) {
+			c.Status(http.StatusCreated)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/endpoints", strings.NewReader(body)))
+
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		var resp validationError
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+		assert.Equal(t, "21108", resp.Code)
+		assert.Equal(t, "LMCACHE_CONFIG_FILE", resp.Hint)
+		assert.Contains(t, resp.Message, "remove custom LMCACHE_CONFIG_FILE")
 	})
 }

@@ -112,7 +112,7 @@ func validateEndpoint(store storage.Storage, providers ...kvcache.Providers) gin
 			}
 
 			if err := kvcache.Validate(input.New, cluster, provider); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"message": err.Error(), "code": "INVALID_CACHE_CONFIGURATION"})
+				c.JSON(http.StatusBadRequest, providerValidationError(err, "INVALID_CACHE_CONFIGURATION"))
 				c.Abort()
 
 				return

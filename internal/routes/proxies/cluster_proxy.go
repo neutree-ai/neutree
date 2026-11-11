@@ -99,7 +99,7 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 		}
 
 		if err := cacheProviders.Validate(input.Current, input.New); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{Code: "10208", Message: err.Error()})
+			c.AbortWithStatusJSON(http.StatusBadRequest, providerValidationError(err, "10208"))
 			return
 		}
 
