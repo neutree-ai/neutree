@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const sensitiveQueryRejectedCode = "10312"
+const sensitiveQueryRejectedCode = "10330"
 
 // sensitiveQueryGuard rejects PostgREST query features on a resource with
 // masked fields that response masking cannot cover: projections other than

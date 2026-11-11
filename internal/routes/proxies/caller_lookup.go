@@ -36,7 +36,7 @@ func rowFilters(query url.Values) url.Values {
 
 var callerLookupClient = &http.Client{Timeout: 30 * time.Second}
 
-const targetLookupFailedCode = "10314"
+const targetLookupFailedCode = "10332"
 
 // targetLookupError means the row a write targets could not be read. Writes
 // that depend on that row must not be forwarded.

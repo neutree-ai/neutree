@@ -617,7 +617,7 @@ func queryParamsToFilters(queryParams url.Values) []storage.Filter {
 	return filters
 }
 
-const ambiguousBackfillCode = "10313"
+const ambiguousBackfillCode = "10331"
 
 var errAmbiguousBackfill = errors.New("the filters match more than one resource")
 
