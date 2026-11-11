@@ -133,8 +133,23 @@ func TestGetUsageByDimensionPermissionScope(t *testing.T) {
 	})
 }
 
+// dimFilter narrows get_usage_by_dimension; an empty field leaves its
+// parameter NULL.
+type dimFilter struct {
+	workspace, team, orgUnit, user, sa string
+	direct                             bool
+}
+
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+
+	return s
+}
+
 // dimensionUsage sums get_usage_by_dimension per key as userID, after prelude.
-func dimensionUsage(t *testing.T, db *sql.DB, userID string, prelude func(tx *sql.Tx), workspace, team, orgUnit any) map[string]int64 {
+func dimensionUsage(t *testing.T, db *sql.DB, userID string, prelude func(tx *sql.Tx), f dimFilter) map[string]int64 {
 	t.Helper()
 
 	out := map[string]int64{}
@@ -142,7 +157,10 @@ func dimensionUsage(t *testing.T, db *sql.DB, userID string, prelude func(tx *sq
 		rows, err := tx.Query(`
 			SELECT api_key_id::text, usage FROM api.get_usage_by_dimension(
 			    p_start_date => '1970-01-01', p_end_date => '2999-12-31',
-			    p_workspace => $1, p_team => $2, p_org_unit => $3)`, workspace, team, orgUnit)
+			    p_workspace => $1, p_team => $2, p_org_unit => $3,
+			    p_user_id => $4, p_service_account_id => $5, p_direct => $6)`,
+			nullable(f.workspace), nullable(f.team), nullable(f.orgUnit),
+			nullable(f.user), nullable(f.sa), f.direct)
 		if err != nil {
 			return err
 		}
@@ -188,15 +206,15 @@ func TestGetUsageByDimension_TeamAdmin(t *testing.T) {
 	recordUsage(t, key, "m1", 20, 5, nil)
 	aggregateUsage(t)
 
-	if got := dimensionUsage(t, db, admin, nil, ws, nil, nil); len(got) != 1 || got[key] != 25 {
+	if got := dimensionUsage(t, db, admin, nil, dimFilter{workspace: ws}); len(got) != 1 || got[key] != 25 {
 		t.Errorf("team-admin: %v, want the member's key with 25 (usage after joining)", got)
 	}
 
-	if got := dimensionUsage(t, db, peer, nil, ws, nil, nil); len(got) != 0 {
+	if got := dimensionUsage(t, db, peer, nil, dimFilter{workspace: ws}); len(got) != 0 {
 		t.Errorf("another member: %v, want nothing", got)
 	}
 
-	if got := dimensionUsage(t, db, member, nil, ws, nil, nil); got[key] != 35 {
+	if got := dimensionUsage(t, db, member, nil, dimFilter{workspace: ws}); got[key] != 35 {
 		t.Errorf("owner: %v, want 35", got)
 	}
 
@@ -230,7 +248,7 @@ func TestGetUsageByDimension_DeletedKey(t *testing.T) {
 	}
 
 	for who, want := range map[string]int64{owner: 12, reader: 12, stranger: 0} {
-		if got := dimensionUsage(t, db, who, nil, ws, nil, nil); got[key] != want {
+		if got := dimensionUsage(t, db, who, nil, dimFilter{workspace: ws}); got[key] != want {
 			t.Errorf("%s: %v, want %d", who, got, want)
 		}
 	}

@@ -320,7 +320,7 @@ func TestTeamAdmin_UsageByDimensionTeam(t *testing.T) {
 	recordUsage(t, outsiderKey, "m1", 1000, 0, nil)
 	aggregateUsage(t)
 
-	got := dimensionUsage(t, f.db, f.admin, nil, ws, f.team, nil)
+	got := dimensionUsage(t, f.db, f.admin, nil, dimFilter{workspace: ws, team: f.team})
 	if len(got) != 1 || got[memberKey] != 22 {
 		t.Fatalf("p_team: %v, want the member's key with 22", got)
 	}
@@ -339,7 +339,7 @@ func TestTeamAdmin_UsageByDimensionTeam(t *testing.T) {
 		t.Errorf("p_team total %d, usage by group %d", got[memberKey], byGroup)
 	}
 
-	if all := dimensionUsage(t, f.db, f.admin, nil, ws, nil, nil); len(all) != 2 || all[adminKey] != 100 || all[memberKey] != 22 {
+	if all := dimensionUsage(t, f.db, f.admin, nil, dimFilter{workspace: ws}); len(all) != 2 || all[adminKey] != 100 || all[memberKey] != 22 {
 		t.Errorf("no filter: %v, want own key and the member's key", all)
 	}
 }
