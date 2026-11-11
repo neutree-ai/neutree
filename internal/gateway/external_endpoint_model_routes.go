@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"sort"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -10,8 +11,25 @@ import (
 // control-plane model route spec into the self-contained target records the
 // gateway plugin needs at request time.
 func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) ([]map[string]interface{}, error) {
-	if ee.Spec == nil || len(ee.Spec.ModelRoutes) == 0 {
-		return nil, nil
+	modelRoutes := ee.Spec.ModelRoutes
+	if len(modelRoutes) == 0 {
+		// Preserve the accepted model_mapping input and its first-available
+		// provider order, including models whose providers are all unavailable.
+		byModel := make(map[string][]v1.ExternalEndpointModelRouteTarget)
+
+		for i, provider := range resolved {
+			for model, upstreamModel := range provider.entry.ModelMapping {
+				byModel[model] = append(byModel[model], v1.ExternalEndpointModelRouteTarget{
+					Upstream: provider.entry.Name, UpstreamModel: upstreamModel, Priority: i,
+				})
+			}
+		}
+
+		for model, targets := range byModel {
+			modelRoutes = append(modelRoutes, v1.ExternalEndpointModelRoute{Model: model, Targets: targets})
+		}
+
+		sort.Slice(modelRoutes, func(i, j int) bool { return modelRoutes[i].Model < modelRoutes[j].Model })
 	}
 
 	providers := make(map[string]resolvedUpstream, len(resolved))
@@ -26,10 +44,10 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 		}
 	}
 
-	seenModels := make(map[string]struct{}, len(ee.Spec.ModelRoutes))
-	routes := make([]map[string]interface{}, 0, len(ee.Spec.ModelRoutes))
+	seenModels := make(map[string]struct{}, len(modelRoutes))
+	routes := make([]map[string]interface{}, 0, len(modelRoutes))
 
-	for _, route := range ee.Spec.ModelRoutes {
+	for _, route := range modelRoutes {
 		if route.Model == "" {
 			return nil, fmt.Errorf("model route model must not be empty")
 		}
@@ -88,10 +106,6 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			}
 
 			targets = append(targets, compiled)
-		}
-
-		if len(targets) == 0 {
-			continue
 		}
 
 		routes = append(routes, map[string]interface{}{

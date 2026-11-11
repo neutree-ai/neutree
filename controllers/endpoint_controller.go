@@ -344,10 +344,24 @@ func (c *EndpointController) preserveResources(obj *v1.Endpoint, status *v1.Endp
 	}
 
 	if status.Resources != nil {
+		if len(status.Resources.Replicas) == 0 && status.Resources.Summary == nil {
+			preserved := *status.Resources
+			preserved.Replicas = obj.Status.Resources.Replicas
+			preserved.Summary = obj.Status.Resources.Summary
+			status.Resources = &preserved
+		}
+
 		return
 	}
 
-	status.Resources = obj.Status.Resources
+	preserved := *obj.Status.Resources
+	preserved.ReadyReplicas = 0
+
+	if len(preserved.Replicas) == 0 && preserved.Summary == nil {
+		return
+	}
+
+	status.Resources = &preserved
 }
 
 func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {
