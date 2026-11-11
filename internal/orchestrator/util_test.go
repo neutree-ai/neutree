@@ -291,6 +291,18 @@ func TestParseVLLMHumanReadableIntRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeVLLMEngineArgs_HyphenatedKey(t *testing.T) {
+	args := map[string]interface{}{"kv-cache-memory-bytes": "8G"}
+	require.NoError(t, normalizeVLLMEngineArgs(args))
+	assert.Equal(t, map[string]interface{}{"kv_cache_memory_bytes": int64(8 * (1 << 30))}, args)
+
+	err := normalizeVLLMEngineArgs(map[string]interface{}{
+		"kv_cache_memory_bytes": "8G",
+		"kv-cache-memory-bytes": "4G",
+	})
+	require.Error(t, err)
+}
+
 func TestGPUZero_NoAcceleratorType(t *testing.T) {
 	mgr := &acceleratormocks.MockManager{}
 

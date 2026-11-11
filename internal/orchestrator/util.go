@@ -24,21 +24,39 @@ const acceleratorTypeCPU = "cpu"
 var vllmHumanReadableIntPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)([kKmMgGtT])$`)
 
 // normalizeVLLMEngineArgs converts vLLM's human-readable KV-cache size to the
-// native integer expected by its Python API. Callers must pass a runtime copy,
-// not the map stored on the Endpoint, so the user's readable value is retained.
+// native integer expected by its Python API, canonicalizing the hyphenated CLI
+// flag form to the underscore field name AsyncEngineArgs accepts. Callers must
+// pass a runtime copy, not the map stored on the Endpoint, so the user's
+// readable value is retained.
 func normalizeVLLMEngineArgs(args map[string]interface{}) error {
-	const key = "kv_cache_memory_bytes"
+	const (
+		key     = "kv_cache_memory_bytes"
+		dashKey = "kv-cache-memory-bytes"
+	)
 
-	value, ok := args[key]
-	if !ok {
+	value, hasUnderscore := args[key]
+	dashValue, hasDash := args[dashKey]
+
+	if !hasUnderscore && !hasDash {
 		return nil
+	}
+
+	if hasUnderscore && hasDash {
+		return errors.Errorf("conflicting vLLM engine arguments %s and %s", key, dashKey)
+	}
+
+	sourceKey := key
+	if hasDash {
+		sourceKey = dashKey
+		value = dashValue
 	}
 
 	parsed, err := parseVLLMHumanReadableInt(value)
 	if err != nil {
-		return errors.Wrapf(err, "invalid vLLM engine argument %s", key)
+		return errors.Wrapf(err, "invalid vLLM engine argument %s", sourceKey)
 	}
 
+	delete(args, dashKey)
 	args[key] = parsed
 
 	return nil
