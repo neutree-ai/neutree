@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
@@ -26,9 +27,11 @@ type MetricsComponent struct {
 	ctrlClient client.Client
 	logger     klog.Logger
 
-	inferenceScrapeRules InferenceScrapeRules
-	cacheProviders       *clustercache.Providers
-	metricsTargets       metricsconfig.Registry
+	inferenceScrapeRules    InferenceScrapeRules
+	cacheProviders          *clustercache.Providers
+	metricsTargets          metricsconfig.Registry
+	acceleratorOperators    map[string]acceleratoroperator.AcceleratorOperator
+	acceleratorOperatorsSet bool
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -51,6 +54,15 @@ func (m *MetricsComponent) WithCacheProviders(providers *clustercache.Providers)
 // cluster metrics continue to use their existing configuration path.
 func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *MetricsComponent {
 	m.metricsTargets = registry
+
+	return m
+}
+
+// WithAcceleratorOperators supplies the operators selected for this cluster
+// reconcile so Metrics does not repeat cluster matching and node discovery.
+func (m *MetricsComponent) WithAcceleratorOperators(operators map[string]acceleratoroperator.AcceleratorOperator) *MetricsComponent {
+	m.acceleratorOperators = operators
+	m.acceleratorOperatorsSet = true
 
 	return m
 }
