@@ -8,8 +8,8 @@ import (
 )
 
 // Vector retries a usage delivery whose response it did not see, so the same
-// request id can reach record_api_usage twice. The second call must neither
-// add usage nor raise an error (an HTTP error would make Vector retry forever).
+// request id can reach record_api_usage twice. The second call must not add
+// usage and must report success, so Vector does not retry it again.
 func TestRecordApiUsageIsIdempotent(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
@@ -67,8 +67,8 @@ func TestRecordApiUsageIsIdempotent(t *testing.T) {
 		t.Fatalf("first delivery not recorded: %v", res)
 	}
 
-	if res := record(10); res["success"] == true {
-		t.Fatalf("redelivery reported as a new record: %v", res)
+	if res := record(10); res["success"] != true || res["duplicate"] != true {
+		t.Fatalf("redelivery not reported as an already-recorded duplicate: %v", res)
 	}
 
 	var rows int
@@ -87,7 +87,7 @@ func TestRecordApiUsageIsIdempotent(t *testing.T) {
 	}
 
 	// Redelivery after aggregation is still rejected by the request id.
-	if res := record(10); res["success"] == true {
+	if res := record(10); res["duplicate"] != true {
 		t.Fatalf("redelivery after aggregation recorded again: %v", res)
 	}
 

@@ -21,6 +21,7 @@ func TestPostgrestProxyReportsBrokenConnectionAs503(t *testing.T) {
 		{"connection lost mid-request", http.StatusBadRequest, `{"code":"","details":null,"hint":null,"message":""}`, http.StatusServiceUnavailable},
 		{"real client error", http.StatusBadRequest, `{"code":"PGRST100","message":"bad filter"}`, http.StatusBadRequest},
 		{"non-JSON 400", http.StatusBadRequest, `bad request`, http.StatusBadRequest},
+		{"retryable usage write failure", http.StatusServiceUnavailable, `{"code":"PT503","message":"usage not recorded"}`, http.StatusServiceUnavailable},
 		{"success", http.StatusOK, `{"code":""}`, http.StatusOK},
 	}
 
