@@ -99,6 +99,7 @@ func TestRecordApiUsageErrorStatus(t *testing.T) {
 		}
 	})
 
+	// Vector's usage heartbeat sends the nil key and relies on this answer.
 	t.Run("unknown API key is a permanent 200 failure", func(t *testing.T) {
 		reqID := "usage-err-nokey-" + keyID
 

@@ -604,6 +604,48 @@ func TestPrepareNeutreeCoreDeployConfig_TraceSinkDropsWhenBufferFull(t *testing.
 	require.NotContains(t, config.Sinks["postgrest_rpc"].Buffer, "when_full", "usage sink must keep the default blocking buffer")
 }
 
+// The usage sink's disk buffer can hold the last record until the next write,
+// so a heartbeat must reach it; record_api_usage ignores the nil key.
+func TestPrepareNeutreeCoreDeployConfig_UsageSinkHeartbeat(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+
+	var config struct {
+		Sources    map[string]map[string]interface{} `json:"sources"`
+		Transforms map[string]struct {
+			Inputs []string `json:"inputs"`
+			Source string   `json:"source"`
+		} `json:"transforms"`
+		Sinks map[string]struct {
+			Inputs []string               `json:"inputs"`
+			Buffer map[string]interface{} `json:"buffer"`
+		} `json:"sinks"`
+	}
+	require.NoError(t, yaml.Unmarshal(vector, &config))
+
+	require.Equal(t, "demo_logs", config.Sources["buffer_heartbeat"]["type"])
+	require.Equal(t, []string{"buffer_heartbeat"}, config.Transforms["prepare_usage_heartbeat"].Inputs)
+	assert.Contains(t, config.Transforms["prepare_usage_heartbeat"].Source,
+		`"p_api_key_id": "00000000-0000-0000-0000-000000000000"`)
+	require.Equal(t, "disk", config.Sinks["postgrest_rpc"].Buffer["type"])
+	require.Equal(t, []string{"prepare_postgrest_payload", "prepare_usage_heartbeat"}, config.Sinks["postgrest_rpc"].Inputs)
+}
+
 func currentNeutreeCoreReleaseVersion() *semver.Version {
 	minVersion := semver.MustParse(neutreeCoreCompatibilityPolicyForCurrentRelease.targetMin)
 	return semver.New(minVersion.Major(), minVersion.Minor(), minVersion.Patch(), "", "")

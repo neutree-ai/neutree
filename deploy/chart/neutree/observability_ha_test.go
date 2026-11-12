@@ -92,8 +92,8 @@ func TestVMAgentHAReplicaCountOverride(t *testing.T) {
 	require.Equal(t, int32(3), *deployment.Spec.Replicas)
 }
 
-func TestVectorTraceHeartbeat(t *testing.T) {
-	render := func(values map[string]interface{}) (map[string]interface{}, []interface{}) {
+func TestVectorBufferHeartbeat(t *testing.T) {
+	render := func(values map[string]interface{}) (map[string]interface{}, map[string]map[string]interface{}) {
 		var cm corev1.ConfigMap
 		renderedObject(t, renderChart(t, values), "ConfigMap", "neutree-vector", &cm)
 
@@ -103,17 +103,22 @@ func TestVectorTraceHeartbeat(t *testing.T) {
 		}
 		require.NoError(t, yaml.Unmarshal([]byte(cm.Data["vector.yml"]), &config))
 
-		sink, ok := config.Sinks["ai_trace_victorialogs"]
-		require.True(t, ok, "trace sink rendered")
-		require.Equal(t, "disk", sink["buffer"].(map[string]interface{})["type"])
-
-		return config.Sources, sink["inputs"].([]interface{})
+		return config.Sources, config.Sinks
 	}
 
 	for name, values := range map[string]map[string]interface{}{"single": nil, "ha": haValues(nil)} {
-		sources, inputs := render(values)
-		require.Contains(t, sources, "trace_buffer_heartbeat", name)
-		require.Equal(t, []interface{}{"prepare_trace_payload", "prepare_trace_heartbeat"}, inputs, name)
+		sources, sinks := render(values)
+		require.Contains(t, sources, "buffer_heartbeat", name)
+
+		for sink, inputs := range map[string][]interface{}{
+			"postgrest_rpc":         {"prepare_postgrest_payload", "prepare_usage_heartbeat"},
+			"ai_trace_victorialogs": {"prepare_trace_payload", "prepare_trace_heartbeat"},
+		} {
+			s, ok := sinks[sink]
+			require.True(t, ok, "%s: %s rendered", name, sink)
+			require.Equal(t, "disk", s["buffer"].(map[string]interface{})["type"], "%s: %s", name, sink)
+			require.Equal(t, inputs, s["inputs"], "%s: %s", name, sink)
+		}
 	}
 }
 
