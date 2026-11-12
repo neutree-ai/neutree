@@ -11,12 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestLogSinkMaskedFields(t *testing.T) {
@@ -100,29 +97,27 @@ func TestLogSinkRoutesBackfillSecretsOnPatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			storageMock := storageMocks.NewMockStorage(t)
-			storageMock.EXPECT().
-				GenericQuery(storage.LOG_SINK_TABLE, "spec", mock.Anything, mock.Anything).
-				Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
-					*result.(*[]map[string]interface{}) = []map[string]interface{}{{
-						"spec": map[string]interface{}{
-							"type": "victorialogs",
-							"victorialogs": map[string]interface{}{
-								"url": "https://vl.example.com",
-								"auth": map[string]interface{}{
-									"type":     "basic",
-									"username": "writer",
-									"password": "stored-pw",
-									"token":    "stored-tk",
-								},
-							},
+			storedRow := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"type": "victorialogs",
+					"victorialogs": map[string]interface{}{
+						"url": "https://vl.example.com",
+						"auth": map[string]interface{}{
+							"type":     "basic",
+							"username": "writer",
+							"password": "stored-pw",
+							"token":    "stored-tk",
 						},
-					}}
-				}).
-				Return(nil)
+					},
+				},
+			}
 
 			var forwarded v1.LogSink
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveBackfillLookup(w, r, storedRow) {
+					return
+				}
+
 				assert.Equal(t, http.MethodPatch, r.Method)
 				assert.Equal(t, "id=eq.7", r.URL.RawQuery)
 
@@ -136,7 +131,6 @@ func TestLogSinkRoutesBackfillSecretsOnPatch(t *testing.T) {
 			router := gin.New()
 			RegisterLogSinkRoutes(router.Group("/api/v1"), nil, &Dependencies{
 				StorageAccessURL: upstream.URL,
-				Storage:          storageMock,
 			})
 
 			req := httptest.NewRequest(http.MethodPatch, "/api/v1/log_sinks?id=eq.7", strings.NewReader(tt.body))
@@ -224,28 +218,26 @@ func TestLogSinkRoutesBackfillS3KeysOnPatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			storageMock := storageMocks.NewMockStorage(t)
-			storageMock.EXPECT().
-				GenericQuery(storage.LOG_SINK_TABLE, "spec", mock.Anything, mock.Anything).
-				Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
-					*result.(*[]map[string]interface{}) = []map[string]interface{}{{
-						"spec": map[string]interface{}{
-							"type": "s3",
-							"s3": map[string]interface{}{
-								"region": "us-east-1",
-								"bucket": "traces",
-								"auth": map[string]interface{}{
-									"access_key_id":     "stored-ak",
-									"secret_access_key": "stored-sk",
-								},
-							},
+			storedRow := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"type": "s3",
+					"s3": map[string]interface{}{
+						"region": "us-east-1",
+						"bucket": "traces",
+						"auth": map[string]interface{}{
+							"access_key_id":     "stored-ak",
+							"secret_access_key": "stored-sk",
 						},
-					}}
-				}).
-				Return(nil)
+					},
+				},
+			}
 
 			var forwarded v1.LogSink
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveBackfillLookup(w, r, storedRow) {
+					return
+				}
+
 				body, err := io.ReadAll(r.Body)
 				assert.NoError(t, err)
 				assert.NoError(t, json.Unmarshal(body, &forwarded))
@@ -256,7 +248,6 @@ func TestLogSinkRoutesBackfillS3KeysOnPatch(t *testing.T) {
 			router := gin.New()
 			RegisterLogSinkRoutes(router.Group("/api/v1"), nil, &Dependencies{
 				StorageAccessURL: upstream.URL,
-				Storage:          storageMock,
 			})
 
 			req := httptest.NewRequest(http.MethodPatch, "/api/v1/log_sinks?id=eq.7", strings.NewReader(tt.body))

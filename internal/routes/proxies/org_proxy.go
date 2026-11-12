@@ -14,7 +14,7 @@ func RegisterOrgUnitRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup := group.Group("/org_units")
 	proxyGroup.Use(middlewares...)
 
-	proxyGroup.GET("", CreateStructProxyHandler[v1.OrgUnit](deps, storage.ORG_UNIT_TABLE))
+	proxyGroup.GET("", CreateStructProxyHandler[v1.OrgUnit](proxyGroup, deps, storage.ORG_UNIT_TABLE))
 }
 
 // RegisterTeamRoutes registers Team routes; the database keeps synced Teams
@@ -25,7 +25,7 @@ func RegisterTeamRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	proxyGroup := group.Group("/teams")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.Team](deps, storage.TEAM_TABLE)
+	handler := CreateStructProxyHandler[v1.Team](proxyGroup, deps, storage.TEAM_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
@@ -42,7 +42,7 @@ func RegisterTeamMemberRoutes(group *gin.RouterGroup, middlewares []gin.HandlerF
 	proxyGroup := group.Group("/team_members")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[storage.TeamMember](deps, storage.TEAM_MEMBER_TABLE)
+	handler := CreateStructProxyHandler[storage.TeamMember](proxyGroup, deps, storage.TEAM_MEMBER_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
@@ -57,7 +57,7 @@ func RegisterOrgUnitMemberRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	proxyGroup := group.Group("/org_unit_members")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[storage.OrgUnitMember](deps, storage.ORG_UNIT_MEMBER_TABLE)
+	handler := CreateStructProxyHandler[storage.OrgUnitMember](proxyGroup, deps, storage.ORG_UNIT_MEMBER_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
@@ -73,7 +73,7 @@ func RegisterGroupPolicyRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 	proxyGroup := group.Group("/group_policies")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.GroupPolicy](deps, storage.GROUP_POLICY_TABLE)
+	handler := CreateStructProxyHandler[v1.GroupPolicy](proxyGroup, deps, storage.GROUP_POLICY_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
@@ -90,7 +90,7 @@ func RegisterServiceAccountRoutes(group *gin.RouterGroup, middlewares []gin.Hand
 	proxyGroup := group.Group("/service_accounts")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.ServiceAccount](deps, storage.SERVICE_ACCOUNT_TABLE)
+	handler := CreateStructProxyHandler[v1.ServiceAccount](proxyGroup, deps, storage.SERVICE_ACCOUNT_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
@@ -106,7 +106,7 @@ func RegisterTeamApplicationPermissionRoutes(group *gin.RouterGroup, middlewares
 	proxyGroup := group.Group("/team_application_permissions")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.TeamApplicationPermissions](deps, storage.TEAM_APP_PERMISSION_TABLE)
+	handler := CreateStructProxyHandler[v1.TeamApplicationPermissions](proxyGroup, deps, storage.TEAM_APP_PERMISSION_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

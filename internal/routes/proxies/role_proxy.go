@@ -60,7 +60,7 @@ func RegisterRoleRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 		storage.ROLE_TABLE,
 		validateRoleDeletion(deps.Storage),
 	)
-	handler := CreateStructProxyHandler[v1.Role](deps, storage.ROLE_TABLE)
+	handler := CreateStructProxyHandler[v1.Role](proxyGroup, deps, storage.ROLE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

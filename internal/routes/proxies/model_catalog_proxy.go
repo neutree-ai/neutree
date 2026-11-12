@@ -29,7 +29,7 @@ func RegisterModelCatalogRoutes(group *gin.RouterGroup, middlewares []gin.Handle
 	proxyGroup := group.Group("/model_catalogs")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.ModelCatalog](deps, "model_catalogs")
+	handler := CreateStructProxyHandler[v1.ModelCatalog](proxyGroup, deps, "model_catalogs")
 	recipeValidation := validateModelCatalogRecipe()
 
 	// Only register allowed methods
