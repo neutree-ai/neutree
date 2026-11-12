@@ -12,7 +12,7 @@ func TestSelectNodeAgent(t *testing.T) {
 		legacyImage       = "neutree/neutree-node-agent:v1.1.0-rc.1"
 		pinnedImage       = "neutree/neutree-node-agent:v1.2.0-rc.1"
 		intermediateImage = "neutree/neutree-node-agent:v1.2.1-rc.1"
-		currentImage      = "neutree/neutree-node-agent:v1.3.0-alpha.1"
+		currentImage      = "neutree/neutree-node-agent:v1.3.0-rc.1"
 	)
 
 	tests := []struct {
