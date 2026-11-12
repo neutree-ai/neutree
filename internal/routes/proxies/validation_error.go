@@ -1,12 +1,41 @@
 package proxies
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
 
 type validationError struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Hint       string `json:"hint"`
 	HTTPStatus int    `json:"-"`
+}
+
+type structuredValidationError interface {
+	error
+	ErrorCode() string
+	ErrorHint() string
+}
+
+func providerValidationError(err error, defaultCode string) *validationError {
+	code := defaultCode
+	hint := ""
+
+	var structured structuredValidationError
+	if errors.As(err, &structured) {
+		if structured.ErrorCode() != "" {
+			code = structured.ErrorCode()
+		}
+
+		hint = structured.ErrorHint()
+	}
+
+	return &validationError{
+		Code:    code,
+		Message: err.Error(),
+		Hint:    hint,
+	}
 }
 
 // internalServerValidationError is the response for validation-time
