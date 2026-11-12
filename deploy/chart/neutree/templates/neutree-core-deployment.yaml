@@ -51,7 +51,7 @@ spec:
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
-            - --controller-workers=5
+            - --controller-workers=10
             - --leader-elect-lease-name={{ include "neutree.fullname" . }}-core-leader
             - --default-cluster-version=v1.0.0
             {{- $metricsRemoteWriteUrl := include "neutree.metricsRemoteWriteUrl" . }}

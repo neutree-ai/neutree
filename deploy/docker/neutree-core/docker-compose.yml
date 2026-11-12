@@ -158,7 +158,7 @@ services:
     command:
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
-      - --controller-workers=5
+      - --controller-workers=10
       - --default-cluster-version=v1.0.0
       - --metrics-remote-write-url={{ .MetricsRemoteWriteURL }}
       - --gateway-type=kong
