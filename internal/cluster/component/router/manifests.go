@@ -222,6 +222,7 @@ func routerProxyArgs(config v1.RouterSpec, version string) []string {
 		klog.Warningf("Skipping Router proxy arguments for invalid Router version %q: %v", version, err)
 		return nil
 	}
+
 	if !supported {
 		klog.Warningf("Skipping Router proxy arguments for unsupported Router version %q", version)
 		return nil
