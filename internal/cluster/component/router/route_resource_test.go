@@ -13,6 +13,7 @@ import (
 
 func Test_BuildRouterDeployment(t *testing.T) {
 	// Test implementation goes here
+	poolLimit, connectTimeout, socketConnectTimeout, socketReadTimeout := 0, 0.0, 0.25, 600.0
 	routerComponent := &RouterComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
@@ -29,9 +30,15 @@ func Test_BuildRouterDeployment(t *testing.T) {
 		config: v1.KubernetesClusterConfig{
 			Router: v1.RouterSpec{
 				AccessMode: v1.KubernetesAccessModeLoadBalancer,
-				Version:    "1.0.0",
+				Version:    "1.2.2",
 				Replicas:   2,
 				Resources:  map[string]string{"cpu": "100m", "memory": "128Mi"},
+				RouterProxyConfig: v1.RouterProxyConfig{
+					MaxConnectionsPerBackend:  &poolLimit,
+					ConnectTimeoutSeconds:     &connectTimeout,
+					SockConnectTimeoutSeconds: &socketConnectTimeout,
+					SockReadTimeoutSeconds:    &socketReadTimeout,
+				},
 			},
 		},
 	}
@@ -54,7 +61,15 @@ func Test_BuildRouterDeployment(t *testing.T) {
 			assert.Equal(t, "router", deployment.GetName(), "Deployment name mismatch")
 			assert.Equal(t, "router", deployment.GetLabels()["app"], "Deployment app label mismatch")
 			assert.Equal(t, int32(2), *deployment.Spec.Replicas, "Deployment replicas mismatch")
-			assert.Equal(t, "test-image-prefix/neutree/router:1.0.0", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
+			assert.Equal(t, "test-image-prefix/neutree/router:1.2.2", deployment.Spec.Template.Spec.Containers[0].Image, "Deployment image mismatch")
+			assert.Equal(t, "1.0.0", deployment.Spec.Template.Labels["neutree.ai/cluster-version"])
+			assert.Equal(t, []string{
+				"--host", "0.0.0.0", "--port", "8000", "--k8s-namespace", "test-namespace",
+				"--k8s-label-selector", "cluster=test-cluster,workspace=test-workspace,app=inference",
+				"--session-key", "session_id", "--service-discovery", "k8s",
+				"--max-connections-per-backend", "0", "--connect-timeout-seconds", "0",
+				"--sock-connect-timeout-seconds", "0.25", "--sock-read-timeout-seconds", "600",
+			}, deployment.Spec.Template.Spec.Containers[0].Args)
 			assert.Equal(t, "test-image-pull-secret", deployment.Spec.Template.Spec.ImagePullSecrets[0].Name, "Deployment image pull secret mismatch")
 			actualCPU := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["cpu"]
 			actualMemory := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["memory"]
@@ -100,6 +115,45 @@ func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
 	}
 
 	t.Fatalf("router deployment not found in resources")
+}
+
+func TestRouterManifestProxyArguments(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		router  string
+		want    []string
+	}{
+		{name: "later release renders only supplied option", version: "v1.3.1", router: `{"connect_timeout_seconds":1.5}`, want: []string{"--connect-timeout-seconds", "1.5"}},
+		{name: "defaults are owned by router", version: "v1.3.0", router: `{}`},
+		{name: "old image omits unsupported options", version: "v1.2.0", router: `{"connect_timeout_seconds":30}`},
+		{name: "boundary release omits options", version: "v1.2.1", router: `{"connect_timeout_seconds":30}`},
+		{name: "boundary build metadata omits options", version: "v1.2.1+build.1", router: `{"connect_timeout_seconds":30}`},
+		{name: "boundary prerelease omits options", version: "v1.2.1-rc.1", router: `{"connect_timeout_seconds":30}`},
+		{name: "next patch prerelease renders options", version: "v1.2.2-rc.1", router: `{"connect_timeout_seconds":30}`, want: []string{"--connect-timeout-seconds", "30"}},
+		{name: "current test image renders options", version: "v1.3.0-neu869-0", router: `{"connect_timeout_seconds":30}`, want: []string{"--connect-timeout-seconds", "30"}},
+		{
+			name: "new override supports options on old cluster", version: "v1.2.1",
+			router: `{"version":"v1.3.0-neu869-0","connect_timeout_seconds":30}`, want: []string{"--connect-timeout-seconds", "30"},
+		},
+		{name: "old override omits options on new cluster", version: "v1.3.0", router: `{"version":"v1.2.1","connect_timeout_seconds":30}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			component := &RouterComponent{
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"},
+					Spec:     &v1.ClusterSpec{Version: tc.version},
+				},
+				namespace:   "default",
+				imagePrefix: "docker.io/neutree-ai",
+			}
+			require.NoError(t, json.Unmarshal([]byte(tc.router), &component.config.Router))
+			variables := component.buildManifestVariables()
+			assert.Equal(t, tc.want, variables.ProxyArgs)
+			assert.Equal(t, tc.version, variables.Version)
+		})
+	}
 }
 
 func Test_BuildRouterService(t *testing.T) {

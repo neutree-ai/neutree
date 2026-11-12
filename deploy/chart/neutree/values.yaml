@@ -498,6 +498,8 @@ grafana:
       - configMap:
           name: '{{ include "neutree.grafana.dashboardConfigMapName" "node_exporter_dashboard.json" }}'
       - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "router_dashboard.json" }}'
+      - configMap:
           name: '{{ include "neutree.grafana.dashboardConfigMapName" "serve_deployment_grafana_dashboard.json" }}'
       - configMap:
           name: '{{ include "neutree.grafana.dashboardConfigMapName" "serve_grafana_dashboard.json" }}'
