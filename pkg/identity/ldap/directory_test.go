@@ -221,26 +221,22 @@ func TestSnapshot(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSnapshotUserWithoutOrgUnit(t *testing.T) {
+func TestSnapshotWithoutOrgUnitBase(t *testing.T) {
 	conn := fixtureDir()
 	cfg := dirConfig()
 	cfg.Sync.OrgUnitBaseDN = ""
-	cfg.Sync.GroupBaseDN = ""
 	cfg.Sync.DisabledUserFilter = ""
 
 	snap, err := snapshot(t, cfg, conn)
 	require.NoError(t, err)
 	assert.Empty(t, snap.OrgUnits)
-	assert.Empty(t, snap.Teams)
+	assert.NotEmpty(t, snap.Teams)
 	require.Len(t, snap.Users, 5)
 
 	for _, u := range snap.Users {
 		assert.Empty(t, u.OrgUnitExternalID)
-		assert.Empty(t, u.TeamExternalIDs)
 		assert.False(t, u.Disabled)
 	}
-
-	assert.Len(t, conn.searches, 3, "only users are read")
 }
 
 func TestSnapshotRangedMembers(t *testing.T) {
@@ -419,6 +415,7 @@ func TestNewDirectoryValidation(t *testing.T) {
 		"bad disabled filter":  func(c *dirSetup) { c.Sync.DisabledUserFilter = "employeeType=disabled)" },
 		"list with username":   func(c *dirSetup) { c.Sync.UserListFilter = "(uid={username})" },
 		"auth config invalid":  func(c *dirSetup) { c.BindDN = "" },
+		"no base DN":           func(c *dirSetup) { c.Sync.OrgUnitBaseDN, c.Sync.GroupBaseDN = "", "" },
 		"bad user list filter": func(c *dirSetup) { c.Sync.UserListFilter = "((" },
 	}
 
@@ -434,6 +431,19 @@ func TestNewDirectoryValidation(t *testing.T) {
 
 	_, err := NewDirectory(dirConfig().Config, dirConfig().Sync, nil)
 	assert.ErrorIs(t, err, ErrInvalidConfig)
+
+	for name, mutate := range map[string]func(*dirSetup){
+		"only org unit base DN": func(c *dirSetup) { c.Sync.GroupBaseDN = "" },
+		"only group base DN":    func(c *dirSetup) { c.Sync.OrgUnitBaseDN = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := dirConfig()
+			mutate(&cfg)
+
+			_, err := NewDirectory(cfg.Config, cfg.Sync, dial)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestNearestOrgUnit(t *testing.T) {

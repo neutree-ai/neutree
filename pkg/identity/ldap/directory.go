@@ -100,6 +100,10 @@ func (s SyncConfig) withDefaults(userFilter string) SyncConfig {
 }
 
 func (s SyncConfig) validate() error {
+	if s.OrgUnitBaseDN == "" && s.GroupBaseDN == "" {
+		return fmt.Errorf("%w: set at least one of org unit base DN and group base DN", ErrInvalidConfig)
+	}
+
 	for _, dn := range []struct{ name, value string }{
 		{"org unit base DN", s.OrgUnitBaseDN},
 		{"group base DN", s.GroupBaseDN},

@@ -34,6 +34,11 @@ func syncSourceJSON(name string, sync, ldapSync map[string]any) string {
 		"user_base_dn":  "ou=people,dc=example,dc=org",
 		"user_filter":   "(&(objectClass=inetOrgPerson)(uid={username}))",
 	}
+	if ldapSync == nil && sync != nil && sync["enabled"] == true {
+		// Enabled sync needs a base DN.
+		ldapSync = map[string]any{"org_unit_base_dn": "ou=org,dc=example,dc=org"}
+	}
+
 	if ldapSync != nil {
 		ldap["sync"] = ldapSync
 	}
@@ -641,4 +646,108 @@ func TestRevokeUserSessions_ServiceRoleOnly(t *testing.T) {
 	if err := NewTestStorage(t).RevokeUserSessions("00000000-0000-0000-0000-000000000000"); err != nil {
 		t.Errorf("service_role call failed: %v", err)
 	}
+}
+
+func TestIdentitySourceSync_BaseDNRequired(t *testing.T) {
+	token := adminToken(t)
+	name := newIdentitySourceName("needdn")
+	enabled := map[string]any{"enabled": true}
+
+	for _, tc := range []struct {
+		name     string
+		ldapSync map[string]any
+	}{
+		{"both empty", map[string]any{"page_size": 100}},
+		{"both blank", map[string]any{"org_unit_base_dn": "  ", "group_base_dn": ""}},
+	} {
+		t.Run("create with "+tc.name, func(t *testing.T) {
+			code, raw := postgrestAs(t, token, http.MethodPost, "/identity_sources",
+				syncSourceJSON(newIdentitySourceName("needdn-new"), enabled, tc.ldapSync))
+			if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10330"`) {
+				t.Errorf("POST = HTTP %d, want 400 with code 10330: %s", code, raw)
+			}
+		})
+	}
+
+	for _, dn := range []string{"org_unit_base_dn", "group_base_dn"} {
+		t.Run("one "+dn+" is enough", func(t *testing.T) {
+			createIdentitySource(t, token, syncSourceJSON(newIdentitySourceName("needdn-one"), enabled,
+				map[string]any{dn: "ou=x,dc=example,dc=org"}))
+		})
+	}
+
+	source := createIdentitySource(t, token, syncSourceJSON(name, enabled, nil))
+	path := fmt.Sprintf("/identity_sources?id=eq.%d", source.ID)
+
+	t.Run("clearing both DNs of an enabled sync", func(t *testing.T) {
+		code, raw := postgrestAs(t, token, http.MethodPatch, path,
+			syncSourceJSON(name, enabled, map[string]any{"org_unit_base_dn": "", "group_base_dn": ""}))
+		if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10330"`) {
+			t.Errorf("PATCH = HTTP %d, want 400 with code 10330: %s", code, raw)
+		}
+	})
+
+	t.Run("clearing them while sync is off", func(t *testing.T) {
+		if code, raw := postgrestAs(t, token, http.MethodPatch, path,
+			syncSourceJSON(name, map[string]any{"enabled": false}, map[string]any{"org_unit_base_dn": "", "group_base_dn": ""})); code != http.StatusOK {
+			t.Fatalf("PATCH = HTTP %d: %s", code, raw)
+		}
+	})
+
+	t.Run("enabling it again without a DN", func(t *testing.T) {
+		code, raw := postgrestAs(t, token, http.MethodPatch, path, syncSourceJSON(name, enabled, map[string]any{"page_size": 10}))
+		if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10330"`) {
+			t.Errorf("PATCH = HTTP %d, want 400 with code 10330: %s", code, raw)
+		}
+	})
+}
+
+// A source saved before the rule has sync enabled and no base DN. Writes that
+// leave the sync settings alone must keep working on it.
+func TestIdentitySourceSync_LegacyRowStillWritable(t *testing.T) {
+	token := adminToken(t)
+	name := newIdentitySourceName("legacydn")
+	source := createIdentitySource(t, token, syncSourceJSON(name, map[string]any{"enabled": true}, nil))
+
+	db := GetTestDB(t)
+	if _, err := db.Exec(`ALTER TABLE api.identity_sources DISABLE TRIGGER identity_sources_sync_before_write`); err != nil {
+		t.Fatalf("disable trigger: %v", err)
+	}
+
+	_, err := db.Exec(`UPDATE api.identity_sources SET spec = jsonb_populate_record(NULL::api.identity_source_spec,
+		jsonb_set(to_jsonb(spec), '{ldap,sync,org_unit_base_dn}', 'null')) WHERE id = $1`, source.ID)
+
+	if _, enErr := db.Exec(`ALTER TABLE api.identity_sources ENABLE TRIGGER identity_sources_sync_before_write`); enErr != nil {
+		t.Fatalf("enable trigger: %v", enErr)
+	}
+
+	if err != nil {
+		t.Fatalf("make the row legacy: %v", err)
+	}
+
+	if s := getIdentitySource(t, token, source.ID).Spec.LDAP.Sync; s != nil && s.OrgUnitBaseDN != "" {
+		t.Fatalf("spec.ldap.sync = %+v, want no base DN", s)
+	}
+
+	path := fmt.Sprintf("/identity_sources?id=eq.%d", source.ID)
+
+	t.Run("status write", func(t *testing.T) {
+		status := &v1.IdentitySourceStatus{LastSync: &v1.IdentitySourceSyncStatus{OK: false, Message: "x"}}
+		if err := NewTestStorage(t).UpdateIdentitySource(fmt.Sprint(source.ID), &v1.IdentitySource{Status: status}); err != nil {
+			t.Errorf("status update failed: %v", err)
+		}
+	})
+
+	t.Run("sync now request", func(t *testing.T) {
+		code, raw := postgrestAs(t, token, http.MethodPost, "/rpc/request_identity_source_sync", mustJSON(map[string]any{"p_name": name}))
+		if code >= 300 {
+			t.Errorf("request_identity_source_sync = HTTP %d: %s", code, raw)
+		}
+	})
+
+	t.Run("write without sync settings", func(t *testing.T) {
+		if code, raw := postgrestAs(t, token, http.MethodPatch, path, ldapSourceJSON(name, "Renamed", "", true)); code != http.StatusOK {
+			t.Errorf("PATCH = HTTP %d: %s", code, raw)
+		}
+	})
 }
