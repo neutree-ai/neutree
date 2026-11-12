@@ -30,7 +30,7 @@ const NeutreeNodeAgentV121 = "v1.2.1-rc.1"
 // NeutreeNodeAgentV130 is the image pin for the v1.3.0 cluster release cycle.
 // It can change during development and is frozen once v1.3.0 is released.
 // Later release cycles must use new versioned constants.
-const NeutreeNodeAgentV130 = "v1.3.0-alpha.1"
+const NeutreeNodeAgentV130 = "v1.3.0-rc.1"
 
 // Grafana image version.
 const Grafana = "11.5.3"

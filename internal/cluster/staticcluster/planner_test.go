@@ -935,7 +935,7 @@ func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v9.9.9"
 
-	assert.Equal(t, "neutree/neutree-node-agent:v1.3.0-alpha.1", defaultNodeAgentImage(cluster))
+	assert.Equal(t, "neutree/neutree-node-agent:v1.3.0-rc.1", defaultNodeAgentImage(cluster))
 }
 
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
