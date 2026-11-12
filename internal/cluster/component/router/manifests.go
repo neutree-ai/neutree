@@ -6,6 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
+	"k8s.io/klog/v2"
 )
 
 var routerMainifestTemplate = `
@@ -217,7 +218,12 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 
 func routerProxyArgs(config v1.RouterSpec, version string) []string {
 	supported, err := clusterversion.SupportsRouterClientConfig(version)
-	if err != nil || !supported {
+	if err != nil {
+		klog.Warningf("Skipping Router proxy arguments for invalid Router version %q: %v", version, err)
+		return nil
+	}
+	if !supported {
+		klog.Warningf("Skipping Router proxy arguments for unsupported Router version %q", version)
 		return nil
 	}
 
