@@ -259,7 +259,7 @@
       "gridPos": {
         "x": 16,
         "y": 1,
-        "w": 8,
+        "w": 4,
         "h": 5
       },
       "id": 1,
@@ -290,6 +290,54 @@
         "defaults": {
           "unit": "locale",
           "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Peak share of GPU KV blocks pinned by active in-flight requests across selected replicas. Idle evictable prefix-cache blocks are excluded; values near 100% indicate KV capacity pressure that evicts cached prefixes and can trigger queueing or preemption.",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "id": 2,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "expr": "max(vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}) or max(vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}) or max(sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"})",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "Active KV block usage",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
           "color": {
             "mode": "fixed",
             "fixedColor": "#0080FF"
@@ -518,6 +566,59 @@
         "tooltip": {
           "mode": "multi",
           "sort": "none"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "description": "Per-replica share of GPU KV blocks pinned by active in-flight requests over time. Idle evictable prefix-cache blocks are excluded; values near 100% indicate KV capacity saturation.",
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 9
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "max by(replica) (vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}) or max by(replica) (vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}) or max by(replica) (sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"})",
+          "refId": "A",
+          "legendFormat": "{{replica}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Active KV block usage trend",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "",
+            "axisPlacement": "left"
+          },
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
         }
       }
     }
