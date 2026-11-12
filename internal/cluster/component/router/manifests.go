@@ -3,10 +3,11 @@ package router
 import (
 	"strconv"
 
+	"k8s.io/klog/v2"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
-	"k8s.io/klog/v2"
 )
 
 var routerMainifestTemplate = `
