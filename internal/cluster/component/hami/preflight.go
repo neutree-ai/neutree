@@ -24,7 +24,7 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 	}
 
 	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(
-		userVirtualizationConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)); err != nil {
+		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
 		return err
 	}
 

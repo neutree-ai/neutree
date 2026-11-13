@@ -87,8 +87,8 @@ func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion st
 	values := defaultChartValues(h.normalizedImagePrefix(), hamiVersion)
 	// Merge order is intentional: chart defaults < plugin discovery patch <
 	// Neutree protected values < supported user config_patch. The user patch is
-	// sanitized below so lifecycle values remain protected while image values
-	// can be changed for controlled hot fixes.
+	// validated before reconcile so lifecycle values remain protected while
+	// supported image values can be changed for controlled hot fixes.
 	values = mergeChartValues(values, scopePlan.ConfigPatch)
 	values = mergeChartValues(values, h.protectedChartValues(hamiVersion))
 
@@ -96,18 +96,10 @@ func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion st
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
 		configPatch := h.cluster.Spec.AcceleratorVirtualization.ConfigPatch
-		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
+		values = mergeChartValues(values, deepCopyChartValues(configPatch))
 	}
 
 	return mergeChartValues(values, h.protectedImagePullSecretValues(values))
-}
-
-func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
-	if len(configPatch) == 0 {
-		return nil
-	}
-
-	return deepCopyChartValues(configPatch)
 }
 
 func defaultChartValues(imageRegistry, hamiVersion string) map[string]interface{} {
