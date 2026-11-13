@@ -91,51 +91,67 @@ func (c *StaticNodeController) reconcileNormal(
 	node *v1.StaticNode,
 	reconciler *staticnode.Reconciler,
 ) (reconcileErr error) {
+	result := &staticnode.ReconcileResult{}
+
 	runner, err := c.runnerFactory.NewStaticNodeRunner(ctx, node)
 	if err != nil {
 		reconcileErr = errors.Wrap(err, "failed to create static node runner")
-		status := staticnode.BuildStatus(node, nil, reconcileErr)
+		status := staticnode.BuildStatus(node, result, reconcileErr)
 		c.updateStatus(node, status, "failed to update static node status", &reconcileErr)
 
 		return reconcileErr
 	}
 	defer closeStaticNodeRunner(runner)
 
-	result := &staticnode.ReconcileResult{}
+	acceleratorObserved := node.Status != nil &&
+		node.Status.Accelerator != nil &&
+		node.Status.Accelerator.Type != ""
 
 	result.Accelerator, reconcileErr = reconciler.ReconcileAccelerator(ctx, node, runner)
-	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node accelerator status", &reconcileErr)
-
 	if reconcileErr != nil {
+		status := staticnode.BuildStatus(node, result, reconcileErr)
+		c.updateStatus(node, status, "failed to update static node accelerator status", &reconcileErr)
+
 		return reconcileErr
 	}
 
+	if !acceleratorObserved {
+		// Publish discovery early so StaticNodeCluster can plan components without clearing lifecycle errors.
+		status := v1.StaticNodeStatus{}
+		if node.Status != nil {
+			status = *node.Status
+		}
+
+		status.Accelerator = result.Accelerator
+		c.updateStatus(node, status, "failed to update static node accelerator status", &reconcileErr)
+
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+	}
+
+	defer func() {
+		// Publish lifecycle state only after this pass finishes, so retries keep their last error visible.
+		status := staticnode.BuildStatus(node, result, reconcileErr)
+		c.updateStatus(node, status, "failed to update static node status", &reconcileErr)
+	}()
+
 	registryAuth, err := c.registryAuth(node)
 	if err != nil {
-		reconcileErr = errors.Wrap(err, "failed to resolve static node registry auth")
-		c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node registry auth status", &reconcileErr)
-
-		return reconcileErr
+		return errors.Wrap(err, "failed to resolve static node registry auth")
 	}
 
 	dockerRuntime, err := staticnode.NewDockerRuntime(ctx, runner, registryAuth)
 	if err != nil {
-		reconcileErr = errors.Wrap(err, "failed to initialize static node docker runtime")
-		c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node docker runtime status", &reconcileErr)
-
-		return reconcileErr
+		return errors.Wrap(err, "failed to initialize static node docker runtime")
 	}
 
 	result.Warm, reconcileErr = reconciler.ReconcileWarmImages(ctx, node, dockerRuntime)
-	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node warm status", &reconcileErr)
-
 	if reconcileErr != nil {
 		return reconcileErr
 	}
 
 	result.Components, reconcileErr = reconciler.ReconcileComponents(ctx, node, runner, dockerRuntime)
-	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node component status", &reconcileErr)
-
 	if reconcileErr != nil {
 		return reconcileErr
 	}
@@ -146,7 +162,6 @@ func (c *StaticNodeController) reconcileNormal(
 		result.Accelerator,
 		result.Components,
 	)
-	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node device snapshot status", &reconcileErr)
 
 	return reconcileErr
 }
