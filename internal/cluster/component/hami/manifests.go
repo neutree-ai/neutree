@@ -177,10 +177,6 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 
 func (h *HAMiComponent) imageRegistryAndRepository(repository string) (string, string) {
 	if imagePrefix := h.normalizedImagePrefix(); imagePrefix != "" {
-		if repository == clusterversion.HAMiP1ImageRepository {
-			return imagePrefix, "hami"
-		}
-
 		return imagePrefix, repository
 	}
 

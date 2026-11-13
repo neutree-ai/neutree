@@ -129,7 +129,11 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 
 	}
 
-	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
+	schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled")
+	if err != nil {
+		return unsupportedImageConfig([]string{"scheduler", "patch", "enabled"}, "must be a boolean")
+	}
+	if ok && schedulerPatch {
 		return &AcceleratorVirtualizationError{
 			Reason:  AcceleratorVirtualizationManagedSchedulerReason,
 			Message: "HAMi scheduler patch hook is managed by Neutree and cannot be enabled",
@@ -137,7 +141,11 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 		}
 	}
 
-	if certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled"); err == nil && ok && certManager {
+	certManager, ok, err := unstructured.NestedBool(configPatch, "scheduler", "certManager", "enabled")
+	if err != nil {
+		return unsupportedImageConfig([]string{"scheduler", "certManager", "enabled"}, "must be a boolean")
+	}
+	if ok && certManager {
 		return &AcceleratorVirtualizationError{
 			Reason:  AcceleratorVirtualizationManagedCertManagerReason,
 			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
@@ -145,7 +153,11 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 		}
 	}
 
-	if admissionWebhook, ok, err := unstructured.NestedBool(configPatch, "scheduler", "admissionWebhook", "enabled"); err == nil && ok && !admissionWebhook {
+	admissionWebhook, ok, err := unstructured.NestedBool(configPatch, "scheduler", "admissionWebhook", "enabled")
+	if err != nil {
+		return unsupportedImageConfig([]string{"scheduler", "admissionWebhook", "enabled"}, "must be a boolean")
+	}
+	if ok && !admissionWebhook {
 		return &AcceleratorVirtualizationError{
 			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
 			Message: "HAMi scheduler admission webhook is managed by Neutree and cannot be disabled",
@@ -154,7 +166,9 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 	}
 
 	if _, found, err := unstructured.NestedFieldNoCopy(
-		configPatch, "scheduler", "admissionWebhook", "namespaceSelector"); err == nil && found {
+		configPatch, "scheduler", "admissionWebhook", "namespaceSelector"); err != nil {
+		return unsupportedImageConfig([]string{"scheduler", "admissionWebhook", "namespaceSelector"}, "parent value must be an object")
+	} else if found {
 		return &AcceleratorVirtualizationError{
 			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
 			Message: "HAMi scheduler admission webhook namespaceSelector is managed by Neutree and cannot be customized",
@@ -172,7 +186,9 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 		{path: []string{"devicePlugin", "service", "type"}, reason: AcceleratorVirtualizationManagedSchedulerReason, name: "devicePlugin.service.type"},
 	}
 	for _, field := range managedFields {
-		if _, found, err := unstructured.NestedFieldNoCopy(configPatch, field.path...); err == nil && found {
+		if _, found, err := unstructured.NestedFieldNoCopy(configPatch, field.path...); err != nil {
+			return unsupportedImageConfig(field.path, "parent value must be an object")
+		} else if found {
 			return &AcceleratorVirtualizationError{
 				Reason:  field.reason,
 				Message: fmt.Sprintf("HAMi %s is managed by Neutree and cannot be customized", field.name),
@@ -199,7 +215,7 @@ func validateImageValues(configPatch map[string]interface{}, path ...string) err
 	}
 	for field, fieldValue := range image {
 		switch field {
-		case "registry", "repository", "tag", "pullPolicy":
+		case "repository", "tag", "pullPolicy":
 			if _, ok := fieldValue.(string); !ok {
 				return unsupportedImageConfig(append(path, field), "must be a string")
 			}

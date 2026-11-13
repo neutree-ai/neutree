@@ -298,7 +298,7 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 			name:               "private registry rewrites all images",
 			imagePrefix:        "registry.example.com/neutree-ai",
 			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
-			extenderImage:      "registry.example.com/neutree-ai/hami:" + clusterversion.HAMiP1ImageTag,
+			extenderImage:      "registry.example.com/neutree-ai/neutree/hami:" + clusterversion.HAMiP1ImageTag,
 			devicePluginImage:  "registry.example.com/neutree-ai/projecthami/hami:" + componentversion.V130HAMI,
 		},
 		{

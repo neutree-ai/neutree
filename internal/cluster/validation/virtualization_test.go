@@ -157,6 +157,22 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			},
 		},
 		{
+			name: "rejects per-image registry override",
+			configPatch: map[string]interface{}{
+				"scheduler": map[string]interface{}{
+					"extender": map[string]interface{}{"image": map[string]interface{}{"registry": "registry.example.com"}},
+				},
+			},
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
+		},
+		{
+			name: "rejects scalar protected parent",
+			configPatch: map[string]interface{}{
+				"scheduler": map[string]interface{}{"service": "NodePort"},
+			},
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
+		},
+		{
 			name: "rejects global image override",
 			configPatch: map[string]interface{}{
 				"global": map[string]interface{}{"imageTag": "v2.10.0-p1"},
