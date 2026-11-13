@@ -86,20 +86,35 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion string) map[string]interface{} {
 	values := defaultChartValues(h.normalizedImagePrefix(), hamiVersion)
 	// Merge order is intentional: chart defaults < plugin discovery patch <
-	// Neutree protected values < supported user config_patch. The user patch is
-	// validated before reconcile so lifecycle values remain protected while
-	// supported image values can be changed for controlled hot fixes.
+	// supported user config_patch < Neutree protected values. Protected values
+	// keep shared lifecycle, TLS, service, and image settings under Neutree control.
 	values = mergeChartValues(values, scopePlan.ConfigPatch)
-	values = mergeChartValues(values, h.protectedChartValues(hamiVersion))
 
 	if h.cluster.Spec != nil &&
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
 		configPatch := h.cluster.Spec.AcceleratorVirtualization.ConfigPatch
-		values = mergeChartValues(values, deepCopyChartValues(configPatch))
+		if _, found := configPatch["devicePlugin"]; found {
+			klog.Warningf("Ignoring legacy accelerator_virtualization.config_patch.devicePlugin for cluster %s",
+				h.cluster.Metadata.WorkspaceName())
+		}
+
+		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
 	}
 
-	return mergeChartValues(values, h.protectedImagePullSecretValues(values))
+	return mergeChartValues(values, h.protectedChartValues(hamiVersion))
+}
+
+func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
+	if len(configPatch) == 0 {
+		return nil
+	}
+
+	sanitized := deepCopyChartValues(configPatch)
+	delete(sanitized, "devicePlugin")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
+
+	return sanitized
 }
 
 func defaultChartValues(imageRegistry, hamiVersion string) map[string]interface{} {
@@ -172,6 +187,14 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 		})
 	}
 
+	if h.imagePullSecret != "" {
+		values = mergeChartValues(values, map[string]interface{}{
+			"global": map[string]interface{}{
+				"imagePullSecrets": []string{h.imagePullSecret},
+			},
+		})
+	}
+
 	return values
 }
 
@@ -181,25 +204,6 @@ func (h *HAMiComponent) imageRegistryAndRepository(repository string) (string, s
 	}
 
 	return clusterversion.HAMiImageRegistry, repository
-}
-
-func (h *HAMiComponent) protectedImagePullSecretValues(values map[string]interface{}) map[string]interface{} {
-	if h.imagePullSecret == "" {
-		return nil
-	}
-
-	secrets := []interface{}{h.imagePullSecret}
-	if global, ok := values["global"].(map[string]interface{}); ok {
-		if configured, ok := global["imagePullSecrets"].([]interface{}); ok {
-			secrets = append(configured, secrets...)
-		}
-	}
-
-	return map[string]interface{}{
-		"global": map[string]interface{}{
-			"imagePullSecrets": secrets,
-		},
-	}
 }
 
 func chartImageValues(registry, repository, tag string) map[string]interface{} {

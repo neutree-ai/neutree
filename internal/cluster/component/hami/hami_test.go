@@ -381,12 +381,15 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	err := component.Preflight(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "admission webhook is managed by Neutree")
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.V130HAMI)
+	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["enabled"])
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+	assertHasObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
 }
 
-func TestHAMiComponentRejectsAdmissionWebhookNamespaceSelectorOverride(t *testing.T) {
+func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"scheduler": map[string]interface{}{
@@ -408,9 +411,49 @@ func TestHAMiComponentRejectsAdmissionWebhookNamespaceSelectorOverride(t *testin
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	err := component.Preflight(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "namespaceSelector is managed by Neutree")
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.V130HAMI)
+	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
+	require.NoError(t, err)
+	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
+	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["manageNamespaceSelector"])
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+	require.NotNil(t, webhook)
+
+	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, webhooks)
+
+	for _, entry := range webhooks {
+		webhookEntry, ok := entry.(map[string]interface{})
+		require.True(t, ok)
+
+		namespaceSelector, found, err := unstructured.NestedMap(webhookEntry, "namespaceSelector")
+		require.NoError(t, err)
+		require.True(t, found)
+
+		expressions, found, err := unstructured.NestedSlice(namespaceSelector, "matchExpressions")
+		require.NoError(t, err)
+		require.True(t, found)
+
+		for _, expression := range expressions {
+			match, ok := expression.(map[string]interface{})
+			require.True(t, ok)
+
+			if match["key"] != "kubernetes.io/metadata.name" || match["operator"] != "In" {
+				continue
+			}
+
+			values, ok := match["values"].([]interface{})
+			require.True(t, ok)
+			assert.NotEqual(t, []interface{}{"neutree-system"}, values,
+				"webhook must not accept a custom owning-namespace selector")
+		}
+	}
 }
 
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
@@ -545,7 +588,7 @@ func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires cluster version >= v1.1.0")
 }
 
-func TestHAMiComponentRejectsNonImageDevicePluginConfigPatchDuringPreflight(t *testing.T) {
+func TestHAMiComponentIgnoresLegacyDevicePluginConfigPatchDuringPreflight(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
@@ -557,16 +600,17 @@ func TestHAMiComponentRejectsNonImageDevicePluginConfigPatchDuringPreflight(t *t
 
 	err := component.Preflight(context.Background())
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported accelerator_virtualization.config_patch.devicePlugin field")
+	require.NoError(t, err)
 }
 
-func TestHAMiComponentUserImagePatchOverridesOwnerImage(t *testing.T) {
+func TestHAMiComponentLegacyDevicePluginConfigPatchCannotOverrideOwner(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
-			"image": map[string]interface{}{
-				"tag": "user-image",
+			"enabled":          false,
+			"nvidiaDriverRoot": "/legacy-driver",
+			"nvidiaNodeSelector": map[string]interface{}{
+				"example.com/legacy": "true",
 			},
 		},
 		"scheduler": map[string]interface{}{
@@ -583,8 +627,10 @@ func TestHAMiComponentUserImagePatchOverridesOwnerImage(t *testing.T) {
 	plan := defaultNodeScopePlan()
 	plan.ConfigPatch = map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
-			"image": map[string]interface{}{
-				"tag": "owner-image",
+			"enabled":          true,
+			"nvidiaDriverRoot": "/plugin-driver",
+			"nvidiaNodeSelector": map[string]interface{}{
+				"example.com/owner": "true",
 			},
 		},
 	}
@@ -592,10 +638,15 @@ func TestHAMiComponentUserImagePatchOverridesOwnerImage(t *testing.T) {
 	values := component.buildChartValues(plan, componentversion.V130HAMI)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
-	assert.Equal(t, "user-image", nestedMap(t, devicePlugin, "image")["tag"])
+	assert.Equal(t, true, devicePlugin["enabled"])
+	assert.Equal(t, "/plugin-driver", devicePlugin["nvidiaDriverRoot"])
+	assert.Equal(t, map[string]interface{}{
+		"example.com/owner": "true",
+	}, devicePlugin["nvidiaNodeSelector"])
 	assert.Equal(t, "spread",
 		nestedMap(t, values, "scheduler", "defaultSchedulerPolicy")["nodeSchedulerPolicy"])
 	assert.Equal(t, "preserved", nestedMap(t, values, "global")["legacySetting"])
+	assert.Contains(t, cluster.Spec.AcceleratorVirtualization.ConfigPatch, "devicePlugin")
 }
 
 func TestHAMiComponentDefaultValuesDoNotOwnNVIDIADevicePluginPolicy(t *testing.T) {
@@ -837,7 +888,7 @@ func TestHAMiPreflightAllowsUnmanagedClusterRoleBinding(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestHAMiPreflightRejectsNonImageDevicePluginOverrides(t *testing.T) {
+func TestHAMiPreflightAllowsUnmanagedRuntimeClassWhenNVIDIAPluginIsDisabled(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
@@ -847,13 +898,14 @@ func TestHAMiPreflightRejectsNonImageDevicePluginOverrides(t *testing.T) {
 	}
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t, &nodev1.RuntimeClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "nvidia"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "nvidia",
+			},
 		}))
 
 	err := component.Preflight(context.Background())
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported accelerator_virtualization.config_patch.devicePlugin field")
+	require.NoError(t, err)
 }
 
 func TestHAMiServingCertificateRenewalWindow(t *testing.T) {
@@ -1156,36 +1208,27 @@ func TestEmbeddedHAMiChartVersion(t *testing.T) {
 	assert.NotContains(t, chartValuesFromYAML(protectedChartValuesYAML), "dra")
 }
 
-func TestHAMiChartImageValuesCanBeOverridden(t *testing.T) {
-	cluster := newTestCluster()
-	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+func TestHAMiChartProtectedImageVersions(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "docker.io",
+		"", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+	values := component.buildChartValues(NodeScopePlan{ConfigPatch: map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"extender": map[string]interface{}{
-				"image": map[string]interface{}{"repository": "neutree/hami", "tag": "v2.10.0-p1-custom"},
+				"image": map[string]interface{}{"tag": "unexpected"},
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": map[string]interface{}{"repository": "projecthami/hami", "tag": "v2.10.0-custom"},
+			"image": map[string]interface{}{"tag": "unexpected"},
+			"monitor": map[string]interface{}{
+				"image": map[string]interface{}{"tag": "unexpected"},
+			},
 		},
-	}
-	component := NewHAMiComponent(cluster, "neutree-system", "docker.io",
-		"", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
-	values := component.buildChartValues(NodeScopePlan{}, componentversion.V130HAMI)
+	}}, componentversion.V130HAMI)
 
-	assert.Equal(t, "v2.10.0-p1-custom", nestedMap(t, values, "scheduler", "extender", "image")["tag"])
-	assert.Equal(t, "v2.10.0-custom", nestedMap(t, values, "devicePlugin", "image")["tag"])
+	assert.Equal(t, "v2.10.0-p1", nestedMap(t, values, "scheduler", "extender", "image")["tag"])
+	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "image")["tag"])
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "monitor", "image")["tag"])
-
-	resources, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
-	require.NoError(t, err)
-	assert.Equal(t, "docker.io/neutree/hami:v2.10.0-p1-custom",
-		findContainer(t, resources.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")["image"])
-	assert.Equal(t, "docker.io/projecthami/hami:v2.10.0-custom",
-		findContainer(t, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")["image"])
-	assert.Equal(t, "docker.io/projecthami/hami:v2.10.0",
-		findContainer(t, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")["image"])
-	assert.Equal(t, "registry.k8s.io/kube-scheduler:"+clusterversion.DefaultKubeSchedulerVersion,
-		findContainer(t, resources.Items, "Deployment", SchedulerName, "kube-scheduler")["image"])
+	assert.Equal(t, "v2.10.0", (HAMiStatus{Ready: true, Version: componentversion.V130HAMI}).ComponentStatus().Version)
 }
 
 func TestHAMiChartKubernetesVersionCompatibility(t *testing.T) {
@@ -1426,15 +1469,11 @@ func TestHAMiClusterVersionCompatibility(test *testing.T) {
 			assert.Equal(test, "hami-"+strings.TrimPrefix(testCase.hamiVersion, "v"), deployment.GetLabels()["helm.sh/chart"])
 			extender := findContainer(test, resources.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
 			profile := clusterversion.HAMiImageProfileForVersion(testCase.hamiVersion)
-			expectedRegistry, expectedRepository := component.imageRegistryAndRepository(profile.ExtenderRepository)
-			expectedImage := expectedRegistry + "/" + expectedRepository + ":" + profile.ExtenderTag
-			assert.Equal(test, expectedImage, extender["image"])
+			assert.Equal(test, "registry.example.com/neutree/"+profile.ExtenderRepository+":"+profile.ExtenderTag, extender["image"])
 			devicePlugin := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
-			deviceRegistry, deviceRepository := component.imageRegistryAndRepository(profile.DevicePluginRepository)
-			expectedDeviceImage := deviceRegistry + "/" + deviceRepository + ":" + profile.DevicePluginTag
-			assert.Equal(test, expectedDeviceImage, devicePlugin["image"])
+			assert.Equal(test, "registry.example.com/neutree/"+profile.DevicePluginRepository+":"+profile.DevicePluginTag, devicePlugin["image"])
 			monitor := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")
-			assert.Equal(test, expectedDeviceImage, monitor["image"])
+			assert.Equal(test, "registry.example.com/neutree/"+profile.DevicePluginRepository+":"+profile.DevicePluginTag, monitor["image"])
 			scheduler := findContainer(test, resources.Items, "Deployment", SchedulerName, "kube-scheduler")
 			assert.Equal(test, "registry.example.com/neutree/kube-scheduler:"+testCase.schedulerVersion, scheduler["image"])
 			for _, resource := range resources.Items {
@@ -1545,13 +1584,8 @@ func TestHAMiReconcileClusterVersionUpgrade(test *testing.T) {
 			for _, container := range deployment.Spec.Template.Spec.Containers {
 				containerImages[container.Name] = container.Image
 			}
-			expectedRepository := clusterversion.HAMiImageRepository
-			expectedTag := step.hamiVersion
-			if step.hamiVersion == componentversion.V130HAMI {
-				expectedRepository = clusterversion.HAMiP1ImageRepository
-				expectedTag = clusterversion.HAMiP1ImageTag
-			}
-			assert.Equal(test, "docker.io/"+expectedRepository+":"+expectedTag, containerImages["vgpu-scheduler-extender"])
+			profile := clusterversion.HAMiImageProfileForVersion(step.hamiVersion)
+			assert.Equal(test, "docker.io/"+profile.ExtenderRepository+":"+profile.ExtenderTag, containerImages["vgpu-scheduler-extender"])
 			assert.Equal(test, "registry.k8s.io/kube-scheduler:"+step.schedulerVersion, containerImages["kube-scheduler"])
 			require.NoError(test, fakeClient.Get(ctx, secretKey, secret))
 			assert.Equal(test, originalCA, secret.Data["ca.crt"])

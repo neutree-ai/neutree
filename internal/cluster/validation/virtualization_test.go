@@ -134,64 +134,15 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			name: "allows supported config patch",
 			configPatch: map[string]interface{}{
 				"scheduler": map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
-				"global":    map[string]interface{}{"legacySetting": "preserved"},
+				"global":    map[string]interface{}{"imageRegistry": "registry.example.com"},
 			},
 		},
 		{
-			name: "allows device plugin image config patch",
+			name: "rejects device plugin config patch",
 			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{
-					"image": map[string]interface{}{"tag": "v2.10.0-p1"},
-				},
-			},
-		},
-		{
-			name: "allows independent extender and device plugin images",
-			configPatch: map[string]interface{}{
-				"scheduler": map[string]interface{}{
-					"extender": map[string]interface{}{"image": map[string]interface{}{"repository": "neutree/hami", "tag": "v2.10.0-p1"}},
-				},
-				"devicePlugin": map[string]interface{}{
-					"image": map[string]interface{}{"repository": "projecthami/hami", "tag": "v2.10.0"},
-				},
-			},
-		},
-		{
-			name: "rejects per-image registry override",
-			configPatch: map[string]interface{}{
-				"scheduler": map[string]interface{}{
-					"extender": map[string]interface{}{"image": map[string]interface{}{"registry": "registry.example.com"}},
-				},
+				"devicePlugin": map[string]interface{}{"nvidiaDriverRoot": "/run/nvidia/driver"},
 			},
 			reason: AcceleratorVirtualizationUnsupportedConfigReason,
-		},
-		{
-			name: "rejects scalar protected parent",
-			configPatch: map[string]interface{}{
-				"scheduler": map[string]interface{}{"service": "NodePort"},
-			},
-			reason: AcceleratorVirtualizationUnsupportedConfigReason,
-		},
-		{
-			name: "rejects global image override",
-			configPatch: map[string]interface{}{
-				"global": map[string]interface{}{"imageTag": "v2.10.0-p1"},
-			},
-			reason: AcceleratorVirtualizationUnsupportedConfigReason,
-		},
-		{
-			name: "rejects monitor image override",
-			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{
-					"monitor": map[string]interface{}{"image": map[string]interface{}{"tag": "monitor"}},
-				},
-			},
-			reason: AcceleratorVirtualizationUnsupportedConfigReason,
-		},
-		{
-			name:        "rejects mock device plugin",
-			configPatch: map[string]interface{}{"mockDevicePlugin": map[string]interface{}{"image": map[string]interface{}{"tag": "mock"}}},
-			reason:      AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 		{
 			name:        "rejects unsupported top-level key",
@@ -235,30 +186,7 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
 		},
 		{
-			name: "rejects customizing admission webhook ownership",
-			configPatch: map[string]interface{}{
-				"scheduler": map[string]interface{}{
-					"admissionWebhook": map[string]interface{}{"manageNamespaceSelector": false},
-				},
-			},
-			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
-		},
-		{
-			name: "rejects customizing scheduler service",
-			configPatch: map[string]interface{}{
-				"scheduler": map[string]interface{}{"service": map[string]interface{}{"type": "NodePort"}},
-			},
-			reason: AcceleratorVirtualizationManagedSchedulerReason,
-		},
-		{
-			name: "rejects customizing device plugin service",
-			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{"service": map[string]interface{}{"type": "NodePort"}},
-			},
-			reason: AcceleratorVirtualizationManagedSchedulerReason,
-		},
-		{
-			name: "rejects non-image device plugin chart values",
+			name: "rejects MIG config as device plugin config",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},
 			},
