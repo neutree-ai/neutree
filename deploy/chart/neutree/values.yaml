@@ -23,6 +23,11 @@ jwtSecret: ""
 # It is recommended to change it quickly after installation.
 adminPassword: ""
 
+persistence:
+  # Helm resource policy applied to chart-managed PersistentVolumeClaims.
+  # Set to "" to allow Helm to delete PVCs on uninstall.
+  resourcePolicy: keep
+
 system:
   grafana:
     # User-facing Grafana URL returned by the Neutree API. When Grafana is
