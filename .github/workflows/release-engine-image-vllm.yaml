@@ -34,11 +34,6 @@ on:
         required: false
         type: string
         default: ""
-      package_file_server_url:
-        description: "optional package upload URL override"
-        required: false
-        type: string
-        default: ""
 
 jobs:
   build-amd64-image:
@@ -126,5 +121,4 @@ jobs:
       base_image_tag_override: ${{ github.event.inputs.base_image_tag_override }}
       ray_short_version: ${{ github.event.inputs.ray_short_version }}
       engine_patch_suffix: ${{ github.event.inputs.engine_patch_suffix }}
-      package_file_server_url: ${{ github.event.inputs.package_file_server_url }}
     secrets: inherit
