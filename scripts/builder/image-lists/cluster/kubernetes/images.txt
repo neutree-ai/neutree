@@ -5,6 +5,7 @@ neutree/neutree-runtime:latest
 neutree/neutree-node-agent:v1.3.0-rc.1
 docker.io/projecthami/hami:v2.10.0
 docker.io/neutree/hami:v2.10.0-p1
+docker.io/projecthami/hami:v2.10.0
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/kube-scheduler:v1.26.15
 registry.k8s.io/kube-scheduler:v1.27.16

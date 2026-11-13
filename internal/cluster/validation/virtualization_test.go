@@ -134,7 +134,7 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			name: "allows supported config patch",
 			configPatch: map[string]interface{}{
 				"scheduler": map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
-				"global":    map[string]interface{}{"imageRegistry": "registry.example.com"},
+				"global":    map[string]interface{}{"legacySetting": "preserved"},
 			},
 		},
 		{
@@ -146,25 +146,31 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			},
 		},
 		{
-			name: "allows all supported image locations",
+			name: "allows independent extender and device plugin images",
 			configPatch: map[string]interface{}{
-				"global": map[string]interface{}{
-					"imageTag":         "v2.10.0-p1",
-					"imagePullSecrets": []interface{}{"hami-pull-secret"},
-				},
 				"scheduler": map[string]interface{}{
-					"extender":      map[string]interface{}{"image": map[string]interface{}{"tag": "scheduler"}},
-					"kubeScheduler": map[string]interface{}{"image": map[string]interface{}{"tag": "kube-scheduler"}},
-					"patch": map[string]interface{}{
-						"image":    map[string]interface{}{"tag": "certgen"},
-						"imageNew": map[string]interface{}{"tag": "certgen-new"},
-					},
+					"extender": map[string]interface{}{"image": map[string]interface{}{"repository": "neutree/hami", "tag": "v2.10.0-p1"}},
 				},
 				"devicePlugin": map[string]interface{}{
-					"image":   map[string]interface{}{"tag": "device-plugin"},
+					"image": map[string]interface{}{"repository": "projecthami/hami", "tag": "v2.10.0"},
+				},
+			},
+		},
+		{
+			name: "rejects global image override",
+			configPatch: map[string]interface{}{
+				"global": map[string]interface{}{"imageTag": "v2.10.0-p1"},
+			},
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
+		},
+		{
+			name: "rejects monitor image override",
+			configPatch: map[string]interface{}{
+				"devicePlugin": map[string]interface{}{
 					"monitor": map[string]interface{}{"image": map[string]interface{}{"tag": "monitor"}},
 				},
 			},
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 		{
 			name:        "rejects mock device plugin",

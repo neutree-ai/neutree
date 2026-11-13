@@ -84,24 +84,33 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 
 	imagePaths := [][]string{
 		{"scheduler", "extender", "image"},
-		{"scheduler", "kubeScheduler", "image"},
-		{"scheduler", "patch", "image"},
-		{"scheduler", "patch", "imageNew"},
 		{"devicePlugin", "image"},
-		{"devicePlugin", "monitor", "image"},
 	}
 	for _, path := range imagePaths {
 		if err := validateImageValues(configPatch, path...); err != nil {
 			return err
 		}
 	}
-	if err := validateImageValues(configPatch, "global"); err != nil {
-		return err
+	unsupportedImagePaths := [][]string{
+		{"global", "imageRegistry"},
+		{"global", "imageTag"},
+		{"global", "imagePullSecrets"},
+		{"scheduler", "kubeScheduler", "image"},
+		{"scheduler", "patch", "image"},
+		{"scheduler", "patch", "imageNew"},
+		{"devicePlugin", "monitor", "image"},
+	}
+	for _, path := range unsupportedImagePaths {
+		if _, found, err := unstructured.NestedFieldNoCopy(configPatch, path...); err != nil {
+			return unsupportedImageConfig(path, "is not a supported image configuration")
+		} else if found {
+			return unsupportedImageConfig(path, "is not a supported image configuration")
+		}
 	}
 
 	if patch, found, err := unstructured.NestedMap(configPatch, "devicePlugin"); err == nil && found {
 		for field := range patch {
-			if field != "image" && field != "monitor" {
+			if field != "image" {
 				return &AcceleratorVirtualizationError{
 					Reason:  AcceleratorVirtualizationUnsupportedConfigReason,
 					Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch.devicePlugin field %q", field),
@@ -110,17 +119,6 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 			}
 		}
 
-		if monitor, found, err := unstructured.NestedMap(patch, "monitor"); err == nil && found {
-			for field := range monitor {
-				if field != "image" {
-					return &AcceleratorVirtualizationError{
-						Reason:  AcceleratorVirtualizationUnsupportedConfigReason,
-						Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch.devicePlugin.monitor field %q", field),
-						Hint:    "Only image values can be overridden under devicePlugin.monitor",
-					}
-				}
-			}
-		}
 	}
 
 	if schedulerPatch, ok, err := unstructured.NestedBool(configPatch, "scheduler", "patch", "enabled"); err == nil && ok && schedulerPatch {
@@ -168,26 +166,6 @@ func validateImageValues(configPatch map[string]interface{}, path ...string) err
 		return nil
 	}
 
-	if len(path) == 1 && path[0] == "global" {
-		global, ok := value.(map[string]interface{})
-		if !ok {
-			return unsupportedImageConfig(path, "must be an object")
-		}
-		for field, fieldValue := range global {
-			switch field {
-			case "imageRegistry", "imageTag":
-				if _, ok := fieldValue.(string); !ok {
-					return unsupportedImageConfig(append(path, field), "must be a string")
-				}
-			case "imagePullSecrets":
-				if err := validatePullSecrets(fieldValue, append(path, field)...); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-
 	image, ok := value.(map[string]interface{})
 	if !ok {
 		return unsupportedImageConfig(path, "must be an object")
@@ -228,7 +206,7 @@ func unsupportedImageConfig(path []string, detail string) error {
 	return &AcceleratorVirtualizationError{
 		Reason:  AcceleratorVirtualizationUnsupportedConfigReason,
 		Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch.%s: %s", strings.Join(path, "."), detail),
-		Hint:    "Use chart image fields registry, repository, tag, pullPolicy, and pullSecrets",
+		Hint:    "Only scheduler.extender.image and devicePlugin.image may be overridden",
 	}
 }
 
