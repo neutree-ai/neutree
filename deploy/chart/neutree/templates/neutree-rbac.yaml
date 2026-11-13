@@ -22,7 +22,30 @@ rules:
     verbs: ["get","list","create","update","patch"]
   - apiGroups: [""]
     resources: ["services"]
-    verbs: ["get","list"]
+    verbs: ["get","list","patch"]
+  # The database migration Job freezes and then stops the PostgreSQL Deployment
+  # of earlier releases, and waits for the CloudNativePG Cluster.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get","list","watch","patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get","patch","update"]
+  # The migration Job creates the Cluster when helm cannot (see
+  # neutree.db.deferred), and sets its owner.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get","list","watch","create"]
+  # It also raises synchronous replication to required after a single instance
+  # has grown to HA, and replaces a Cluster kept by helm uninstall; the
+  # uninstall hook detaches and hibernates it.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: [{{ include "neutree.db.clusterName" . | quote }}]
+    verbs: ["patch","update"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get","create","update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

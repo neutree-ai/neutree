@@ -203,17 +203,23 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 		return errors.Wrap(err, "prepare neutree core launch config failed")
 	}
 
-	composeFilePath := filepath.Join(options.workDir, "neutree-core", "docker-compose.yml")
+	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
+	composeFilePath := filepath.Join(coreWorkDir, "docker-compose.yml")
+
+	err = migrateLegacyPostgres(exector, os.Stdout, composeFilePath, coreWorkDir, options.dbPassword)
+	if err != nil {
+		return err
+	}
 
 	output, err := exector.Execute(context.Background(), "docker", []string{
-		"compose", "-p", "neutree-core", "-f", composeFilePath,
+		"compose", "-p", neutreeCoreComposeProject, "-f", composeFilePath,
 		"up", "-d", "--timeout", controlPlaneComposeStopTimeoutSeconds,
 	})
 	if err != nil {
 		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
 	}
 
-	return nil
+	return removeRetiredCoreServices(exector, os.Stdout)
 }
 
 func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {

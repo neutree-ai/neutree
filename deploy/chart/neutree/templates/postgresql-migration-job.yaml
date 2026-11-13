@@ -1,0 +1,109 @@
+{{- $fullname := include "neutree.fullname" . -}}
+{{- $legacy := lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" $fullname) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-pg-migration
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+data:
+  {{- (.Files.Glob "db-migration/*").AsConfig | nindent 2 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "neutree.db.migrationJobName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: {{ .Values.db.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-pg-migration
+      annotations:
+        checksum/scripts: {{ (.Files.Glob "db-migration/*").AsConfig | sha256sum | quote }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.migration) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      serviceAccountName: {{ $fullname }}-sa
+      restartPolicy: Never
+      initContainers:
+        - name: copy-kubectl
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          command: ["cp", "/usr/local/bin/kubectl", "/tools/kubectl"]
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+      containers:
+        - name: migrate
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
+          imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+          command: ["bash", "/scripts/migrate-k8s.sh"]
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: CLUSTER
+              value: {{ include "neutree.db.clusterName" . }}
+            - name: RESOURCES_CONFIGMAP
+              value: {{ include "neutree.db.resourcesConfigMapName" . }}
+            - name: CREATE_RESOURCES
+              value: {{ include "neutree.db.deferred" . | quote }}
+            - name: TARGET_HOST
+              value: {{ include "neutree.db.host" . }}
+            - name: DB_NAME
+              value: {{ .Values.db.name | quote }}
+            - name: DATA_DURABILITY
+              value: {{ ternary "required" "" (gt (int (include "neutree.db.instances" .)) 1) | quote }}
+            {{- if .Values.grafanaDatabase.enabled }}
+            - name: TARGET_ONLY_ROLES
+              value: {{ .Values.grafanaDatabase.user | quote }}
+            - name: GRAFANA_DATABASE
+              value: {{ .Values.grafanaDatabase.name | quote }}
+            - name: GRAFANA_USER
+              value: {{ .Values.grafanaDatabase.user | quote }}
+            {{- end }}
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              value: {{ .Values.db.password | quote }}
+            - name: AUTH_ADMIN_PASSWORD
+              value: auth_admin_password
+            - name: KONG_ADMIN_PASSWORD
+              value: kong_admin_password
+            - name: LEGACY_DEPLOYMENT
+              value: {{ if $legacy }}{{ $fullname }}-postgresql{{ end }}
+            - name: LEGACY_SERVICE
+              value: {{ if $legacy }}{{ $fullname }}-postgresql-service{{ end }}
+          {{- with .Values.db.migration.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+            - name: scripts
+              mountPath: /scripts
+            - name: work
+              mountPath: /work
+            - name: resources
+              mountPath: /resources
+      volumes:
+        - name: tools
+          emptyDir: {}
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-pg-migration
+        - name: work
+          emptyDir: {}
+        - name: resources
+          configMap:
+            name: {{ include "neutree.db.resourcesConfigMapName" . }}

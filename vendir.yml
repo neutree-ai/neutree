@@ -39,3 +39,13 @@ directories:
   - path: .
     directory:
       path: db/init-scripts/
+- path: deploy/chart/neutree/db-migration/
+  contents:
+  - path: .
+    directory:
+      path: db/pg-migration/
+- path: deploy/docker/neutree-core/db-migration/
+  contents:
+  - path: .
+    directory:
+      path: db/pg-migration/

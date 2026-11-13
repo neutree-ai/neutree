@@ -157,7 +157,6 @@ func NewWorkspaceControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
 			Storage:           opts.config.Storage,
-			EngineRegistry:    opts.config.EngineRegistry,
 			BuiltinRegistries: builtinModelRegistryConfig(opts),
 		})
 		if err != nil {

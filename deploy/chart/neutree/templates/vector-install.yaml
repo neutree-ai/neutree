@@ -1,4 +1,6 @@
 {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . -}}
+{{- $ha := include "neutree.ha.enabled" . -}}
+{{- $persistentVolume := .Values.vector.persistence.enabled -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -21,6 +23,16 @@ data:
         encode: json
       vector_metrics:
         type: internal_metrics
+      # Vector's disk buffer sometimes misses the wakeup for a record and only
+      # reads it when the next one is written, so the last usage record or trace
+      # before an idle period could wait indefinitely. A periodic record through
+      # every disk-buffered sink bounds that delay.
+      buffer_heartbeat:
+        type: demo_logs
+        format: shuffle
+        lines:
+          - heartbeat
+        interval: 10
     transforms:
       parse_kong_logs:
         type: remap
@@ -97,6 +109,23 @@ data:
               "p_cost_usd": .extracted_data.cost_usd,
               "p_message_id": .extracted_data.message_id
           }
+      # record_api_usage answers an unknown key with 200 before writing
+      # anything, so the nil key passes the buffer without a row or a retry.
+      prepare_usage_heartbeat:
+        type: remap
+        inputs:
+          - buffer_heartbeat
+        source: |
+          . = {"p_api_key_id": "00000000-0000-0000-0000-000000000000", "p_request_id": "heartbeat", "p_usage_amount": 0}
+      {{- if $aiTraceStoreUrl }}
+      # record_type keeps it out of every trace query, like chunk records.
+      prepare_trace_heartbeat:
+        type: remap
+        inputs:
+          - buffer_heartbeat
+        source: |
+          . = {"_msg": "heartbeat", "record_type": "heartbeat", "timestamp": to_unix_timestamp(now(), unit: "milliseconds")}
+      {{- end }}
       {{- if $aiTraceStoreUrl }}
       filter_trace_logs:
         type: filter
@@ -236,6 +265,7 @@ data:
         type: http
         inputs:
           - prepare_postgrest_payload
+          - prepare_usage_heartbeat
         encoding:
           codec: json
         framing:
@@ -261,6 +291,7 @@ data:
         type: http
         inputs:
           - prepare_trace_payload
+          - prepare_trace_heartbeat
         uri: {{ $aiTraceStoreUrl }}/insert/jsonline?_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp
         method: post
         encoding:
@@ -302,17 +333,30 @@ spec:
   type: ClusterIP
 ---
 apiVersion: apps/v1
+{{- if $ha }}
+# Each replica locks its own disk buffers, so in HA mode every pod gets its
+# own volume from the volumeClaimTemplates below.
+kind: StatefulSet
+{{- else }}
 kind: Deployment
+{{- end }}
 metadata:
   name: {{ include "neutree.fullname" . }}-vector
   labels:
     {{ include "neutree.labels" . | nindent 4 }}
 spec:
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.vector) }}
+  {{- if $ha }}
+  serviceName: {{ include "neutree.fullname" . }}-vector
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  {{- else }}
   # The disk buffers are locked by one Vector process and the volume may be
   # ReadWriteOnce, so the old pod must stop before the new one starts.
   strategy:
     type: Recreate
-  replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-vector
@@ -325,6 +369,9 @@ spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.vector "component" "neutree-vector")) }}
+      {{- . | nindent 6 }}
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
@@ -362,6 +409,18 @@ spec:
             - name: metrics
               containerPort: 9598
               protocol: TCP
+          {{- with .Values.vector.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.vector.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.vector.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.vector.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -378,28 +437,17 @@ spec:
               mountPath: "/etc/vector/logsink-secrets/"
               readOnly: true
       terminationGracePeriodSeconds: 60
-      {{- with .Values.vector.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.vector.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.vector.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       volumes:
         - name: jwt-secret
           emptyDir: {}
+        {{- if not $persistentVolume }}
         - name: data
-          {{- if .Values.vector.persistence.enabled }}
+          emptyDir: {}
+        {{- else if not $ha }}
+        - name: data
           persistentVolumeClaim:
             claimName: {{ include "neutree.fullname" . }}-vector-pvc
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+        {{- end }}
         - name: logsink-secrets
           secret:
             secretName: {{ include "neutree.fullname" . }}-vector-logsink-secrets
@@ -415,7 +463,18 @@ spec:
                   items:
                     - key: logsinks.yaml
                       path: logsinks.yaml
-{{- if .Values.vector.persistence.enabled }}
+  {{- if and $ha $persistentVolume }}
+  volumeClaimTemplates:
+    # Claim templates cannot change after creation, so they carry no
+    # version labels.
+    - metadata:
+        name: data
+        labels:
+          {{- include "neutree.selectorLabels" . | nindent 10 }}
+      spec:
+        {{- include "neutree.vector.pvcSpec" . | nindent 8 }}
+  {{- end }}
+{{- if and $persistentVolume (not $ha) }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -426,14 +485,5 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  {{- if .Values.vector.persistence.storageClassName }}
-  storageClassName: {{ .Values.vector.persistence.storageClassName }}
-  {{- end }}
-  accessModes:
-  {{- range .Values.vector.persistence.accessModes }}
-    - {{ . | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.vector.persistence.size | quote }}
+  {{- include "neutree.vector.pvcSpec" . | nindent 2 }}
 {{- end }}

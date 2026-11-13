@@ -1,0 +1,145 @@
+# High availability. Install or upgrade with this file instead of setting
+# ha.enabled yourself:
+#   helm upgrade --install <release> . -f values-ha.yaml [-f your-values.yaml]
+# ha.enabled covers the components this chart renders itself; the settings
+# below cover the VictoriaMetrics and Grafana subcharts, whose values cannot
+# follow ha.enabled. Rendering fails when one is used without the other.
+# Needs three schedulable nodes. Put your own values after this file to
+# override any of them.
+ha:
+  enabled: true
+  # Marks this overlay; rendering fails if it is used with ha.enabled=false.
+  overlay: true
+
+grafanaDatabase:
+  enabled: true
+
+# A standby operator (the chart always runs it with --leader-elect) takes over
+# within seconds when the node of the active one fails; otherwise failover of
+# the PostgreSQL primary waits until the operator pod is rescheduled.
+cnpg:
+  replicaCount: 2
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+
+victoria-metrics-cluster:
+  vminsert:
+    replicaCount: 3
+    # Same as vmselect: vmagent retries, but no write should hit a closed port.
+    lifecycle:
+      preStop:
+        sleep:
+          seconds: 5
+    extraArgs:
+      # Every sample is stored on two vmstorage nodes, so one node can be
+      # lost without losing data or query completeness.
+      replicationFactor: 2
+    # The required anti-affinity leaves no node for a surge pod.
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vminsert
+                app.kubernetes.io/name: victoria-metrics-cluster
+  vmselect:
+    replicaCount: 3
+    # vmselect closes its port on SIGTERM; keep serving while the endpoints
+    # of a terminating pod are withdrawn so a rollout fails no query.
+    lifecycle:
+      preStop:
+        sleep:
+          seconds: 5
+    extraArgs:
+      # A response missing one vmstorage node is still complete (not partial).
+      replicationFactor: 2
+      # Collapses the copies made by replication and by the vmagent replicas,
+      # which scrape the same targets; must equal the shortest scrape
+      # interval (the 5s Kong job) and match vmstorage.
+      dedup.minScrapeInterval: 5s
+    deployment:
+      spec:
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 0
+            maxUnavailable: 1
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vmselect
+                app.kubernetes.io/name: victoria-metrics-cluster
+  vmstorage:
+    replicaCount: 3
+    extraArgs:
+      dedup.minScrapeInterval: 5s
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vmstorage
+                app.kubernetes.io/name: victoria-metrics-cluster
+
+grafana:
+  replicas: 2
+  # State lives in PostgreSQL (grafanaDatabase), not on a volume.
+  persistence:
+    enabled: false
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  podDisruptionBudget:
+    # The subchart falls back to policy/v1beta1 when rendering offline.
+    apiVersion: policy/v1
+    maxUnavailable: 1
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+  env:
+    GF_DATABASE_TYPE: postgres
+    GF_DATABASE_NAME: grafana
+    GF_DATABASE_SSL_MODE: require
+  envValueFrom:
+    GF_DATABASE_HOST:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: host
+    GF_DATABASE_USER:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: username
+    GF_DATABASE_PASSWORD:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: password

@@ -67,6 +67,9 @@ _G.kong = {
 -- name, so the tests do not depend on the kong.plugins.* directory nesting being
 -- present -- the plugin dir is often bind-mounted on its own.
 local spec_dir = (debug.getinfo(1, "S").source:sub(2)):match("(.*/)") or "./"
+package.preload["kong.plugins.neutree-ai-access.global_counter"] = function()
+    return assert(loadfile(spec_dir .. "../global_counter.lua"))()
+end
 local handler = assert(loadfile(spec_dir .. "../handler.lua"))()
 
 local WORKSPACE_PREFIX = "/workspace/ws/endpoint/ep-a"

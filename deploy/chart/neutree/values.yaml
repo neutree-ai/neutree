@@ -23,6 +23,18 @@ jwtSecret: ""
 # It is recommended to change it quickly after installation.
 adminPassword: ""
 
+# High availability for the stateless components (api, auth, postgrest, kong,
+# vector, core). When enabled, each of them defaults to 3 replicas, spreads one
+# pod per node through a required pod anti-affinity (used only when the
+# component's own affinity is empty), rolls with maxSurge 0 / maxUnavailable 1,
+# and gets a PodDisruptionBudget with maxUnavailable 1. Needs at least as many
+# schedulable nodes as replicas. A component's explicit replicaCount always wins.
+# Turn it on by passing values-ha.yaml, which also carries the settings of the
+# VictoriaMetrics and Grafana subcharts; ha.enabled=true without them fails
+# to render.
+ha:
+  enabled: false
+
 system:
   grafana:
     # User-facing Grafana URL returned by the Neutree API. When Grafana is
@@ -83,15 +95,53 @@ dbScripts:
     tag: ""
     pullPolicy: IfNotPresent
 
-db:
+# CloudNativePG operator (the cloudnative-pg chart, operator 1.30.1), installed
+# with this release into the release namespace and watching only that
+# namespace. It also creates cluster-wide objects with fixed names (CRDs,
+# admission webhooks), so a Kubernetes cluster can hold only one Neutree
+# release and no other CloudNativePG installation. Every key below is passed to
+# the subchart.
+cnpg:
+  # Always true: Neutree does not support an operator installed separately.
+  enabled: true
+  # The operator finds its own Deployment by app.kubernetes.io/name=cloudnative-pg;
+  # without this the alias would make that label "cnpg".
+  nameOverride: cloudnative-pg
+  # Offline installs: the chart's global.image.registry does not apply here.
+  # Point this at the mirrored operator image, e.g.
+  # <registry>/cloudnative-pg/cloudnative-pg (tag 1.30.1). Rendering fails
+  # when global.image.registry is set and this is left at its default.
   image:
-    registry: ""
-    repository: library/postgres
-    tag: "13"
+    repository: ghcr.io/cloudnative-pg/cloudnative-pg
+  # imagePullSecrets: []
+  config:
+    clusterWide: false
+    data:
+      # Upgrading the operator replaces the instance manager inside the running
+      # PostgreSQL pods instead of restarting them (and switching over).
+      ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES: "true"
+
+# PostgreSQL runs as a CloudNativePG Cluster (<fullname>-pg), managed by the
+# operator above. One instance by default; with ha.enabled, three instances on
+# separate nodes with synchronous replication (a commit waits for one standby;
+# writes block while no standby is available).
+db:
+  # instances: unset means 1, or 3 when ha.enabled.
+  # CloudNativePG operand image (PostgreSQL 17). Also runs the migration Job.
+  image:
+    registry: ghcr.io
+    repository: cloudnative-pg/postgresql
+    tag: "17.6"
     pullPolicy: IfNotPresent
   user: postgres
   password: pgpassword
   name: neutree
+  # libpq parameters appended to the connection URL of the clients that accept
+  # them. When the database node vanishes without closing its sockets, pooled
+  # and LISTEN connections would otherwise hang until the kernel gives up
+  # retransmitting (15+ minutes); these make them fail within seconds so the
+  # client reconnects to the new primary.
+  connectionParams: "keepalives=1&keepalives_idle=10&keepalives_interval=5&keepalives_count=3&tcp_user_timeout=10000"
   resources:
     requests:
       cpu: 100m
@@ -100,17 +150,41 @@ db:
       cpu: 2
       memory: 2Gi
   persistence:
-    enabled: true
     size: 40Gi
-    accessModes:
-      - ReadWriteOnce
-  service:
-    type: ClusterIP
+    # storageClassName: ""
+  # Seconds a stopping instance waits for clients to disconnect before it
+  # closes their connections (CloudNativePG smartShutdownTimeout).
+  smartShutdownTimeoutSeconds: 10
+  # Extra PostgreSQL parameters for the Cluster (postgresql.parameters).
+  parameters: {}
+  # nodeSelector / tolerations / affinity.nodeAffinity are passed to the
+  # Cluster's affinity block. Instances always repel each other per node in HA
+  # mode.
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Moving from the PostgreSQL Deployment of earlier releases: the migration
+  # Job copies the old database into the Cluster during helm upgrade. See
+  # README.md for the rollback and cleanup steps.
+  migration:
+    backoffLimit: 3
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
 
 auth:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
+  db:
+    # A connection attempt that hangs fails after this many seconds instead
+    # of holding the request until the client gives up.
+    connectTimeoutSeconds: 3
+    # GoTrue keeps no idle connections by default and dials one per request;
+    # keeping a few open takes the dial off the request path. Idle ones are
+    # recycled so a connection to a vanished primary does not linger.
+    maxPoolSize: 10
+    maxIdlePoolSize: 5
+    connMaxIdleTime: 60s
   image:
     registry: ""
     repository: supabase/gotrue
@@ -120,6 +194,12 @@ auth:
     requests:
       cpu: 100m
       memory: 128Mi
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -141,6 +221,7 @@ migration:
   affinity: {}
 
 postgrest:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: postgrest/postgrest
@@ -150,22 +231,33 @@ postgrest:
     requests:
       cpu: 100m
       memory: 128Mi
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  service:
-    type: ClusterIP
-
-postgresmeta:
-  image:
-    registry: ""
-    repository: supabase/postgres-meta
-    tag: "v0.86.0"
-    pullPolicy: IfNotPresent
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
+  # /ready fails while PostgREST has no usable database connection or schema
+  # cache, taking the replica out of the Service. /live only reports that the
+  # process is serving; set either to null to drop the probe.
+  # failureThreshold outlasts a planned primary switchover (up to ~15s): every
+  # replica loses the database then, and dropping them all from the Service
+  # only adds a probe period to the outage once the new primary is up.
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: admin
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 4
+  livenessProbe:
+    httpGet:
+      path: /live
+      port: admin
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn. The image has no shell, so this uses the built-in sleep action
+  # (Kubernetes 1.30+; dropped by older API servers). Set to null to drop.
+  lifecycle:
+    preStop:
+      sleep:
+        seconds: 5
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -173,6 +265,8 @@ postgresmeta:
     type: ClusterIP
 
 core:
+  # Replicas elect a leader through a Lease; only the leader runs controllers and crons.
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: neutree/neutree-core
@@ -182,6 +276,14 @@ core:
     requests:
       cpu: 100m
       memory: 128Mi
+  # /healthz answers on every replica, leader or standby; set to null to drop it.
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: server
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -199,7 +301,21 @@ api:
     requests:
       cpu: 100m
       memory: 128Mi
-  replicaCount: 1
+  # replicaCount: unset means 1, or 3 when ha.enabled.
+  # /health does not touch any dependency; set to null to drop the probe.
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -222,6 +338,10 @@ api:
                          #     secretName: neutree-api-tls
 
 vmagent:
+  # replicaCount: unset means 1, or 2 when ha.enabled. In HA mode every
+  # replica scrapes every target and VictoriaMetrics deduplicates the samples
+  # (see values-ha.yaml), and the persistence block below is not used.
+  # readinessProbe: unset means none in single mode and GET /health in HA mode.
   image:
     registry: ""
     repository: victoriametrics/vmagent
@@ -241,6 +361,7 @@ vmagent:
       - ReadWriteOnce
 
 kong:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   # One counter per (EE path, virtual model, upstream name, upstream model);
   # the numeric value is the current inflight request count, not request data.
   # Kong 3.9 measurements: 78-128-byte keys use ~256 B/entry (~40k in 10 MiB);
@@ -266,8 +387,22 @@ kong:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # A terminating Kong keeps accepting requests for waitSeconds while its
+  # endpoints are withdrawn, then stops accepting and lets in-flight requests,
+  # including long streaming responses, finish for up to drainTimeoutSeconds.
+  shutdown:
+    waitSeconds: 15
+    drainTimeoutSeconds: 120
   proxyService:
     type: LoadBalancer
+  # Count API key rps/rpm limits in PostgreSQL so all Kong replicas share one
+  # counter; off, each replica counts on its own. A database error or a query
+  # slower than timeoutMs falls back to per-replica counting for
+  # cooldownSeconds.
+  globalRateLimit:
+    # enabled: unset means off, or on when ha.enabled.
+    timeoutMs: 150
+    cooldownSeconds: 10
   # Optional Ingress for the inference gateway (Kong proxy at
   # `<fullname>-kong-proxy:80`). When enabled, neutree-core uses this public
   # URL as --gateway-proxy-url; tls: [] -> http://host, tls configured ->
@@ -284,6 +419,7 @@ kong:
     tls: []
 
 vector:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: timberio/vector
@@ -292,6 +428,19 @@ vector:
     requests:
       cpu: 100m
       memory: 128Mi
+  # Ready once the Kong log intake port accepts connections; set to null to drop it.
+  readinessProbe:
+    tcpSocket:
+      port: aggregator-log
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -388,6 +537,18 @@ victoria-metrics-cluster:
     replicaCount: 1
     persistentVolume:
       size: 40Gi
+
+# Keep Grafana's own state (users, sessions, dashboards saved in its UI) in a
+# database of the PostgreSQL Cluster instead of SQLite on a volume, so Grafana
+# can run several replicas. values-ha.yaml turns this on together with the
+# Grafana settings that read the login from the Secret
+# "<release>-grafana-db" (keys username, password, host).
+grafanaDatabase:
+  enabled: false
+  name: grafana
+  user: grafana
+  # Empty: generated on install and kept across upgrades.
+  password: ""
 
 grafana:
   enabled: true

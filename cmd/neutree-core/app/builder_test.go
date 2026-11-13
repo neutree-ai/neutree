@@ -87,6 +87,23 @@ func TestBuilderBuildDoesNotRegisterExternalPluginEndpoint(t *testing.T) {
 	}
 }
 
+func TestBuilderBuildServesHealthz(t *testing.T) {
+	engine := gin.New()
+	builder := NewBuilder().WithConfig(&config.CoreConfig{GinEngine: engine})
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, config.HealthzPath, nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200", config.HealthzPath, recorder.Code)
+	}
+}
+
 func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
 	existingManager := accelerator.NewManager()
 	config := &config.CoreConfig{GinEngine: gin.New(), AcceleratorManager: existingManager}

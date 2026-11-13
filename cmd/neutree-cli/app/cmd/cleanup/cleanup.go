@@ -101,6 +101,15 @@ func runCleanup(executor command.Executor, opts *cleanupOptions, component strin
 		return errors.Wrapf(err, "failed to run docker compose down for %s, output: %s", component, string(output))
 	}
 
+	// The PostgreSQL 13 volume of an earlier release is kept after an upgrade
+	// for a rollback and is no longer in the compose file.
+	if opts.removeData && component == "neutree-core" {
+		output, err := executor.Execute(context.Background(), "docker", []string{"volume", "rm", launch.LegacyPostgresVolume})
+		if err != nil && !strings.Contains(err.Error()+string(output), "no such volume") {
+			return errors.Wrapf(err, "failed to remove volume %s, output: %s", launch.LegacyPostgresVolume, string(output))
+		}
+	}
+
 	fmt.Printf("%s has been cleaned up successfully.\n", component)
 
 	return nil

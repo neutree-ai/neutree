@@ -2,6 +2,9 @@ package app
 
 import (
 	"fmt"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 
 	"k8s.io/klog"
 
@@ -159,6 +162,12 @@ func (b *Builder) Build() (*App, error) {
 
 		registerControllers[name] = ctrl
 	}
+
+	// Liveness only: every replica, leader or standby, must report ready so
+	// rolling updates are not blocked waiting on the single leader.
+	b.config.GinEngine.GET(config.HealthzPath, func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
 
 	return NewApp(b.config, registerControllers), nil
 }

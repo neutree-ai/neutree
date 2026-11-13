@@ -5,7 +5,17 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.core) }}
+  {{- if include "neutree.ha.enabled" . }}
+  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- else }}
+  # Surge before terminating so the old leader releases its Lease to a running standby.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-core
@@ -26,6 +36,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             {{- if .Values.nodePort.externalHost }}
             - name: NODEPORT_EXTERNAL_HOST
               value: {{ .Values.nodePort.externalHost | quote }}
@@ -33,7 +51,8 @@ spec:
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
-            - --controller-workers=5
+            - --controller-workers=10
+            - --leader-elect-lease-name={{ include "neutree.fullname" . }}-core-leader
             - --default-cluster-version=v1.0.0
             {{- $metricsRemoteWriteUrl := include "neutree.metricsRemoteWriteUrl" . }}
             {{- if $metricsRemoteWriteUrl }}
@@ -72,15 +91,14 @@ spec:
             - containerPort: 3001
               name: server
               protocol: TCP
-      {{- with .Values.core.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.core.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.core.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+          {{- with .Values.core.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.core.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.core "component" "neutree-core")) }}
+      {{- . | trim | nindent 6 }}
       {{- end }}

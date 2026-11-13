@@ -59,3 +59,31 @@ func TestCleanupAggregatedRecordsStopsOnError(t *testing.T) {
 	assert.Equal(t, cleanupBatchSize, deleted)
 	s.AssertNumberOfCalls(t, "CallDatabaseFunction", 2)
 }
+
+func TestCleanupRateLimitCountersDrainsUntilShortBatch(t *testing.T) {
+	s := &storagemocks.MockStorage{}
+	for _, n := range []int{rateLimitCleanupBatchSize, 3} {
+		s.On("CallDatabaseFunction", "cleanup_gateway_rate_limit_counters", mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				*args.Get(2).(*int) = n
+			}).
+			Return(nil).Once()
+	}
+
+	deleted, err := cleanupRateLimitCounters(s)
+
+	require.NoError(t, err)
+	assert.Equal(t, rateLimitCleanupBatchSize+3, deleted)
+	s.AssertNumberOfCalls(t, "CallDatabaseFunction", 2)
+}
+
+func TestCleanupRateLimitCountersStopsOnError(t *testing.T) {
+	s := &storagemocks.MockStorage{}
+	s.On("CallDatabaseFunction", "cleanup_gateway_rate_limit_counters", mock.Anything, mock.Anything).
+		Return(errors.New("rpc failed")).Once()
+
+	deleted, err := cleanupRateLimitCounters(s)
+
+	require.Error(t, err)
+	assert.Equal(t, 0, deleted)
+}
