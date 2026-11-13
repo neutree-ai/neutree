@@ -3,6 +3,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "neutree.fullname" . }}-victorialogs-pvc
+  annotations:
+    "helm.sh/resource-policy": keep
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
