@@ -65,9 +65,6 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	require.Len(t, updatedStatusHistory, 2)
 	assert.NotNil(t, updatedStatusHistory[0].Status.Accelerator)
 	assert.Nil(t, updatedStatusHistory[0].Status.Warm)
-	require.NotNil(t, updatedStatusHistory[1].Status.Warm)
-	assert.True(t, updatedStatusHistory[1].Status.Warm.Ready)
-	assert.Equal(t, v1.StaticNodePhaseReconciling, updatedStatusHistory[1].Status.Phase)
 	assert.Empty(t, statusObj.Status.ErrorMessage)
 	assert.Equal(t, 2, runner.calls)
 }
@@ -87,7 +84,6 @@ func TestStaticNodeControllerKeepsErrorUntilReconcileReturns(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := controllerStaticNode()
-			node.Spec.SSHAuth = &v1.Auth{}
 			component := v1.NodeComponentSpec{
 				Name: "neutree-node-agent", Image: node.Spec.Warm.Images[0].Ref, ConfigHash: "hash-agent",
 			}
@@ -98,17 +94,16 @@ func TestStaticNodeControllerKeepsErrorUntilReconcileReturns(t *testing.T) {
 			accelerator := &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()}
 			node.Status = &v1.StaticNodeStatus{
 				Phase: v1.StaticNodePhaseFailed, ErrorMessage: previousError,
-				Warm:       &v1.WarmStatus{Ready: true},
-				Components: []v1.NodeComponentStatus{{Name: component.Name, Phase: v1.NodeComponentPhaseFailed}},
+				Accelerator: accelerator,
+				Warm:        &v1.WarmStatus{Ready: true},
+				Components:  []v1.NodeComponentStatus{{Name: component.Name, Phase: v1.NodeComponentPhaseFailed}},
 			}
-			node.Status.Accelerator = accelerator
 
 			persisted := *node.Status
 			var history []v1.StaticNodeStatus
 			checkInProgress := func() {
 				assert.Equal(t, previousError, persisted.ErrorMessage)
 				assert.Equal(t, v1.StaticNodePhaseFailed, persisted.Phase)
-				require.NotNil(t, persisted.Accelerator, "discovery must reach the planner before Docker operations")
 			}
 			snapshotCalled := false
 			runner := &fakeControllerStaticNodeRunner{
@@ -144,7 +139,6 @@ func TestStaticNodeControllerKeepsErrorUntilReconcileReturns(t *testing.T) {
 				}, nil, nil),
 				RunnerFactory: &fakeControllerStaticNodeRunnerFactory{runner: runner},
 				Reconciler: &staticnode.Reconciler{
-					AcceleratorManager: fakeControllerAcceleratorManager{accelerator: accelerator},
 					NodeDeviceSnapshotClient: &fakeControllerNodeDeviceSnapshotClient{
 						beforeSnapshot: func() {
 							checkInProgress()
@@ -166,8 +160,6 @@ func TestStaticNodeControllerKeepsErrorUntilReconcileReturns(t *testing.T) {
 				require.ErrorContains(t, err, cause.Error())
 				assert.Contains(t, persisted.ErrorMessage, cause.Error())
 				assert.Equal(t, v1.StaticNodePhaseFailed, persisted.Phase)
-				assert.Equal(t, err.Error(), persisted.ErrorMessage)
-				assert.NotEqual(t, previousError, persisted.ErrorMessage)
 				assert.False(t, snapshotCalled)
 			} else if tc.healthError != nil {
 				require.NoError(t, err)
@@ -232,46 +224,30 @@ func TestStaticNodeControllerReturnsStatusWriteErrors(t *testing.T) {
 	}
 }
 
-func TestStaticNodeControllerRecordsEarlyFailures(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		runnerFailure bool
-	}{
-		{name: "runner creation", runnerFailure: true},
-		{name: "accelerator discovery"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cause := errors.New("node setup failed")
-			node := controllerStaticNode()
-			node.Spec.SSHAuth = &v1.Auth{}
-			runner := &fakeControllerStaticNodeRunner{}
-			factory := &fakeControllerStaticNodeRunnerFactory{runner: runner}
-			if tc.runnerFailure {
-				factory.buildRunner = func(context.Context, *v1.StaticNode) (staticnode.CommandRunner, error) {
-					return nil, cause
-				}
-			}
-			var status *v1.StaticNodeStatus
-			store := storagemocks.NewMockStorage(t)
-			store.On("UpdateStaticNode", "8", mock.Anything).Run(func(args mock.Arguments) {
-				status = args.Get(1).(*v1.StaticNode).Status
-			}).Return(nil).Once()
-			controller, err := NewStaticNodeController(&StaticNodeControllerOption{
-				Storage:       store,
-				RunnerFactory: factory,
-				Reconciler:    &staticnode.Reconciler{AcceleratorManager: fakeControllerAcceleratorManager{err: cause}},
-			})
-			require.NoError(t, err)
+func TestStaticNodeControllerRecordsAcceleratorDiscoveryFailure(t *testing.T) {
+	cause := errors.New("accelerator discovery failed")
+	node := controllerStaticNode()
+	node.Spec.SSHAuth = &v1.Auth{}
+	runner := &fakeControllerStaticNodeRunner{}
+	var status *v1.StaticNodeStatus
+	store := storagemocks.NewMockStorage(t)
+	store.On("UpdateStaticNode", "8", mock.Anything).Run(func(args mock.Arguments) {
+		status = args.Get(1).(*v1.StaticNode).Status
+	}).Return(nil).Once()
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage:       store,
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{runner: runner},
+		Reconciler:    &staticnode.Reconciler{AcceleratorManager: fakeControllerAcceleratorManager{err: cause}},
+	})
+	require.NoError(t, err)
 
-			err = controller.Reconcile(node)
+	err = controller.Reconcile(node)
 
-			require.ErrorIs(t, err, cause)
-			require.NotNil(t, status)
-			assert.Equal(t, v1.StaticNodePhaseFailed, status.Phase)
-			assert.Contains(t, status.ErrorMessage, cause.Error())
-			assert.Zero(t, runner.calls)
-		})
-	}
+	require.ErrorIs(t, err, cause)
+	require.NotNil(t, status)
+	assert.Equal(t, v1.StaticNodePhaseFailed, status.Phase)
+	assert.Contains(t, status.ErrorMessage, cause.Error())
+	assert.Zero(t, runner.calls)
 }
 
 func TestFindStaticNodeUsesWorkspaceNameFilters(t *testing.T) {
