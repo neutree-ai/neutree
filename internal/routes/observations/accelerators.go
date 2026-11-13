@@ -75,8 +75,6 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 
 			route.GET("/performance-trends", middleware.RequireWorkspacePermission(permission,
 				middleware.PermissionDependencies{Storage: deps.Storage}), performanceTrendsHandler(deps))
-			route.GET("/performance-observations", middleware.RequireWorkspacePermission(permission,
-				middleware.PermissionDependencies{Storage: deps.Storage}), performanceHandler(deps))
 		}
 
 		if resource == "clusters" {

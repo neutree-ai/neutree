@@ -11,6 +11,8 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/cacheobservations"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +46,7 @@ func TestPerformanceRange(t *testing.T) {
 func TestPerformanceTrendsRoute(t *testing.T) {
 	s := mocks.NewMockStorage(t)
 	permission(t, s, true)
-	s.On("ListEndpoint", resourceFilter("tenant", "chat")).Return([]v1.Endpoint{{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}}}, nil)
+	s.On("ListEndpoint", resourceFilter("tenant", "chat")).Return([]v1.Endpoint{{Spec: &v1.EndpointSpec{Cluster: "cluster-a", KVCache: &v1.EndpointKVCacheSpec{Provider: "example"}}, Status: &v1.EndpointStatus{Resources: &v1.EndpointResourceStatus{Replicas: []v1.ReplicaDeviceAllocation{{NodeID: "worker.1"}}}}}}, nil)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "/api/v1/query_range", r.URL.Path)
 		q := r.URL.Query()
@@ -53,6 +55,8 @@ func TestPerformanceTrendsRoute(t *testing.T) {
 		require.Equal(t, "15", q.Get("step"))
 		require.Contains(t, q.Get("query"), `workspace="tenant",neutree_cluster="cluster-a",application="chat"`)
 		require.Contains(t, q.Get("query"), "[60s]")
+		require.Contains(t, q.Get("query"), "example_cache_performance")
+		require.NotContains(t, q.Get("query"), "cum_")
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":"success","data":{"resultType":"matrix","result":[
    {"metric":{"metric":"prompt_tokens_per_second"},"values":[[100,"10"],[115,"0"]]},
    {"metric":{"metric":"generation_tokens_per_second"},"values":[[100,"2"],[115,"0"]]},
@@ -62,7 +66,7 @@ func TestPerformanceTrendsRoute(t *testing.T) {
   ]}}`))}, nil
 	})}
 	w := httptest.NewRecorder()
-	router(&Dependencies{Storage: s, MetricsURL: "http://metrics", Client: client}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/chat/performance-trends?start=100&end=400", nil))
+	router(&Dependencies{Storage: s, MetricsURL: "http://metrics", Client: client, KVCacheProviders: kvcache.Providers{"example": performanceObserver{t: t}}}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/chat/performance-trends?start=100&end=400", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var got performanceTrends
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
@@ -99,4 +103,28 @@ func TestPerformanceTrendsMonitoringStates(t *testing.T) {
 			require.Empty(t, series)
 		})
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type performanceObserver struct {
+	kvcache.VLLMNative
+	t *testing.T
+}
+
+func (p performanceObserver) PerformanceQueries(scope cacheobservations.Scope) []string {
+	require.Equal(p.t, cacheobservations.Scope{Workspace: "tenant", Cluster: "cluster-a", Endpoint: "chat", Window: "60s", Nodes: []string{"worker.1"}}, scope)
+	return []string{"example_cache_performance"}
+}
+
+func TestPerformanceTrendsRequiresEndpointRead(t *testing.T) {
+	s := mocks.NewMockStorage(t)
+	permission(t, s, false)
+	w := httptest.NewRecorder()
+	router(&Dependencies{Storage: s, MetricsURL: "http://must-not-call.invalid"}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/chat/performance-trends", nil))
+	require.Equal(t, http.StatusForbidden, w.Code)
 }
