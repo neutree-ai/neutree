@@ -1751,6 +1751,48 @@ func TestStatusAggregatorRecordsObservedVersionWhenReady(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
+func TestStatusAggregatorUsesWarmErrorWhenNodeErrorIsEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		warm  v1.WarmStatus
+		phase v1.StaticNodePhase
+		want  string
+	}{
+		{
+			name:  "warming reports pull error",
+			warm:  v1.WarmStatus{Reason: "ImagePullFailed", Message: "failed to pull image: x509: certificate signed by unknown authority"},
+			phase: v1.StaticNodePhaseWarming,
+			want:  "static node head-0 warm not ready: failed to pull image: x509: certificate signed by unknown authority",
+		},
+		{
+			name:  "warming falls back to reason",
+			warm:  v1.WarmStatus{Reason: "ImagePullFailed"},
+			phase: v1.StaticNodePhaseWarming,
+			want:  "static node head-0 warm not ready: ImagePullFailed",
+		},
+		{
+			name:  "optional image failure does not block readiness",
+			warm:  v1.WarmStatus{Ready: true, Images: []v1.WarmImageStatus{{Phase: v1.WarmPhaseFailed, Message: "optional image pull failed"}}},
+			phase: v1.StaticNodePhaseReady,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			head := staticNodeStatus("head-0", v1.StaticNodeRoleHead, tc.phase, tc.warm.Ready, nil)
+			head.Status.Warm = &tc.warm
+			worker := staticNodeStatus("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, nil)
+
+			status := (StatusAggregator{}).Aggregate(testStaticNodeCluster(), []*v1.StaticNode{head, worker}, nil)
+
+			if tc.warm.Ready {
+				assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Phase)
+			} else {
+				assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Phase)
+			}
+			assert.Equal(t, tc.want, status.ErrorMessage)
+		})
+	}
+}
+
 func testStaticNodeCluster() *v1.StaticNodeCluster {
 	return &v1.StaticNodeCluster{
 		Metadata: &v1.Metadata{
