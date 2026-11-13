@@ -86,23 +86,20 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion string) map[string]interface{} {
 	values := defaultChartValues(h.normalizedImagePrefix(), hamiVersion)
 	// Merge order is intentional: chart defaults < plugin discovery patch <
-	// supported user config_patch < Neutree protected values. Protected values
-	// keep shared lifecycle, TLS, service, and image settings under Neutree control.
+	// Neutree protected values < supported user config_patch. The user patch is
+	// sanitized below so lifecycle values remain protected while image values
+	// can be changed for controlled hot fixes.
 	values = mergeChartValues(values, scopePlan.ConfigPatch)
+	values = mergeChartValues(values, h.protectedChartValues(hamiVersion))
 
 	if h.cluster.Spec != nil &&
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
 		configPatch := h.cluster.Spec.AcceleratorVirtualization.ConfigPatch
-		if _, found := configPatch["devicePlugin"]; found {
-			klog.Warningf("Ignoring legacy accelerator_virtualization.config_patch.devicePlugin for cluster %s",
-				h.cluster.Metadata.WorkspaceName())
-		}
-
 		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
 	}
 
-	return mergeChartValues(values, h.protectedChartValues(hamiVersion))
+	return mergeChartValues(values, h.protectedImagePullSecretValues(values))
 }
 
 func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
@@ -111,8 +108,13 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 	}
 
 	sanitized := deepCopyChartValues(configPatch)
-	delete(sanitized, "devicePlugin")
 	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "enabled")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "manageNamespaceSelector")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "certManager", "enabled")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "patch", "enabled")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "service", "type")
+	unstructured.RemoveNestedField(sanitized, "devicePlugin", "service", "type")
 
 	return sanitized
 }
@@ -161,19 +163,23 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 }
 
 func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]interface{} {
+	imageRegistry, imageRepository, imageTag := h.hamiImageDefaults(hamiVersion)
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
+		"global": map[string]interface{}{
+			"imageTag": imageTag,
+		},
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+				"image": chartImageValues(imageRegistry, imageRepository, ""),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+			"image": chartImageValues(imageRegistry, imageRepository, ""),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+				"image": chartImageValues(imageRegistry, imageRepository, ""),
 			},
 		},
 	})
@@ -184,15 +190,38 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 		})
 	}
 
-	if h.imagePullSecret != "" {
-		values = mergeChartValues(values, map[string]interface{}{
-			"global": map[string]interface{}{
-				"imagePullSecrets": []string{h.imagePullSecret},
-			},
-		})
+	return values
+}
+
+func (h *HAMiComponent) hamiImageDefaults(hamiVersion string) (string, string, string) {
+	if hamiVersion == componentversion.V130HAMI {
+		if h.normalizedImagePrefix() != "" {
+			return HAMiImageRegistry, "hami", HAMiP1ImageTag
+		}
+
+		return HAMiImageRegistry, HAMiP1ImageRepository, HAMiP1ImageTag
 	}
 
-	return values
+	return HAMiImageRegistry, HAMiImageRepository, hamiVersion
+}
+
+func (h *HAMiComponent) protectedImagePullSecretValues(values map[string]interface{}) map[string]interface{} {
+	if h.imagePullSecret == "" {
+		return nil
+	}
+
+	secrets := []interface{}{h.imagePullSecret}
+	if global, ok := values["global"].(map[string]interface{}); ok {
+		if configured, ok := global["imagePullSecrets"].([]interface{}); ok {
+			secrets = append(configured, secrets...)
+		}
+	}
+
+	return map[string]interface{}{
+		"global": map[string]interface{}{
+			"imagePullSecrets": secrets,
+		},
+	}
 }
 
 func chartImageValues(registry, repository, tag string) map[string]interface{} {

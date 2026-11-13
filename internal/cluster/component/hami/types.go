@@ -23,6 +23,8 @@ const (
 	ServingCertificateRenewDays  = 30
 	HAMiImageRegistry            = "docker.io"
 	HAMiImageRepository          = "projecthami/hami"
+	HAMiP1ImageRepository        = "neutree/hami"
+	HAMiP1ImageTag               = "v2.10.0-p1"
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
 )

@@ -138,11 +138,38 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			},
 		},
 		{
-			name: "rejects device plugin config patch",
+			name: "allows device plugin image config patch",
 			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{"nvidiaDriverRoot": "/run/nvidia/driver"},
+				"devicePlugin": map[string]interface{}{
+					"image": map[string]interface{}{"tag": "v2.10.0-p1"},
+				},
 			},
-			reason: AcceleratorVirtualizationUnsupportedConfigReason,
+		},
+		{
+			name: "allows all supported image locations",
+			configPatch: map[string]interface{}{
+				"global": map[string]interface{}{
+					"imageTag":         "v2.10.0-p1",
+					"imagePullSecrets": []interface{}{"hami-pull-secret"},
+				},
+				"scheduler": map[string]interface{}{
+					"extender":      map[string]interface{}{"image": map[string]interface{}{"tag": "scheduler"}},
+					"kubeScheduler": map[string]interface{}{"image": map[string]interface{}{"tag": "kube-scheduler"}},
+					"patch": map[string]interface{}{
+						"image":    map[string]interface{}{"tag": "certgen"},
+						"imageNew": map[string]interface{}{"tag": "certgen-new"},
+					},
+				},
+				"devicePlugin": map[string]interface{}{
+					"image":   map[string]interface{}{"tag": "device-plugin"},
+					"monitor": map[string]interface{}{"image": map[string]interface{}{"tag": "monitor"}},
+				},
+			},
+		},
+		{
+			name:        "rejects mock device plugin",
+			configPatch: map[string]interface{}{"mockDevicePlugin": map[string]interface{}{"image": map[string]interface{}{"tag": "mock"}}},
+			reason:      AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 		{
 			name:        "rejects unsupported top-level key",
@@ -186,7 +213,7 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
 		},
 		{
-			name: "rejects MIG config as device plugin config",
+			name: "rejects non-image device plugin chart values",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},
 			},
