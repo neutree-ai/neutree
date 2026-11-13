@@ -50,7 +50,7 @@ func trendHandler(deps *Dependencies) gin.HandlerFunc {
 
 		status := "ok"
 		if len(samples) == 0 {
-			status = "no_data"
+			status = monitoringNoData
 		}
 
 		end := now.Unix() / 21600 * 21600
@@ -110,7 +110,7 @@ func queryTrend(ctx context.Context, deps *Dependencies, workspace, cluster stri
 		return nil, err
 	}
 
-	if result.Status != monitoringSuccess || result.IsPartial || result.Data.ResultType != "matrix" {
+	if result.Status != monitoringSuccess || result.IsPartial || result.Data.ResultType != monitoringMatrix {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 
