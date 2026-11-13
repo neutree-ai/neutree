@@ -186,6 +186,7 @@ jobs:
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
           PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
           ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
+          PACKAGE_FILE_SERVER_URL: ${{ inputs.package_file_server_url }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
@@ -193,7 +194,8 @@ jobs:
           archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum_name="$archive_name.sha256"
           manifest_name="$ENGINE-$MANIFEST_VERSION-manifest.yaml"
-          package_dir="${ENGINE_PACKAGE_FILE_SERVER_URL%/}"
+          package_dir="${PACKAGE_FILE_SERVER_URL:-$ENGINE_PACKAGE_FILE_SERVER_URL}"
+          package_dir="${package_dir%/}"
           archive_url="$package_dir/$archive_name"
           checksum_url="$package_dir/$checksum_name"
           manifest_url="$package_dir/$manifest_name"
