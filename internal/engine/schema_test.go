@@ -46,7 +46,7 @@ func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
 }
 
 func TestGetVLLMKubernetesEngineSchema(t *testing.T) {
-	for _, version := range []string{"vllm-v0.31.0", "vllm-v0.32.0"} {
+	for _, version := range []string{"vllm-v0.32.0"} {
 		t.Run(version, func(t *testing.T) {
 			schema, err := GetEngineSchema(version)
 			if err != nil {
@@ -72,16 +72,16 @@ func TestGetVLLMKubernetesEngineSchema(t *testing.T) {
 				"fingerprint_value",
 				"enable_flash_late_interaction",
 				"enable_log_requests",
-				// FrontendArgs moved to vllm.entrypoints.launchers.cli_args in v0.31.0;
+				// FrontendArgs moved to vllm.entrypoints.launchers.cli_args before v0.32.0;
 				// a schema generated without that class silently loses these.
 				"enable_auto_tool_choice",
 				"tool_call_parser",
 				"chat_template",
-				// New in v0.31.0 and wired through the Ray Serve app.
+				// Supported by the v0.32.0 Ray Serve app.
 				"enable_per_request_metrics",
 				"tool_strict_level",
 				"trust_request_mm_kwargs",
-				// New in v0.31.0 engine args.
+				// v0.32.0 engine args.
 				"max_num_queued_reqs",
 				"max_num_queued_tokens",
 			} {
@@ -95,7 +95,7 @@ func TestGetVLLMKubernetesEngineSchema(t *testing.T) {
 				"use_gpu_for_pooling_score",
 				"lora_modules",
 				"log_config_file",
-				// Flags removed upstream between v0.24.0 and v0.31.0; `vllm serve`
+				// Flags removed upstream before v0.32.0; `vllm serve`
 				// rejects them, so they must not be offered on the Kubernetes path.
 				"calculate_kv_scales",
 				"max_long_partial_prefills",
