@@ -9,9 +9,6 @@ import (
 //go:embed vllm/v0.24.0/templates/kubernetes/default.yaml
 var vllmV0_24_0DeployTemplate string
 
-//go:embed vllm/v0.31.0/templates/kubernetes/default.yaml
-var vllmV0_31_0DeployTemplate string
-
 //go:embed vllm/v0.32.0/templates/kubernetes/default.yaml
 var vllmV0_32_0DeployTemplate string
 
@@ -24,11 +21,6 @@ var sglangV0_5_10DeployTemplate string
 // GetVLLMV0_24_0DeployTemplate returns the default deployment template for vLLM V0.24.0 engine
 func GetVLLMV0_24_0DeployTemplate() string {
 	return base64.StdEncoding.EncodeToString([]byte(vllmV0_24_0DeployTemplate))
-}
-
-// GetVLLMV0_31_0DeployTemplate returns the default deployment template for vLLM V0.31.0 engine
-func GetVLLMV0_31_0DeployTemplate() string {
-	return base64.StdEncoding.EncodeToString([]byte(vllmV0_31_0DeployTemplate))
 }
 
 // GetVLLMV0_32_0DeployTemplate returns the default deployment template for vLLM V0.32.0 engine
@@ -49,7 +41,6 @@ func GetSGLangV0_5_10DeployTemplate() string {
 // DeployTemplates contains all available deployment templates
 var DeployTemplates = map[string]func() string{
 	"vllm-v0.24.0-p2":     GetVLLMV0_24_0DeployTemplate,
-	"vllm-v0.31.0":        GetVLLMV0_31_0DeployTemplate,
 	"vllm-v0.32.0":        GetVLLMV0_32_0DeployTemplate,
 	"llama-cpp-v0.3.7-p2": GetLlamaCppDefaultDeployTemplate,
 	"sglang-v0.5.10-p2":   GetSGLangV0_5_10DeployTemplate,
