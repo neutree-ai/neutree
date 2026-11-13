@@ -30,6 +30,11 @@ on:
         required: false
         default: ""
         type: string
+      package_file_server_url:
+        description: "optional package upload URL override"
+        required: false
+        default: ""
+        type: string
     secrets:
       ENGINE_PACKAGE_FILE_SERVER_URL:
         required: true
@@ -161,13 +166,14 @@ jobs:
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
           PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
           ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
+          PACKAGE_FILE_SERVER_URL: ${{ inputs.package_file_server_url }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
         run: |
           set -euo pipefail
           archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum="$archive.sha256"
           manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
-          package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
+          package_url="${PACKAGE_FILE_SERVER_URL:-$ENGINE_PACKAGE_FILE_SERVER_URL}"
           curl --fail -T "$archive" "$package_url"
           curl --fail -T "$checksum" "$package_url"
           curl --fail -T "$manifest" "$package_url"
