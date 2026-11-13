@@ -10,6 +10,48 @@ import (
 
 const MinVirtualizationClusterVersion = "v1.1.0"
 
+const (
+	HAMiImageRegistry     = "docker.io"
+	HAMiImageRepository   = "projecthami/hami"
+	HAMiP1ImageRepository = "neutree/hami"
+	HAMiP1ImageTag        = "v2.10.0-p1"
+)
+
+type HAMiImageProfile struct {
+	ExtenderRepository     string
+	ExtenderTag            string
+	DevicePluginRepository string
+	DevicePluginTag        string
+}
+
+var hamiImageProfiles = map[string]HAMiImageProfile{
+	component.HAMi: {
+		ExtenderRepository:     HAMiImageRepository,
+		ExtenderTag:            component.HAMi,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        component.HAMi,
+	},
+	component.V130HAMI: {
+		ExtenderRepository:     HAMiP1ImageRepository,
+		ExtenderTag:            HAMiP1ImageTag,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        component.V130HAMI,
+	},
+}
+
+func HAMiImageProfileForVersion(hamiVersion string) HAMiImageProfile {
+	if profile, ok := hamiImageProfiles[hamiVersion]; ok {
+		return profile
+	}
+
+	return HAMiImageProfile{
+		ExtenderRepository:     HAMiImageRepository,
+		ExtenderTag:            hamiVersion,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        hamiVersion,
+	}
+}
+
 func SupportsVirtualizationClusterVersion(version string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {

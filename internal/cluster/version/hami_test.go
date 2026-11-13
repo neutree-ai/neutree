@@ -66,3 +66,17 @@ func TestHAMiVersionForCluster(test *testing.T) {
 		})
 	}
 }
+
+func TestHAMiImageProfileForVersion(t *testing.T) {
+	legacy := HAMiImageProfileForVersion("v2.9.0")
+	assert.Equal(t, "projecthami/hami", legacy.ExtenderRepository)
+	assert.Equal(t, "v2.9.0", legacy.ExtenderTag)
+	assert.Equal(t, "projecthami/hami", legacy.DevicePluginRepository)
+	assert.Equal(t, "v2.9.0", legacy.DevicePluginTag)
+
+	current := HAMiImageProfileForVersion("v2.10.0")
+	assert.Equal(t, "neutree/hami", current.ExtenderRepository)
+	assert.Equal(t, "v2.10.0-p1", current.ExtenderTag)
+	assert.Equal(t, "projecthami/hami", current.DevicePluginRepository)
+	assert.Equal(t, "v2.10.0", current.DevicePluginTag)
+}

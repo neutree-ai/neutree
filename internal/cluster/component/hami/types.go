@@ -4,7 +4,7 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	componentversion "github.com/neutree-ai/neutree/internal/component"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 const (
@@ -22,35 +22,13 @@ const (
 	CACertificateYears           = 10
 	ServingCertificateYears      = 1
 	ServingCertificateRenewDays  = 30
-	HAMiImageRegistry            = "docker.io"
-	HAMiImageRepository          = "projecthami/hami"
-	HAMiP1ImageRepository        = "neutree/hami"
-	HAMiP1ImageTag               = "v2.10.0-p1"
+	HAMiImageRegistry            = clusterversion.HAMiImageRegistry
+	HAMiImageRepository          = clusterversion.HAMiImageRepository
+	HAMiP1ImageRepository        = clusterversion.HAMiP1ImageRepository
+	HAMiP1ImageTag               = clusterversion.HAMiP1ImageTag
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
 )
-
-type hamiImageProfile struct {
-	extenderRepository     string
-	extenderTag            string
-	devicePluginRepository string
-	devicePluginTag        string
-}
-
-var hamiImageProfiles = map[string]hamiImageProfile{
-	componentversion.HAMi: {
-		extenderRepository:     HAMiImageRepository,
-		extenderTag:            componentversion.HAMi,
-		devicePluginRepository: HAMiImageRepository,
-		devicePluginTag:        componentversion.HAMi,
-	},
-	componentversion.V130HAMI: {
-		extenderRepository:     HAMiP1ImageRepository,
-		extenderTag:            HAMiP1ImageTag,
-		devicePluginRepository: HAMiImageRepository,
-		devicePluginTag:        componentversion.V130HAMI,
-	},
-}
 
 type HAMiStatus struct {
 	Version                string

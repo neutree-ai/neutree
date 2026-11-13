@@ -1468,13 +1468,13 @@ func TestHAMiClusterVersionCompatibility(test *testing.T) {
 			deployment := findObject(test, resources.Items, "Deployment", SchedulerName)
 			assert.Equal(test, "hami-"+strings.TrimPrefix(testCase.hamiVersion, "v"), deployment.GetLabels()["helm.sh/chart"])
 			extender := findContainer(test, resources.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
-			profile := hamiImageProfileForVersion(testCase.hamiVersion)
-			expectedRegistry, expectedRepository := component.imageRegistryAndRepository(profile.extenderRepository)
-			expectedImage := expectedRegistry + "/" + expectedRepository + ":" + profile.extenderTag
+			profile := clusterversion.HAMiImageProfileForVersion(testCase.hamiVersion)
+			expectedRegistry, expectedRepository := component.imageRegistryAndRepository(profile.ExtenderRepository)
+			expectedImage := expectedRegistry + "/" + expectedRepository + ":" + profile.ExtenderTag
 			assert.Equal(test, expectedImage, extender["image"])
 			devicePlugin := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
-			deviceRegistry, deviceRepository := component.imageRegistryAndRepository(profile.devicePluginRepository)
-			expectedDeviceImage := deviceRegistry + "/" + deviceRepository + ":" + profile.devicePluginTag
+			deviceRegistry, deviceRepository := component.imageRegistryAndRepository(profile.DevicePluginRepository)
+			expectedDeviceImage := deviceRegistry + "/" + deviceRepository + ":" + profile.DevicePluginTag
 			assert.Equal(test, expectedDeviceImage, devicePlugin["image"])
 			monitor := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")
 			assert.Equal(test, expectedDeviceImage, monitor["image"])

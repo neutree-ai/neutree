@@ -163,22 +163,22 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 }
 
 func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]interface{} {
-	profile := hamiImageProfileForVersion(hamiVersion)
-	extenderRegistry, extenderRepository := h.imageRegistryAndRepository(profile.extenderRepository)
-	deviceRegistry, deviceRepository := h.imageRegistryAndRepository(profile.devicePluginRepository)
+	profile := clusterversion.HAMiImageProfileForVersion(hamiVersion)
+	extenderRegistry, extenderRepository := h.imageRegistryAndRepository(profile.ExtenderRepository)
+	deviceRegistry, deviceRepository := h.imageRegistryAndRepository(profile.DevicePluginRepository)
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(extenderRegistry, extenderRepository, profile.extenderTag),
+				"image": chartImageValues(extenderRegistry, extenderRepository, profile.ExtenderTag),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": chartImageValues(deviceRegistry, deviceRepository, profile.devicePluginTag),
+			"image": chartImageValues(deviceRegistry, deviceRepository, profile.DevicePluginTag),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(deviceRegistry, deviceRepository, profile.devicePluginTag),
+				"image": chartImageValues(deviceRegistry, deviceRepository, profile.DevicePluginTag),
 			},
 		},
 	})
@@ -190,19 +190,6 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 	}
 
 	return values
-}
-
-func hamiImageProfileForVersion(hamiVersion string) hamiImageProfile {
-	if profile, ok := hamiImageProfiles[hamiVersion]; ok {
-		return profile
-	}
-
-	return hamiImageProfile{
-		extenderRepository:     HAMiImageRepository,
-		extenderTag:            hamiVersion,
-		devicePluginRepository: HAMiImageRepository,
-		devicePluginTag:        hamiVersion,
-	}
 }
 
 func (h *HAMiComponent) imageRegistryAndRepository(repository string) (string, string) {
