@@ -31,6 +31,11 @@ var hamiImageProfiles = map[string]HAMiImageProfile{
 		DevicePluginRepository: HAMiImageRepository,
 		DevicePluginTag:        component.HAMi,
 	},
+	// HAMi v2.10.0's scheduler extender uses the P1 build because upstream
+	// PR #2900 fixes positional allocation slots for regular init containers
+	// when node device types are model-specific (for example, NVIDIA-L20) but
+	// Pod requests use the generic NVIDIA resource type. The device-plugin and
+	// monitor keep the original v2.10.0 image because the fix is scheduler-side.
 	component.V130HAMI: {
 		ExtenderRepository:     HAMiP1ImageRepository,
 		ExtenderTag:            HAMiP1ImageTag,
