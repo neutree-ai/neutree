@@ -195,6 +195,11 @@
           "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
+        },
+        {
+          "expr": "(sum(rate(vllm:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or (sum(rate(sglang:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(sglang:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "E",
+          "legendFormat": "Avg"
         }
       ],
       "title": "E2E latency trend",
@@ -263,6 +268,21 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF4D6D"
+                }
+              }
+            ]
           }
         ]
       }
@@ -296,6 +316,11 @@
           "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:time_to_first_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
+        },
+        {
+          "expr": "(sum(rate(vllm:time_to_first_token_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:time_to_first_token_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or (sum(rate(sglang:time_to_first_token_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(sglang:time_to_first_token_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "E",
+          "legendFormat": "Avg"
         }
       ],
       "title": "TTFT latency trend",
@@ -364,6 +389,21 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF4D6D"
+                }
+              }
+            ]
           }
         ]
       }
@@ -397,6 +437,11 @@
           "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:request_time_per_output_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(sglang:time_per_output_token_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
+        },
+        {
+          "expr": "sum(rate(vllm:request_time_per_output_token_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(sglang:time_per_output_token_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:request_time_per_output_token_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(vllm:time_per_output_token_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]) or rate(sglang:time_per_output_token_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))",
+          "refId": "E",
+          "legendFormat": "Avg"
         }
       ],
       "title": "TPOT latency trend",
@@ -465,6 +510,21 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF4D6D"
+                }
+              }
+            ]
           }
         ]
       }
@@ -498,6 +558,11 @@
           "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or histogram_quantile(0.99, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
           "refId": "D",
           "legendFormat": "P99"
+        },
+        {
+          "expr": "(sum(rate(vllm:inter_token_latency_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:inter_token_latency_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or (sum(rate(sglang:inter_token_latency_seconds_sum{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(sglang:inter_token_latency_seconds_count{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "E",
+          "legendFormat": "Avg"
         }
       ],
       "title": "ITL latency trend",
@@ -563,6 +628,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#7E41FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF4D6D"
                 }
               }
             ]
