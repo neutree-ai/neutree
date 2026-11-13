@@ -4,7 +4,6 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 const (
@@ -22,10 +21,6 @@ const (
 	CACertificateYears           = 10
 	ServingCertificateYears      = 1
 	ServingCertificateRenewDays  = 30
-	HAMiImageRegistry            = clusterversion.HAMiImageRegistry
-	HAMiImageRepository          = clusterversion.HAMiImageRepository
-	HAMiP1ImageRepository        = clusterversion.HAMiP1ImageRepository
-	HAMiP1ImageTag               = clusterversion.HAMiP1ImageTag
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
 )

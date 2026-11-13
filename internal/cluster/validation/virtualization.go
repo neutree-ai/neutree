@@ -111,6 +111,14 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 	if patch, found, err := unstructured.NestedMap(configPatch, "devicePlugin"); err == nil && found {
 		for field := range patch {
 			if field != "image" {
+				if field == "service" {
+					return &AcceleratorVirtualizationError{
+						Reason:  AcceleratorVirtualizationManagedSchedulerReason,
+						Message: "HAMi devicePlugin.service.type is managed by Neutree and cannot be customized",
+						Hint:    "Remove devicePlugin.service.type from accelerator_virtualization.config_patch",
+					}
+				}
+
 				return &AcceleratorVirtualizationError{
 					Reason:  AcceleratorVirtualizationUnsupportedConfigReason,
 					Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch.devicePlugin field %q", field),
@@ -151,6 +159,25 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
 			Message: "HAMi scheduler admission webhook namespaceSelector is managed by Neutree and cannot be customized",
 			Hint:    "Remove scheduler.admissionWebhook.namespaceSelector from accelerator_virtualization.config_patch",
+		}
+	}
+
+	managedFields := []struct {
+		path   []string
+		reason AcceleratorVirtualizationErrorReason
+		name   string
+	}{
+		{path: []string{"scheduler", "admissionWebhook", "manageNamespaceSelector"}, reason: AcceleratorVirtualizationManagedAdmissionWebhookReason, name: "scheduler.admissionWebhook.manageNamespaceSelector"},
+		{path: []string{"scheduler", "service", "type"}, reason: AcceleratorVirtualizationManagedSchedulerReason, name: "scheduler.service.type"},
+		{path: []string{"devicePlugin", "service", "type"}, reason: AcceleratorVirtualizationManagedSchedulerReason, name: "devicePlugin.service.type"},
+	}
+	for _, field := range managedFields {
+		if _, found, err := unstructured.NestedFieldNoCopy(configPatch, field.path...); err == nil && found {
+			return &AcceleratorVirtualizationError{
+				Reason:  field.reason,
+				Message: fmt.Sprintf("HAMi %s is managed by Neutree and cannot be customized", field.name),
+				Hint:    fmt.Sprintf("Remove %s from accelerator_virtualization.config_patch", field.name),
+			}
 		}
 	}
 

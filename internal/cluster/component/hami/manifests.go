@@ -107,16 +107,7 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 		return nil
 	}
 
-	sanitized := deepCopyChartValues(configPatch)
-	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
-	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "enabled")
-	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "manageNamespaceSelector")
-	unstructured.RemoveNestedField(sanitized, "scheduler", "certManager", "enabled")
-	unstructured.RemoveNestedField(sanitized, "scheduler", "patch", "enabled")
-	unstructured.RemoveNestedField(sanitized, "scheduler", "service", "type")
-	unstructured.RemoveNestedField(sanitized, "devicePlugin", "service", "type")
-
-	return sanitized
+	return deepCopyChartValues(configPatch)
 }
 
 func defaultChartValues(imageRegistry, hamiVersion string) map[string]interface{} {
@@ -194,14 +185,14 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 
 func (h *HAMiComponent) imageRegistryAndRepository(repository string) (string, string) {
 	if imagePrefix := h.normalizedImagePrefix(); imagePrefix != "" {
-		if repository == HAMiP1ImageRepository {
+		if repository == clusterversion.HAMiP1ImageRepository {
 			return imagePrefix, "hami"
 		}
 
 		return imagePrefix, repository
 	}
 
-	return HAMiImageRegistry, repository
+	return clusterversion.HAMiImageRegistry, repository
 }
 
 func (h *HAMiComponent) protectedImagePullSecretValues(values map[string]interface{}) map[string]interface{} {

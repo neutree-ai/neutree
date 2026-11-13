@@ -219,6 +219,29 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
 		},
 		{
+			name: "rejects customizing admission webhook ownership",
+			configPatch: map[string]interface{}{
+				"scheduler": map[string]interface{}{
+					"admissionWebhook": map[string]interface{}{"manageNamespaceSelector": false},
+				},
+			},
+			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
+		},
+		{
+			name: "rejects customizing scheduler service",
+			configPatch: map[string]interface{}{
+				"scheduler": map[string]interface{}{"service": map[string]interface{}{"type": "NodePort"}},
+			},
+			reason: AcceleratorVirtualizationManagedSchedulerReason,
+		},
+		{
+			name: "rejects customizing device plugin service",
+			configPatch: map[string]interface{}{
+				"devicePlugin": map[string]interface{}{"service": map[string]interface{}{"type": "NodePort"}},
+			},
+			reason: AcceleratorVirtualizationManagedSchedulerReason,
+		},
+		{
 			name: "rejects non-image device plugin chart values",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},
