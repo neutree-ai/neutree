@@ -12,8 +12,9 @@ stringData:
 ---
 # Owns the Cluster (the migration Job sets the ownerReference). helm keeps the
 # Cluster (resource-policy keep), so a rollback to a revision that lacks it
-# never deletes the database; it goes when this ConfigMap goes: on helm
-# uninstall, or on a rollback to a chart without it.
+# never deletes the database; it goes when this ConfigMap goes on a rollback to
+# a chart without it. helm uninstall detaches it first and keeps it (see
+# postgresql-uninstall-hook.yaml).
 apiVersion: v1
 kind: ConfigMap
 metadata:

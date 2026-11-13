@@ -229,6 +229,25 @@ func TestDBResourcesAnnotations(t *testing.T) {
 	}
 }
 
+// helm uninstall keeps the Cluster and its volumes: a pre-delete hook detaches
+// it from the resources ConfigMap and hibernates it. A rollback runs no hook.
+func TestDBUninstallKeepsCluster(t *testing.T) {
+	for _, values := range []map[string]interface{}{nil, haValues(nil), haValues(externalOperator(nil))} {
+		resources := renderChart(t, values)
+
+		var job batchv1.Job
+		renderedObject(t, resources, "Job", "neutree-pg-keep", &job)
+		require.Equal(t, "pre-delete", job.Annotations["helm.sh/hook"])
+		require.Equal(t, "neutree-sa", job.Spec.Template.Spec.ServiceAccountName)
+
+		container := job.Spec.Template.Spec.Containers[0]
+		require.Contains(t, container.Env, corev1.EnvVar{Name: "CLUSTER", Value: "neutree-pg"})
+		script := strings.Join(container.Command, " ")
+		require.Contains(t, script, `{"metadata":{"ownerReferences":null}}`)
+		require.Contains(t, script, "cnpg.io/hibernation=on")
+	}
+}
+
 func TestDBClusterSingle(t *testing.T) {
 	spec := renderedCluster(t, renderChart(t, nil))
 

@@ -78,9 +78,9 @@ The switch is a planned operational change. Schedule a maintenance window for it
 - **Management writes and logins pause once,** for about 9 seconds in our tests (target: 15 seconds or less). The pause comes from the final switchover of the PostgreSQL primary.
 - **No data is lost.** The operator copies the database to the new standbys online. Until every standby is ready, commits do not wait for a standby. When all instances are ready, the chart turns on synchronous replication.
 - **The upgrade takes longer for larger databases.** The new standbys copy the whole database first. Writes are not blocked during the copy.
-- **Grafana starts on an empty database.** Provisioned dashboards and data sources come back. Users and dashboards saved in the Grafana UI stay in the old SQLite volume, which is deleted.
+- **Grafana starts on an empty database.** Provisioned dashboards and data sources come back. Users and dashboards saved in the Grafana UI stay in the old SQLite volume `<release>-grafana`, which helm keeps; delete it by hand.
 - **Existing metrics stay on the first vmstorage node only.** Replication applies to samples written after the switch.
-- **Vector moves to a StatefulSet.** Helm deletes the single-mode Vector Deployment and its volume, and the StatefulSet creates one new volume per pod. The old pod tries to deliver its buffered usage records and traces during its 60-second shutdown grace period. Records still in the old volume after that are lost.
+- **Vector moves to a StatefulSet.** Helm deletes the single-mode Vector Deployment and keeps its volume `<release>-vector-pvc`, and the StatefulSet creates one new volume per pod. The old pod tries to deliver its buffered usage records and traces during its 60-second shutdown grace period. Records still in the old volume after that are not delivered; delete the volume by hand.
 
 ### From a release with PostgreSQL 13
 

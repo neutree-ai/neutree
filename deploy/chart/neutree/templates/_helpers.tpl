@@ -618,15 +618,17 @@ API is not installed (lookup fails on an unknown API).
 {{- end -}}
 
 {{/*
-Non-empty when helm cannot create the Cluster itself: the operator ships
-with this release and the Cluster does not exist yet. On a first install the CRDs are not registered when helm maps the
-release resources, and the operator's admission webhook (failurePolicy Fail)
-rejects every Cluster until the operator pod is ready. The migration Job then
-creates it from the resources ConfigMap once the webhook accepts it, and the
-next helm upgrade adopts it.
+Non-empty when helm cannot create or update the Cluster itself: the operator
+ships with this release and is not running yet, that is, on an install or
+while the Cluster does not exist. On a first install the CRDs are not
+registered when helm maps the release resources, and the operator's admission
+webhook (failurePolicy Fail) rejects every Cluster until the operator pod is
+ready. The migration Job then applies the Cluster from the resources ConfigMap
+once the webhook accepts it, and the next helm upgrade adopts it. An install
+finds a Cluster that an earlier helm uninstall kept.
 */}}
 {{- define "neutree.db.deferred" -}}
-{{- if and .Values.cnpg.enabled (not (include "neutree.db.liveCluster" .)) -}}
+{{- if and .Values.cnpg.enabled (or .Release.IsInstall (not (include "neutree.db.liveCluster" .))) -}}
 true
 {{- end -}}
 {{- end -}}

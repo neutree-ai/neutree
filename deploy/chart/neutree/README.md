@@ -28,21 +28,41 @@ All `cnpg.*` values are passed to that chart.
   also creates the Grafana database of HA mode, with SQL.) The same happens on the first upgrade from a
   release with the PostgreSQL Deployment. No manual step is needed; with
   `--wait`, allow a few minutes (`--timeout 15m`).
-- **Uninstall deletes the database.** `helm uninstall` removes the `Cluster`
-  and its volumes, and the operator. The CRDs stay (they are shared by every
-  CNPG `Cluster` in the Kubernetes cluster). Delete them only when no other
-  `Cluster` exists: deleting a CRD deletes every object of that kind. A new
-  install under another release name or namespace must first take the CRDs
-  over:
+- **Uninstall keeps the database.** A pre-delete hook (Job
+  `<release>-pg-keep`) detaches the `Cluster` from the ConfigMap
+  `<release>-pg-resources` and hibernates it: the PostgreSQL pods stop, and
+  the `Cluster` and its volumes stay. helm then removes the operator and the
+  rest of the release. The CRDs stay too (they are shared by every CNPG
+  `Cluster` in the Kubernetes cluster). Delete them only when no other
+  `Cluster` exists: deleting a CRD deletes every object of that kind.
+- **Reinstall.** `helm install` of the same release name into the same
+  namespace finds the kept `Cluster`: the migration Job replaces it with the
+  new manifest (single or HA mode, whichever is installed), wakes it, and the
+  operator starts PostgreSQL on the kept volumes. Use the same `db.password`
+  as before; the other database passwords are fixed or are applied again by
+  the operator. A release under another name or namespace starts with a new
+  database, and must first take the CRDs over:
 
   ```bash
   kubectl annotate --overwrite $(kubectl get crd -o name | grep '\.postgresql\.cnpg\.io$') \
     meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<namespace>
   ```
+- **Deleting the database.** After `helm uninstall`, delete the `Cluster`;
+  its volumes go with it. Deleting the namespace does the same.
+
+  ```bash
+  kubectl -n <namespace> delete clusters.postgresql.cnpg.io <release>-pg
+  ```
+
+  `helm uninstall --no-hooks` skips the hook and deletes the database at once.
+  If the operator does not accept changes to the `Cluster`, the hook fails and
+  so does `helm uninstall`; fix the operator and run it again, or use
+  `--no-hooks`.
 - **Rollback.** helm never deletes the `Cluster` itself
   (`helm.sh/resource-policy: keep`); it is owned by the ConfigMap
-  `<release>-pg-resources`, so it goes with that ConfigMap: on uninstall, or
-  on a rollback to a release with the PostgreSQL Deployment.
+  `<release>-pg-resources`, so a rollback to a release with the PostgreSQL
+  Deployment, which has no such ConfigMap, deletes it (no hook runs on a
+  rollback).
 - **Offline installs.** `global.image.registry` does not apply to the operator
   image. Mirror `ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1` and the
   PostgreSQL image in `db.image` (`ghcr.io/cloudnative-pg/postgresql:17.6`),

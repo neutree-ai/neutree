@@ -1,0 +1,62 @@
+{{- /*
+helm uninstall keeps the database: this hook detaches the Cluster from the
+resources ConfigMap, so deleting the ConfigMap no longer deletes the Cluster
+and its volumes, and hibernates it, so PostgreSQL is stopped before the
+operator goes. The next install of the release wakes it (migrate-k8s.sh).
+A rollback runs no hook, so it still deletes the Cluster with the ConfigMap.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "neutree.fullname" . }}-pg-keep
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: neutree-pg-keep
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.migration) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      serviceAccountName: {{ include "neutree.fullname" . }}-sa
+      restartPolicy: Never
+      containers:
+        - name: keep
+          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
+          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              c="clusters.postgresql.cnpg.io/$CLUSTER"
+              deadline=$(($(date +%s) + 90))
+              retry() {
+                [ "$(date +%s)" -lt "$deadline" ] && { sleep 5; return 0; }
+                echo "Cannot keep the database: the CloudNativePG operator does not accept changes to Cluster $CLUSTER."
+                echo "Fix the operator and run helm uninstall again, or run helm uninstall --no-hooks to delete the database."
+                exit 1
+              }
+              until found=$(kubectl -n "$NAMESPACE" get "$c" --ignore-not-found -o name); do retry; done
+              [ -n "$found" ] || { echo "no Cluster $CLUSTER"; exit 0; }
+              # The resources ConfigMap is its only owner.
+              until kubectl -n "$NAMESPACE" patch "$c" --type merge -p '{"metadata":{"ownerReferences":null}}'; do retry; done
+              until kubectl -n "$NAMESPACE" annotate --overwrite "$c" cnpg.io/hibernation=on; do retry; done
+              # Hibernation waits for a healthy Cluster; the data is kept either way.
+              kubectl -n "$NAMESPACE" wait "$c" --for=condition=cnpg.io/hibernation --timeout=150s \
+                || echo "PostgreSQL is not hibernated; its pods keep running until the next install"
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: CLUSTER
+              value: {{ include "neutree.db.clusterName" . }}
