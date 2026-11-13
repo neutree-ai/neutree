@@ -22,13 +22,18 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestPerformanceRequiresEndpointRead(t *testing.T) {
-	s := mocks.NewMockStorage(t)
-	permission(t, s, false)
-	w := httptest.NewRecorder()
-	router(&Dependencies{Storage: s, MetricsURL: "http://must-not-call.invalid"}, true).ServeHTTP(
-		w, httptest.NewRequest("GET", "/endpoints/tenant/model/performance-observations", nil),
-	)
-	require.Equal(t, http.StatusForbidden, w.Code)
+	for _, path := range []string{"performance-observations", "performance-trends"} {
+		t.Run(path, func(t *testing.T) {
+			s := mocks.NewMockStorage(t)
+			permission(t, s, false)
+			w := httptest.NewRecorder()
+			router(&Dependencies{Storage: s, MetricsURL: "http://must-not-call.invalid"}, true).ServeHTTP(
+				w, httptest.NewRequest("GET", "/endpoints/tenant/model/"+path, nil),
+			)
+			require.Equal(t, http.StatusForbidden, w.Code)
+		})
+	}
+
 }
 
 func TestPerformanceWindowNormalizationAndQueryScope(t *testing.T) {

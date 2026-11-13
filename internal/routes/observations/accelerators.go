@@ -73,6 +73,8 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 		if resource == "endpoints" {
 			permission = "endpoint:read"
 
+			route.GET("/performance-trends", middleware.RequireWorkspacePermission(permission,
+				middleware.PermissionDependencies{Storage: deps.Storage}), performanceTrendsHandler(deps))
 			route.GET("/performance-observations", middleware.RequireWorkspacePermission(permission,
 				middleware.PermissionDependencies{Storage: deps.Storage}), performanceHandler(deps))
 		}
@@ -241,7 +243,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		status := "ok"
 
 		if len(samples) == 0 {
-			status = "no_data"
+			status = monitoringNoData
 		}
 
 		c.JSON(200, Snapshot{Status: status, Samples: samples})
@@ -303,7 +305,7 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 		return nil, err
 	}
 
-	if response.Status != monitoringSuccess || response.IsPartial || response.Data.ResultType != "matrix" {
+	if response.Status != monitoringSuccess || response.IsPartial || response.Data.ResultType != monitoringMatrix {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 

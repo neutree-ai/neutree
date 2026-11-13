@@ -75,7 +75,7 @@ func performanceHandler(deps *Dependencies) gin.HandlerFunc {
 
 		status := items[0].Status
 		if status != nil && (status.Phase == "Paused" || status.Phase == "Deleted") {
-			c.JSON(200, PerformanceSnapshot{Status: "no_data", Window: window})
+			c.JSON(200, PerformanceSnapshot{Status: monitoringNoData, Window: window})
 			return
 		}
 
@@ -104,7 +104,7 @@ func performanceHandler(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		if len(values) == 0 {
-			c.JSON(200, PerformanceSnapshot{Status: "no_data", Window: window})
+			c.JSON(200, PerformanceSnapshot{Status: monitoringNoData, Window: window})
 			return
 		}
 
