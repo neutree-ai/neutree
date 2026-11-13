@@ -10,6 +10,53 @@ import (
 
 const MinVirtualizationClusterVersion = "v1.1.0"
 
+const (
+	HAMiImageRegistry     = "docker.io"
+	HAMiImageRepository   = "projecthami/hami"
+	HAMiP1ImageRepository = "neutree/hami"
+	HAMiP1ImageTag        = "v2.10.0-p1"
+)
+
+type HAMiImageProfile struct {
+	ExtenderRepository     string
+	ExtenderTag            string
+	DevicePluginRepository string
+	DevicePluginTag        string
+}
+
+var hamiImageProfiles = map[string]HAMiImageProfile{
+	component.HAMi: {
+		ExtenderRepository:     HAMiImageRepository,
+		ExtenderTag:            component.HAMi,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        component.HAMi,
+	},
+	// HAMi v2.10.0's scheduler extender uses the P1 build because upstream
+	// PR #2900 fixes positional allocation slots for regular init containers
+	// when node device types are model-specific (for example, NVIDIA-L20) but
+	// Pod requests use the generic NVIDIA resource type. The device-plugin and
+	// monitor keep the original v2.10.0 image because the fix is scheduler-side.
+	component.V130HAMI: {
+		ExtenderRepository:     HAMiP1ImageRepository,
+		ExtenderTag:            HAMiP1ImageTag,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        component.V130HAMI,
+	},
+}
+
+func HAMiImageProfileForVersion(hamiVersion string) HAMiImageProfile {
+	if profile, ok := hamiImageProfiles[hamiVersion]; ok {
+		return profile
+	}
+
+	return HAMiImageProfile{
+		ExtenderRepository:     HAMiImageRepository,
+		ExtenderTag:            hamiVersion,
+		DevicePluginRepository: HAMiImageRepository,
+		DevicePluginTag:        hamiVersion,
+	}
+}
+
 func SupportsVirtualizationClusterVersion(version string) (bool, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
