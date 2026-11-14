@@ -277,6 +277,42 @@ describe("routing counter errors at protocol boundaries", function()
     end
 end)
 
+describe("unavailable model routes at protocol boundaries", function()
+    for _, path in ipairs({ "/v1/chat/completions", "/anthropic/v1/messages" }) do
+        for _, case in ipairs({ { model = "chat", status = 503 }, { model = "unknown", status = 400 } }) do
+            it("returns " .. case.status .. " for " .. case.model .. " on " .. path, function()
+                local previous_kong = _G.kong
+                local routing_stub = package.loaded["kong.plugins.neutree-ai-gateway.routing"]
+                local previous_begin, previous_next = routing_stub.begin, routing_stub.next
+                local routing = assert(loadfile(spec_dir .. "../routing.lua"))()
+                routing_stub.begin, routing_stub.next = routing.begin, routing.next
+                _G.kong = {
+                    ctx = { shared = {}, plugin = {} },
+                    request = {
+                        get_path = function() return path end,
+                        get_method = function() return "POST" end,
+                        get_header = function() return "application/json" end,
+                        get_raw_body = function()
+                            return cjson.encode({ model = case.model, messages = {}, max_tokens = 1 })
+                        end,
+                    },
+                    response = { exit = function(status, body) return { status = status, body = body } end },
+                }
+                local ok, response = pcall(handler.access, handler, {
+                    upstreams = {}, model_routes = { { model = "chat", targets = {} } },
+                })
+                _G.kong = previous_kong
+                routing_stub.begin, routing_stub.next = previous_begin, previous_next
+                assert.is_true(ok, tostring(response))
+                assert.are.equal(case.status, response.status)
+                if case.status == 503 then
+                    assert.are.equal("All upstreams are temporarily unavailable for model: chat", response.body.error.message)
+                end
+            end)
+        end
+    end
+end)
+
 describe("routing trace metadata", function()
     local previous_kong, previous_ngx
     before_each(function()

@@ -66,7 +66,7 @@ func TestEndpointDirectAddressesAgree(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Workspace: "team/a", Name: "model?name"}, Spec: &v1.EndpointSpec{Cluster: "cluster"}}
+			endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Workspace: "team/a", Name: "model?name"}, Spec: &v1.EndpointSpec{Cluster: "cluster"}, Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}}
 			cluster := v1.Cluster{Spec: &v1.ClusterSpec{Type: tc.kind}, Status: &v1.ClusterStatus{DashboardURL: tc.dashboard}}
 			store := &storagemocks.MockStorage{}
 			store.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)

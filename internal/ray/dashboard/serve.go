@@ -17,6 +17,7 @@ const (
 	DeploymentStatusUnhealthy = "UNHEALTHY"
 	ProxyStatusHealthy        = "HEALTHY"
 	ProxyStatusUnhealthy      = "UNHEALTHY"
+	ReplicaStateRunning       = "RUNNING"
 )
 
 // RayServeApplication represents the structure expected by the Ray Serve API.
@@ -53,6 +54,7 @@ type Replica struct {
 	ActorID     string `json:"actor_id"`
 	LogFilePath string `json:"log_file_path"`
 	ReplicaID   string `json:"replica_id"`
+	State       string `json:"state,omitempty"`
 }
 
 type ProxyStatus struct {

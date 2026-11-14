@@ -680,11 +680,19 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 	}
 
 	if specPending {
-		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for the current endpoint configuration"}, nil
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseDEPLOYING,
+			ErrorMessage: "Waiting for the current endpoint configuration",
+			Resources:    withReadyReplicas(nil, int(dep.Status.ReadyReplicas)),
+		}, nil
 	}
 
 	if dep.Status.ObservedGeneration < dep.Generation {
-		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for deployment observation"}, nil
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseDEPLOYING,
+			ErrorMessage: "Waiting for deployment observation",
+			Resources:    withReadyReplicas(nil, int(dep.Status.ReadyReplicas)),
+		}, nil
 	}
 
 	for _, condition := range dep.Status.Conditions {
@@ -730,8 +738,26 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 	return &v1.EndpointStatus{
 		Phase:        v1.EndpointPhaseDEPLOYING,
 		ErrorMessage: "Endpoint deploying in progress: " + errorMessage,
-		Resources:    resources,
+		Resources:    withReadyReplicas(resources, int(dep.Status.ReadyReplicas)),
 	}, nil
+}
+
+func withReadyReplicas(resources *v1.EndpointResourceStatus, readyReplicas int) *v1.EndpointResourceStatus {
+	if readyReplicas <= 0 {
+		if resources != nil {
+			resources.ReadyReplicas = 0
+		}
+
+		return resources
+	}
+
+	if resources == nil {
+		return &v1.EndpointResourceStatus{ReadyReplicas: readyReplicas}
+	}
+
+	resources.ReadyReplicas = readyReplicas
+
+	return resources
 }
 
 func (k *kubernetesOrchestrator) buildEndpointResourceStatus(

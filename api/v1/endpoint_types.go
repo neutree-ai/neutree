@@ -91,8 +91,9 @@ type EndpointStatus struct {
 }
 
 type EndpointResourceStatus struct {
-	Replicas []ReplicaDeviceAllocation `json:"replicas,omitempty"`
-	Summary  *EndpointResourceSummary  `json:"summary,omitempty"`
+	ReadyReplicas int                       `json:"ready_replicas,omitempty"`
+	Replicas      []ReplicaDeviceAllocation `json:"replicas,omitempty"`
+	Summary       *EndpointResourceSummary  `json:"summary,omitempty"`
 }
 
 type ReplicaDeviceAllocation struct {

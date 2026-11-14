@@ -1359,6 +1359,9 @@ function AIGatewayHandler:access(conf)
                 if matched_entry == "capacity_exhausted" then
                     return anthropic_error(503, "overloaded_error", "All upstreams are at capacity for model: " .. tostring(openai_req.model))
                 end
+                if matched_entry == "no_available_target" then
+                    return anthropic_error(503, "overloaded_error", "All upstreams are temporarily unavailable for model: " .. tostring(openai_req.model))
+                end
                 return anthropic_error(400, "invalid_request_error", "No upstream configured for model: " .. tostring(openai_req.model))
             end
 
@@ -1483,6 +1486,9 @@ function AIGatewayHandler:access(conf)
             end
             if matched_entry == "capacity_exhausted" then
                 return fail(503, "All upstreams are at capacity for model: " .. ai_request.model)
+            end
+            if matched_entry == "no_available_target" then
+                return fail(503, "All upstreams are temporarily unavailable for model: " .. ai_request.model)
             end
             return fail(400, "No upstream configured for model: " .. ai_request.model)
         end
