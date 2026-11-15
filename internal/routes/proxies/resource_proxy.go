@@ -715,7 +715,7 @@ func CreateStructProxyHandler[T any](group gin.IRoutes, deps *Dependencies, tabl
 		}
 
 		// Create proxy handler
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
+		proxyHandler := CreatePostgrestProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
 
 		// If no field filtering is needed, use proxy directly
 		if len(excludeFields) == 0 {
@@ -793,7 +793,7 @@ func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, r *maskedResour
 		c.Request.ContentLength = int64(len(bodyBytes))
 		c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
+		proxyHandler := CreatePostgrestProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
 		proxyWithMaskedResponse(c, proxyHandler, r.excludeFields)
 
 		return
@@ -845,6 +845,6 @@ func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, r *maskedResour
 	c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(modifiedBodyBytes)))
 
 	// Forward to PostgREST
-	proxyHandler := CreateProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
+	proxyHandler := CreatePostgrestProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
 	proxyWithMaskedResponse(c, proxyHandler, r.excludeFields)
 }

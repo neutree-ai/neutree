@@ -63,6 +63,12 @@ func renderChartWithError(overrides map[string]interface{}) (*unstructured.Unstr
 }
 
 func renderChartForRelease(overrides map[string]interface{}, release chartutil.ReleaseOptions) (*unstructured.UnstructuredList, error) {
+	return renderChartWithAPIs(overrides, release, true)
+}
+
+// renderChartWithAPIs renders the chart; withCNPG controls whether the
+// CloudNativePG API is reported as installed.
+func renderChartWithAPIs(overrides map[string]interface{}, release chartutil.ReleaseOptions, withCNPG bool) (*unstructured.UnstructuredList, error) {
 	valuesOverrides := map[string]interface{}{
 		"jwtSecret":     "render-test-secret",
 		"adminPassword": "render-test-password",
@@ -76,11 +82,21 @@ func renderChartForRelease(overrides map[string]interface{}, release chartutil.R
 		return nil, err
 	}
 
+	// As helm install does: drop disabled subcharts and apply aliases.
+	if err := chartutil.ProcessDependenciesWithMerge(chart, valuesOverrides); err != nil {
+		return nil, err
+	}
+
+	capabilities := chartutil.DefaultCapabilities.Copy()
+	if withCNPG {
+		capabilities.APIVersions = append(capabilities.APIVersions, "postgresql.cnpg.io/v1")
+	}
+
 	values, err := chartutil.ToRenderValuesWithSchemaValidation(
 		chart,
 		valuesOverrides,
 		release,
-		chartutil.DefaultCapabilities.Copy(),
+		capabilities,
 		true,
 	)
 	if err != nil {

@@ -480,6 +480,11 @@ func staticNodeStatusMessage(nodeName string, status *v1.StaticNodeStatus) strin
 		return fmt.Sprintf("static node %s phase=%s:\n%s", nodeName, status.Phase, status.ErrorMessage)
 	}
 
+	if status.Warm != nil && !status.Warm.Ready &&
+		(status.Warm.Message != "" || status.Warm.Reason != "") {
+		return staticNodeWarmStatusMessage(nodeName, status.Warm)
+	}
+
 	if status.Phase != v1.StaticNodePhaseReady {
 		return fmt.Sprintf("static node %s phase=%s", nodeName, status.Phase)
 	}

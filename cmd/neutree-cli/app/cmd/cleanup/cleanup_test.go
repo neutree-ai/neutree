@@ -60,6 +60,20 @@ func TestRunCleanup(t *testing.T) {
 			},
 		},
 		{
+			name:       "cleanup neutree-core with remove data also drops the PostgreSQL 13 volume",
+			component:  "neutree-core",
+			removeData: true,
+			setupMock: func(m *mocks.MockExecutor, workDir string) {
+				composeFile := filepath.Join(workDir, "neutree-core", "docker-compose.yml")
+				m.On("Execute", mock.Anything, "docker",
+					[]string{"compose", "-p", "neutree-core", "-f", composeFile, "down", "-v"},
+				).Return([]byte("done"), nil)
+				m.On("Execute", mock.Anything, "docker",
+					[]string{"volume", "rm", "neutree-core_pg_data"},
+				).Return([]byte(""), errors.New("exit status 1: Error response from daemon: get neutree-core_pg_data: no such volume"))
+			},
+		},
+		{
 			name:       "docker compose down fails",
 			component:  "neutree-core",
 			removeData: false,

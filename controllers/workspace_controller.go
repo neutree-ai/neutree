@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -18,14 +17,16 @@ type WorkspaceController struct {
 	storage     storage.Storage
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
 
-	engineRegistry engine.Registry
+	// builtinEngines returns the engines provisioned into every workspace.
+	builtinEngines func() ([]*v1.Engine, error)
 	// builtinRegistries is what this deployment provisions into every workspace.
 	builtinRegistries model_registry.BuiltinConfig
 }
 
 type WorkspaceControllerOption struct {
-	Storage        storage.Storage
-	EngineRegistry engine.Registry
+	Storage storage.Storage
+	// BuiltinEngines overrides the engine source; nil means engine.GetBuiltinEngines.
+	BuiltinEngines func() ([]*v1.Engine, error)
 	// BuiltinRegistries configures the built-in model registries. The zero value
 	// provisions none, which is what an offline deployment wants.
 	BuiltinRegistries model_registry.BuiltinConfig
@@ -34,8 +35,12 @@ type WorkspaceControllerOption struct {
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
 		storage:           option.Storage,
-		engineRegistry:    option.EngineRegistry,
+		builtinEngines:    option.BuiltinEngines,
 		builtinRegistries: option.BuiltinRegistries,
+	}
+
+	if c.builtinEngines == nil {
+		c.builtinEngines = engine.GetBuiltinEngines
 	}
 
 	c.syncHandler = c.sync
@@ -163,7 +168,7 @@ func (c *WorkspaceController) updateStatus(obj *v1.Workspace, phase v1.Workspace
 }
 
 func (c *WorkspaceController) syncWorkspaceEngine(workspace v1.Workspace) error {
-	engines, err := c.engineRegistry.ListAll(context.Background())
+	engines, err := c.builtinEngines()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get engines for workspace %s", workspace.Metadata.Name)
 	}

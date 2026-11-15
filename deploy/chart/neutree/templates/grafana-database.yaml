@@ -1,0 +1,22 @@
+{{- if .Values.grafanaDatabase.enabled }}
+{{- $name := include "neutree.grafanaDatabase.secretName" . }}
+{{- $password := .Values.grafanaDatabase.password }}
+{{- if not $password }}
+{{- with (lookup "v1" "Secret" .Release.Namespace $name) }}
+{{- $password = index .data "password" | b64dec }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+    # Lets CloudNativePG apply a changed password to the managed role.
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.grafanaDatabase.user | quote }}
+  password: {{ $password | default (randAlphaNum 32) | quote }}
+  host: {{ printf "%s:%s" (include "neutree.db.host" .) (include "neutree.db.port" .) | quote }}
+{{- end }}

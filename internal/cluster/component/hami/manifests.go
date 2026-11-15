@@ -161,19 +161,22 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 }
 
 func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]interface{} {
+	profile := clusterversion.HAMiImageProfileForVersion(hamiVersion)
+	extenderRegistry, extenderRepository := h.imageRegistryAndRepository(profile.ExtenderRepository)
+	deviceRegistry, deviceRepository := h.imageRegistryAndRepository(profile.DevicePluginRepository)
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+				"image": chartImageValues(extenderRegistry, extenderRepository, profile.ExtenderTag),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+			"image": chartImageValues(deviceRegistry, deviceRepository, profile.DevicePluginTag),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
+				"image": chartImageValues(deviceRegistry, deviceRepository, profile.DevicePluginTag),
 			},
 		},
 	})
@@ -193,6 +196,14 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 	}
 
 	return values
+}
+
+func (h *HAMiComponent) imageRegistryAndRepository(repository string) (string, string) {
+	if imagePrefix := h.normalizedImagePrefix(); imagePrefix != "" {
+		return imagePrefix, repository
+	}
+
+	return clusterversion.HAMiImageRegistry, repository
 }
 
 func chartImageValues(registry, repository, tag string) map[string]interface{} {

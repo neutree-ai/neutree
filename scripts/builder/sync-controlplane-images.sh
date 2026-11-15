@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Sync or verify the control-plane offline image list from the Helm chart.
+# Sync or verify the control-plane offline image list from the Helm chart and
+# the docker compose file.
 set -euo pipefail
 
 usage() {
@@ -37,6 +38,7 @@ ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
 OUTPUT="scripts/builder/image-lists/controlplane/images.txt"
+COMPOSE_FILE="deploy/docker/neutree-core/docker-compose.yml"
 
 require_command() {
     local command_name="$1"
@@ -55,9 +57,9 @@ normalize_image() {
 
 extract_images() {
     awk '
-        /^[[:space:]]*image:[[:space:]]*/ {
+        /^[[:space:]]*(image|imageName):[[:space:]]*/ {
             line = $0
-            sub(/^[[:space:]]*image:[[:space:]]*/, "", line)
+            sub(/^[[:space:]]*(image|imageName):[[:space:]]*/, "", line)
             sub(/[[:space:]]+#.*$/, "", line)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
             gsub(/^["'\'']|["'\'']$/, "", line)
@@ -78,8 +80,14 @@ collect_helm_images() {
         | extract_images
 }
 
+# Compose images whose tags are filled in by neutree-cli are rendered by the
+# chart as well; the rest are taken as written.
+collect_compose_images() {
+    extract_images <"$COMPOSE_FILE" | grep -v '{{'
+}
+
 generate_images() {
-    collect_helm_images | while IFS= read -r image; do
+    { collect_helm_images; collect_compose_images; } | while IFS= read -r image; do
         if [[ "$image" == *"{{"* || "$image" == *"}}"* ]]; then
             echo "ERROR: unresolved image template placeholder: $image" >&2
             exit 1

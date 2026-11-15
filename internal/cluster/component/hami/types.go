@@ -21,8 +21,6 @@ const (
 	CACertificateYears           = 10
 	ServingCertificateYears      = 1
 	ServingCertificateRenewDays  = 30
-	HAMiImageRegistry            = "docker.io"
-	HAMiImageRepository          = "projecthami/hami"
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
 )

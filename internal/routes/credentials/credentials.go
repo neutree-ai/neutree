@@ -63,7 +63,7 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 
 func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, tabelName, proxies.CreatePostgrestAuthModifier(c))
+		proxyHandler := proxies.CreatePostgrestProxyHandler(deps.StorageAccessURL, tabelName, proxies.CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
 }

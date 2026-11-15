@@ -14,7 +14,7 @@ services:
       restart_policy:
         condition: none
   postgres:
-    image: postgres:13
+    image: postgres:17
     container_name: postgres
     environment:
       POSTGRES_USER: postgres
@@ -24,7 +24,9 @@ services:
       copy-db-scripts:
         condition: service_completed_successfully
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # PostgreSQL 17. Releases before it used pg_data (PostgreSQL 13); neutree-cli
+      # copies that volume here when upgrading and leaves it for a rollback.
+      - pg17_data:/var/lib/postgresql/data
       - {{ .NeutreeCoreWorkDir }}/db/init-scripts:/docker-entrypoint-initdb.d
     networks:
       - neutree
@@ -99,7 +101,7 @@ services:
         condition: none
 
   post-migration-hook:
-    image: postgres:13
+    image: postgres:17
     container_name: post-migration-hook
     networks:
       - neutree
@@ -141,28 +143,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  postgres-meta:
-    image: supabase/postgres-meta:v0.86.0
-    container_name: postgres-meta
-    environment:
-      PG_META_HOST: "0.0.0.0"
-      PG_META_PORT: 8080
-      PG_META_DB_HOST: "postgres"
-      PG_META_DB_NAME: "neutree"
-      PG_META_DB_USER: "postgres"
-      PG_META_DB_PORT: 5432
-      PG_META_DB_PASSWORD: "{{ .DbPassword }}"
-    networks:
-      - neutree
-    depends_on:
-      migration:
-        condition: service_completed_successfully
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   neutree-core:
     image: neutree/neutree-core:{{ .NeutreeVersion }}
     container_name: neutree-core
@@ -178,7 +158,7 @@ services:
     command:
       - --storage-access-url=http://postgrest:6432
       - --storage-jwt-secret={{ .JwtSecret }}
-      - --controller-workers=5
+      - --controller-workers=10
       - --default-cluster-version=v1.0.0
       - --metrics-remote-write-url={{ .MetricsRemoteWriteURL }}
       - --gateway-type=kong
@@ -441,7 +421,7 @@ networks:
     driver: bridge
 
 volumes:
-  pg_data:
+  pg17_data:
   vl_data:
 {{ if .MetricsRemoteWriteURL }}
   vmagentdata:

@@ -284,25 +284,29 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 		name               string
 		imagePrefix        string
 		kubeSchedulerImage string
-		hamiImage          string
+		extenderImage      string
+		devicePluginImage  string
 	}{
 		{
 			name:               "docker hub preserves explicit upstream registries",
 			imagePrefix:        "docker.io/neutree-ai",
 			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
-			hamiImage:          "docker.io/projecthami/hami:" + componentversion.V130HAMI,
+			extenderImage:      "docker.io/neutree/hami:" + clusterversion.HAMiP1ImageTag,
+			devicePluginImage:  "docker.io/projecthami/hami:" + componentversion.V130HAMI,
 		},
 		{
 			name:               "private registry rewrites all images",
 			imagePrefix:        "registry.example.com/neutree-ai",
 			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
-			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + componentversion.V130HAMI,
+			extenderImage:      "registry.example.com/neutree-ai/neutree/hami:" + clusterversion.HAMiP1ImageTag,
+			devicePluginImage:  "registry.example.com/neutree-ai/projecthami/hami:" + componentversion.V130HAMI,
 		},
 		{
 			name:               "docker hub without project preserves source registries",
 			imagePrefix:        "docker.io",
 			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
-			hamiImage:          "docker.io/projecthami/hami:" + componentversion.V130HAMI,
+			extenderImage:      "docker.io/neutree/hami:" + clusterversion.HAMiP1ImageTag,
+			devicePluginImage:  "docker.io/projecthami/hami:" + componentversion.V130HAMI,
 		},
 	}
 
@@ -318,13 +322,13 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 			assert.Equal(t, tt.kubeSchedulerImage, kubeScheduler["image"])
 
 			extender := findContainer(t, objs.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
-			assert.Equal(t, tt.hamiImage, extender["image"])
+			assert.Equal(t, tt.extenderImage, extender["image"])
 
 			devicePlugin := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
-			assert.Equal(t, tt.hamiImage, devicePlugin["image"])
+			assert.Equal(t, tt.devicePluginImage, devicePlugin["image"])
 
 			monitor := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")
-			assert.Equal(t, tt.hamiImage, monitor["image"])
+			assert.Equal(t, tt.devicePluginImage, monitor["image"])
 		})
 	}
 }
@@ -1221,7 +1225,7 @@ func TestHAMiChartProtectedImageVersions(t *testing.T) {
 		},
 	}}, componentversion.V130HAMI)
 
-	assert.Equal(t, "v2.10.0", nestedMap(t, values, "scheduler", "extender", "image")["tag"])
+	assert.Equal(t, "v2.10.0-p1", nestedMap(t, values, "scheduler", "extender", "image")["tag"])
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "image")["tag"])
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "monitor", "image")["tag"])
 	assert.Equal(t, "v2.10.0", (HAMiStatus{Ready: true, Version: componentversion.V130HAMI}).ComponentStatus().Version)
@@ -1359,7 +1363,7 @@ func TestHAMiReconcileInstallsAndUpgradesEmbeddedChart(test *testing.T) {
 			for _, container := range deployment.Spec.Template.Spec.Containers {
 				containerImages[container.Name] = container.Image
 			}
-			assert.Equal(test, "docker.io/projecthami/hami:v2.10.0", containerImages["vgpu-scheduler-extender"])
+			assert.Equal(test, "docker.io/neutree/hami:v2.10.0-p1", containerImages["vgpu-scheduler-extender"])
 			assert.Equal(test, "registry.k8s.io/kube-scheduler:v1.33.13", containerImages["kube-scheduler"])
 
 			secret := &corev1.Secret{}
@@ -1391,7 +1395,8 @@ func TestHAMiOfflineImages(t *testing.T) {
 	imageList, err := os.ReadFile(imageListPath)
 	require.NoError(t, err)
 
-	hamiImagePrefix := HAMiImageRegistry + "/" + HAMiImageRepository + ":"
+	hamiImagePrefix := clusterversion.HAMiImageRegistry + "/" + clusterversion.HAMiP1ImageRepository + ":"
+	devicePluginImage := clusterversion.HAMiImageRegistry + "/" + clusterversion.HAMiImageRepository + ":" + componentversion.V130HAMI
 	schedulerImagePrefix := KubeSchedulerImageRegistry + "/" + KubeSchedulerImageRepository + ":"
 	var hamiImages []string
 	var schedulerImages []string
@@ -1399,7 +1404,7 @@ func TestHAMiOfflineImages(t *testing.T) {
 	for _, line := range strings.Split(string(imageList), "\n") {
 		image := strings.TrimSpace(line)
 
-		if strings.HasPrefix(image, hamiImagePrefix) {
+		if strings.HasPrefix(image, hamiImagePrefix) || strings.HasPrefix(image, clusterversion.HAMiImageRegistry+"/"+clusterversion.HAMiImageRepository+":") {
 			hamiImages = append(hamiImages, image)
 		}
 		if strings.HasPrefix(image, schedulerImagePrefix) {
@@ -1408,8 +1413,7 @@ func TestHAMiOfflineImages(t *testing.T) {
 	}
 
 	t.Run("hami", func(t *testing.T) {
-		assert.Equal(t, "v2.10.0", componentversion.V130HAMI)
-		assert.ElementsMatch(t, []string{hamiImagePrefix + componentversion.V130HAMI}, hamiImages)
+		assert.ElementsMatch(t, []string{hamiImagePrefix + clusterversion.HAMiP1ImageTag, devicePluginImage}, hamiImages)
 	})
 
 	expectedSchedulerImages := make([]string, 0, len(clusterversion.KubeSchedulerVersionsByMinor))
@@ -1464,11 +1468,12 @@ func TestHAMiClusterVersionCompatibility(test *testing.T) {
 			deployment := findObject(test, resources.Items, "Deployment", SchedulerName)
 			assert.Equal(test, "hami-"+strings.TrimPrefix(testCase.hamiVersion, "v"), deployment.GetLabels()["helm.sh/chart"])
 			extender := findContainer(test, resources.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
-			assert.Equal(test, "registry.example.com/neutree/projecthami/hami:"+testCase.hamiVersion, extender["image"])
+			profile := clusterversion.HAMiImageProfileForVersion(testCase.hamiVersion)
+			assert.Equal(test, "registry.example.com/neutree/"+profile.ExtenderRepository+":"+profile.ExtenderTag, extender["image"])
 			devicePlugin := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
-			assert.Equal(test, "registry.example.com/neutree/projecthami/hami:"+testCase.hamiVersion, devicePlugin["image"])
+			assert.Equal(test, "registry.example.com/neutree/"+profile.DevicePluginRepository+":"+profile.DevicePluginTag, devicePlugin["image"])
 			monitor := findContainer(test, resources.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")
-			assert.Equal(test, "registry.example.com/neutree/projecthami/hami:"+testCase.hamiVersion, monitor["image"])
+			assert.Equal(test, "registry.example.com/neutree/"+profile.DevicePluginRepository+":"+profile.DevicePluginTag, monitor["image"])
 			scheduler := findContainer(test, resources.Items, "Deployment", SchedulerName, "kube-scheduler")
 			assert.Equal(test, "registry.example.com/neutree/kube-scheduler:"+testCase.schedulerVersion, scheduler["image"])
 			for _, resource := range resources.Items {
@@ -1579,7 +1584,8 @@ func TestHAMiReconcileClusterVersionUpgrade(test *testing.T) {
 			for _, container := range deployment.Spec.Template.Spec.Containers {
 				containerImages[container.Name] = container.Image
 			}
-			assert.Equal(test, "docker.io/projecthami/hami:"+step.hamiVersion, containerImages["vgpu-scheduler-extender"])
+			profile := clusterversion.HAMiImageProfileForVersion(step.hamiVersion)
+			assert.Equal(test, "docker.io/"+profile.ExtenderRepository+":"+profile.ExtenderTag, containerImages["vgpu-scheduler-extender"])
 			assert.Equal(test, "registry.k8s.io/kube-scheduler:"+step.schedulerVersion, containerImages["kube-scheduler"])
 			require.NoError(test, fakeClient.Get(ctx, secretKey, secret))
 			assert.Equal(test, originalCA, secret.Data["ca.crt"])

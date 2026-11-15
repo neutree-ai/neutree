@@ -28,4 +28,12 @@ directories:
   - directory: {}
     path: .
   path: deploy/chart/neutree/init-scripts/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/chart/neutree/db-migration/
+- contents:
+  - directory: {}
+    path: .
+  path: deploy/docker/neutree-core/db-migration/
 kind: LockConfig

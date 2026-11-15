@@ -167,12 +167,12 @@ func (w timeWindow) params() url.Values {
 }
 
 // baseQuery prepends the permission scope to every query the store issues and
-// excludes chunk records — an internal storage detail that must never surface
-// as a trace (it would inflate list pages, stats counts, and per-key
-// aggregates). The negative match keeps pre-chunking records visible: they
-// carry no record_type field, so `NOT record_type:="chunk"` passes them.
+// excludes internal records — chunks and Vector's buffer heartbeats — which
+// must never surface as traces (they would inflate list pages, stats counts,
+// and per-key aggregates). Trace records carry no record_type field, so
+// `NOT record_type:*` passes them and drops any record that has one.
 func (s *traceStore) baseQuery(scope string) string {
-	return scope + " NOT record_type:=" + logsQLQuoteValue(chunkRecordType)
+	return scope + " NOT record_type:*"
 }
 
 // List returns up to limit traces, newest first. Bodies are included only

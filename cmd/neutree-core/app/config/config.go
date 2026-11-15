@@ -5,8 +5,8 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/auth"
-	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
+	"github.com/neutree-ai/neutree/internal/leader"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/observability/logsink"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
@@ -16,6 +16,9 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// HealthzPath is served by every core replica for kubelet probes.
+const HealthzPath = "/healthz"
 
 type ControllerConfig struct {
 	Workers int
@@ -53,10 +56,12 @@ type CoreConfig struct {
 	RepositoryService       registry.RepositoryService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
-	EngineRegistry          engine.Registry
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 	AuthClient              auth.Client
+
+	// LeaderElector gates background work; nil means always leader.
+	LeaderElector leader.Elector
 
 	// global controller configs
 	ControllerConfig *ControllerConfig

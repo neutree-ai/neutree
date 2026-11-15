@@ -44,6 +44,16 @@ func TestJobWaitersAllowRetriedPods(t *testing.T) {
 				}
 			}
 
+			for _, job := range []string{
+				"migration-job", "post-migration-hook-job", "kong-init-migrations",
+				"kong-pre-upgrade-migrations", "kong-post-upgrade-migrations",
+			} {
+				key := fmt.Sprintf("neutree-%s-%d/wait-pg-migration", job, tc.revision)
+				expected[key] = []string{
+					"job-wr", fmt.Sprintf("neutree-pg-migration-%d", tc.revision), "-n", "job-retry-test",
+				}
+			}
+
 			actual := map[string][]string{}
 			for _, resource := range resources.Items {
 				if resource.GetKind() != "Job" {

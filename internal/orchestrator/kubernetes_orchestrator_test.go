@@ -2506,7 +2506,7 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 }
 
 func TestBuildDeployment_VLLMLargeIntegerUsesDecimalNotation(t *testing.T) {
-	cases := []string{"vllm-v0.24.0-p2", "vllm-v0.31.0", "vllm-v0.32.0"}
+	cases := []string{"vllm-v0.24.0-p2", "vllm-v0.32.0"}
 
 	for _, templateKey := range cases {
 		t.Run(templateKey, func(t *testing.T) {
@@ -4107,10 +4107,6 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 		templateKey string
 	}{
 		{
-			name:        "vllm-v0.31.0",
-			templateKey: "vllm-v0.31.0",
-		},
-		{
 			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",
 		},
@@ -4209,10 +4205,6 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 		name        string
 		templateKey string
 	}{
-		{
-			name:        "vllm-v0.31.0",
-			templateKey: "vllm-v0.31.0",
-		},
 		{
 			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",

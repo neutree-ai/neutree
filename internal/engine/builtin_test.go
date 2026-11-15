@@ -62,7 +62,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 
 		sort.Strings(gotVersions)
-		if want := []string{"v0.24.0-p2", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
+		if want := []string{"v0.24.0-p2", "v0.32.0"}; !reflect.DeepEqual(gotVersions, want) {
 			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
 		}
 	}
@@ -129,6 +129,48 @@ func TestGetBuiltinEngines(t *testing.T) {
 		for _, task := range e.Spec.SupportedTasks {
 			if task == v1.TextRerankModelTask {
 				t.Errorf("sglang must not advertise text-rerank")
+			}
+		}
+	}
+}
+
+// TestBuiltinEnginesDeclareCapabilities guards the built-ins against silently
+// losing their declarations, which would leave them relying on the
+// undeclared-means-legacy fallback.
+func TestBuiltinEnginesDeclareCapabilities(t *testing.T) {
+	engines, err := GetBuiltinEngines()
+	if err != nil {
+		t.Fatalf("failed to load built-in engines: %v", err)
+	}
+
+	if len(engines) == 0 {
+		t.Fatal("expected at least one built-in engine")
+	}
+
+	for _, e := range engines {
+		for _, version := range e.Spec.Versions {
+			name := e.Metadata.Name + "/" + version.Version
+
+			if err := version.Capabilities.Validate(); err != nil {
+				t.Errorf("%s declares invalid capabilities: %v", name, err)
+				continue
+			}
+
+			if version.Capabilities == nil {
+				t.Errorf("%s declares no capabilities", name)
+				continue
+			}
+
+			// The built-ins are all scraped on the port their Kubernetes deploy
+			// template exposes, and all back the Playground.
+			metrics := version.ResolveMetricsExport()
+			if !metrics.Enabled || metrics.Port != v1.DefaultMetricsExportPort {
+				t.Errorf("%s: unexpected metrics export %+v", name, metrics)
+			}
+
+			playground := version.ResolvePlayground()
+			if !playground.Enabled || len(playground.Modes) == 0 {
+				t.Errorf("%s: unexpected playground %+v", name, playground)
 			}
 		}
 	}
