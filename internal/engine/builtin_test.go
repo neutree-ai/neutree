@@ -62,7 +62,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 
 		sort.Strings(gotVersions)
-		if want := []string{"v0.24.0-p2", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
+		if want := []string{"v0.24.0-p2", "v0.32.0"}; !reflect.DeepEqual(gotVersions, want) {
 			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
 		}
 	}
