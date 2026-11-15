@@ -69,3 +69,37 @@ func TestPersistentVolumeClaimsKeepOnUninstall(t *testing.T) {
 		})
 	}
 }
+
+// The policy applies to the standalone PVCs managed by this chart. Database
+// retention and subchart volumes have their own lifecycle settings.
+func TestPersistentVolumeClaimsResourcePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy string
+	}{
+		{name: "keep", policy: "keep"},
+		{name: "empty", policy: ""},
+		{name: "custom", policy: "custom-policy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, ha := range []bool{false, true} {
+				values := map[string]interface{}{
+					"persistence": map[string]interface{}{"resourcePolicy": tc.policy},
+				}
+				names := []string{"neutree-vector-pvc", "neutree-victorialogs-pvc", "neutree-vmagent-pvc"}
+				if ha {
+					values = haValues(values)
+					names = []string{"neutree-victorialogs-pvc"}
+				}
+				resources := renderChart(t, values)
+				for _, name := range names {
+					var pvc unstructured.Unstructured
+					renderedObject(t, resources, "PersistentVolumeClaim", name, &pvc)
+					policy, present := pvc.GetAnnotations()["helm.sh/resource-policy"]
+					require.Equal(t, tc.policy, policy, name)
+					require.Equal(t, tc.policy != "", present, name)
+				}
+			}
+		})
+	}
+}

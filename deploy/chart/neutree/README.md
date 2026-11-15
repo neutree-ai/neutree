@@ -159,3 +159,15 @@ kubectl -n <namespace> delete pvc <release>-postgresql-pvc
 ```
 
 After this, rolling back to a release before 1.3 is no longer possible.
+
+## PVC resource policy
+
+`persistence.resourcePolicy` defaults to `keep` for the standalone Vector,
+VictoriaLogs and vmagent PVCs. Set it to `""` to omit the
+`helm.sh/resource-policy` annotation and allow Helm to delete those PVCs on
+uninstall. In HA mode, Vector uses StatefulSet volume claim templates and
+vmagent uses ephemeral storage, so this setting only applies to VictoriaLogs.
+
+This setting does not change PostgreSQL retention (including the legacy PVC),
+StatefulSet volume retention, or subchart PVC annotations such as
+`grafana.persistence.annotations`.

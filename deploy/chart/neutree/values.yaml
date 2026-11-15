@@ -23,6 +23,11 @@ jwtSecret: ""
 # It is recommended to change it quickly after installation.
 adminPassword: ""
 
+persistence:
+  # Helm resource policy for the Vector, VictoriaLogs and vmagent PVCs.
+  # Set to "" to allow Helm to delete PVCs on uninstall.
+  resourcePolicy: keep
+
 # High availability for the stateless components (api, auth, postgrest, kong,
 # vector, core). When enabled, each of them defaults to 3 replicas, spreads one
 # pod per node through a required pod anti-affinity (used only when the
