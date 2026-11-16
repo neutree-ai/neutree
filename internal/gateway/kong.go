@@ -1179,8 +1179,8 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 //	Routable = desiredActive && actualServing
 //
 // where desiredActive reads Spec/Metadata (not deleting and target replicas > 0)
-// and actualServing reads Status (Phase == Running, or Phase == Deploying with
-// ReadyReplicas > 0).
+// and actualServing reads Status (Phase == Running, or a transitional phase
+// with ReadyReplicas > 0).
 func isEndpointRoutable(ep *v1.Endpoint) bool {
 	if ep == nil || ep.Status == nil {
 		return false
@@ -1189,7 +1189,8 @@ func isEndpointRoutable(ep *v1.Endpoint) bool {
 	desiredActive := ep.GetDeletionTimestamp() == "" &&
 		(ep.Spec == nil || ep.Spec.Replicas.Num == nil || *ep.Spec.Replicas.Num > 0)
 	actualServing := ep.Status.Phase == v1.EndpointPhaseRUNNING ||
-		(ep.Status.Phase == v1.EndpointPhaseDEPLOYING && endpointReadyReplicas(ep) > 0)
+		(ep.Status.Phase == v1.EndpointPhaseDEPLOYING && endpointReadyReplicas(ep) > 0) ||
+		(ep.Status.Phase == v1.EndpointPhaseMODELDOWNLOADING && endpointReadyReplicas(ep) > 0)
 
 	return desiredActive && actualServing
 }

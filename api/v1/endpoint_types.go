@@ -91,6 +91,9 @@ type EndpointStatus struct {
 }
 
 type EndpointResourceStatus struct {
+	// ReadyReplicas is the number of replicas currently ready to serve traffic.
+	// Orchestrators populate it whenever deployment readiness is observable,
+	// including transitional phases such as Deploying and ModelDownloading.
 	ReadyReplicas int                       `json:"ready_replicas,omitempty"`
 	Replicas      []ReplicaDeviceAllocation `json:"replicas,omitempty"`
 	Summary       *EndpointResourceSummary  `json:"summary,omitempty"`
