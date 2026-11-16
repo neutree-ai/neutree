@@ -1246,7 +1246,7 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 		// model_mapping has no provider identifiers; assign local names when
 		// compiling that input into the same gateway model-route format.
 		if len(ee.Spec.ModelRoutes) == 0 {
-			entry.Name = fmt.Sprintf("provider-%d", i)
+			entry.Name = fmt.Sprintf("provider-%d", i+1)
 		}
 
 		r := resolvedUpstream{entry: entry}
