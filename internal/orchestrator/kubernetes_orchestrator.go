@@ -465,16 +465,11 @@ func (k *kubernetesOrchestrator) prepareOrchestratorContextForPauseDelete(endpoi
 	}, nil
 }
 
-// validateClusterForPauseDelete enforces the subset of validateDependencies that
-// pause/delete still need: cluster must exist, be Running, and be a K8s
-// cluster. Other dependency checks (engine, model registry, image registry)
-// are intentionally skipped — they are not required to scale or delete the
-// existing K8s objects.
+// validateClusterForPauseDelete checks the cluster type without gating on its
+// phase. Cluster updates do not prevent pausing an existing Deployment or
+// observing an already-paused endpoint; Kubernetes API errors are handled by
+// the pause operation itself.
 func (k *kubernetesOrchestrator) validateClusterForPauseDelete(ctx *OrchestratorContext) error {
-	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
-		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
-	}
-
 	if ctx.Cluster.Spec.Type != v1.KubernetesClusterType {
 		return errors.Errorf("deploy cluster %s is not kubernetes type", ctx.Cluster.Metadata.WorkspaceName())
 	}
