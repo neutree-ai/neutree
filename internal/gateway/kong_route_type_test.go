@@ -50,27 +50,6 @@ func TestGetEndpointRouteType_ByTask(t *testing.T) {
 	}
 }
 
-func TestIsEndpointRoutableDuringModelDownload(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		ready     int
-		wantReady bool
-	}{
-		{name: "ready replica keeps model downloading endpoint routable", ready: 1, wantReady: true},
-		{name: "no ready replica keeps model downloading endpoint unavailable", ready: 0, wantReady: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ep := &v1.Endpoint{
-				Status: &v1.EndpointStatus{
-					Phase:     v1.EndpointPhaseMODELDOWNLOADING,
-					Resources: &v1.EndpointResourceStatus{ReadyReplicas: tc.ready},
-				},
-			}
-			assert.Equal(t, tc.wantReady, isEndpointRoutable(ep))
-		})
-	}
-}
-
 func TestEndpointDirectAddressesAgree(t *testing.T) {
 	cases := []struct {
 		name      string
