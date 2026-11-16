@@ -339,29 +339,29 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 }
 
 func (c *EndpointController) preserveResources(obj *v1.Endpoint, status *v1.EndpointStatus) {
-	if obj.Status == nil || obj.Status.Resources == nil {
+	if obj == nil || status == nil || obj.Status == nil || !hasDeviceResources(obj.Status.Resources) {
 		return
 	}
 
-	if status.Resources != nil {
-		if len(status.Resources.Replicas) == 0 && status.Resources.Summary == nil {
-			preserved := *status.Resources
-			preserved.Replicas = obj.Status.Resources.Replicas
-			preserved.Summary = obj.Status.Resources.Summary
-			status.Resources = &preserved
-		}
-
+	if status.Resources == nil {
+		preserved := *obj.Status.Resources
+		preserved.ReadyReplicas = 0
+		status.Resources = &preserved
 		return
 	}
 
-	preserved := *obj.Status.Resources
-	preserved.ReadyReplicas = 0
-
-	if len(preserved.Replicas) == 0 && preserved.Summary == nil {
+	if hasDeviceResources(status.Resources) {
 		return
 	}
 
+	preserved := *status.Resources
+	preserved.Replicas = obj.Status.Resources.Replicas
+	preserved.Summary = obj.Status.Resources.Summary
 	status.Resources = &preserved
+}
+
+func hasDeviceResources(resources *v1.EndpointResourceStatus) bool {
+	return resources != nil && (len(resources.Replicas) > 0 || resources.Summary != nil)
 }
 
 func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {
