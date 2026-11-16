@@ -431,6 +431,9 @@ func TestResolveEndpointRefAvailability(t *testing.T) {
 		{name: "deploying with 0 ready replicas (cold start or probe failed)", status: &v1.EndpointStatus{
 			Phase: v1.EndpointPhaseDEPLOYING,
 		}, wantErr: "has no ready replicas (phase: Deploying)"},
+		{name: "model downloading with 0 ready replicas", status: &v1.EndpointStatus{
+			Phase: v1.EndpointPhaseMODELDOWNLOADING,
+		}, wantErr: "has no ready replicas (phase: ModelDownloading)"},
 		{name: "pausing while still Running (replicas=0)", replicas: pointy.Int(0), status: &v1.EndpointStatus{
 			Phase:     v1.EndpointPhaseRUNNING,
 			Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
@@ -471,6 +474,33 @@ func TestResolveEndpointRefAvailability(t *testing.T) {
 				require.Error(t, err)
 				assert.ErrorContains(t, err, tc.wantErr)
 			}
+		})
+	}
+}
+
+func TestResolveEndpointRefRejectsDeletingClusters(t *testing.T) {
+	for _, phase := range []v1.ClusterPhase{v1.ClusterPhaseDeleting, v1.ClusterPhaseDeleted} {
+		t.Run(string(phase), func(t *testing.T) {
+			ep := v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "ep", Workspace: "ws"},
+				Spec:     &v1.EndpointSpec{Cluster: "c"},
+				Status:   &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+			}
+			cluster := v1.Cluster{
+				Metadata: &v1.Metadata{},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+				Status:   &v1.ClusterStatus{Phase: phase, DashboardURL: "http://router:8000"},
+			}
+			s := storagemocks.NewMockStorage(t)
+			s.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{ep}, nil)
+			s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+
+			_, _, _, _, err := (&Kong{storage: s}).resolveEndpointRef("ws", "ep")
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "cluster c is "+map[v1.ClusterPhase]string{
+				v1.ClusterPhaseDeleting: "deleting",
+				v1.ClusterPhaseDeleted:  "deleted",
+			}[phase])
 		})
 	}
 }

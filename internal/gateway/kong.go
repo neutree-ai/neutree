@@ -1135,6 +1135,8 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 			return "", "", 0, "", fmt.Errorf("internal endpoint %s has no observed status", endpointName)
 		case ep.Status.Phase == v1.EndpointPhaseDEPLOYING:
 			return "", "", 0, "", fmt.Errorf("internal endpoint %s has no ready replicas (phase: %s)", endpointName, ep.Status.Phase)
+		case ep.Status.Phase == v1.EndpointPhaseMODELDOWNLOADING:
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s has no ready replicas (phase: %s)", endpointName, ep.Status.Phase)
 		default:
 			return "", "", 0, "", fmt.Errorf("internal endpoint %s is not Running (phase: %s)", endpointName, ep.Status.Phase)
 		}
@@ -1162,11 +1164,25 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 		return "", "", 0, "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
 	}
 
-	if clusters[0].Status == nil {
+	cluster := &clusters[0]
+	if cluster.GetDeletionTimestamp() != "" {
+		return "", "", 0, "", fmt.Errorf("cluster %s is deleting", ep.Spec.Cluster)
+	}
+
+	if cluster.Status != nil {
+		switch cluster.Status.Phase {
+		case v1.ClusterPhaseDeleting:
+			return "", "", 0, "", fmt.Errorf("cluster %s is deleting", ep.Spec.Cluster)
+		case v1.ClusterPhaseDeleted:
+			return "", "", 0, "", fmt.Errorf("cluster %s is deleted", ep.Spec.Cluster)
+		}
+	}
+
+	if cluster.Status == nil {
 		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
 	}
 
-	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
+	address, err := utils.GetEndpointServeAddress(cluster, ep)
 	if err != nil {
 		return "", "", 0, "", errors.Wrapf(err, "failed to get endpoint serve address")
 	}

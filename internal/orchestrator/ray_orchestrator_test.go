@@ -4410,6 +4410,21 @@ func TestRayOrchestrator_EndpointReadyReplicas(t *testing.T) {
 			wantPhase: v1.EndpointPhaseRUNNING,
 			wantReady: 2,
 		},
+		{
+			name: "failed application still reports observed ready replicas",
+			appStatus: dashboard.RayServeApplicationStatus{
+				Status: dashboard.ApplicationStatusDeployFailed,
+				Deployments: map[string]dashboard.Deployment{
+					"Controller": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{{ReplicaID: "c1", State: dashboard.ReplicaStateRunning}}},
+					"Backend": {Status: dashboard.DeploymentStatusHealthy, Replicas: []dashboard.Replica{
+						{ReplicaID: "b1", State: dashboard.ReplicaStateRunning},
+						{ReplicaID: "b2", State: dashboard.ReplicaStateRunning},
+					}},
+				},
+			},
+			wantPhase: v1.EndpointPhaseFAILED,
+			wantReady: 2,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mockDashboard := dashboardmocks.NewMockDashboardService(t)
