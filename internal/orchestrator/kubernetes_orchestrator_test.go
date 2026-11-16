@@ -4864,3 +4864,22 @@ func TestKubernetesOrchestrator_ModelDownloadingReportsReadyReplicas(t *testing.
 	require.NotNil(t, status.Resources)
 	assert.Equal(t, 1, status.Resources.ReadyReplicas)
 }
+
+func TestKubernetesOrchestrator_ProgressDeadlineFailureReportsReadyReplicas(t *testing.T) {
+	ep := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "chat-model"},
+		Spec:     &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: pointer.Int(2)}},
+	}
+	client := NewFakeK8sClient(t).WithDeploymentWithCondition(
+		ep.Metadata.Name, 2, 1, 1,
+		string(appsv1.DeploymentProgressing), "ProgressDeadlineExceeded", "deployment timed out",
+	)
+
+	status, err := (&kubernetesOrchestrator{}).getEndpointStats(
+		client, "test-namespace", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseFAILED, status.Phase)
+	require.NotNil(t, status.Resources)
+	assert.Equal(t, 1, status.Resources.ReadyReplicas)
+}
