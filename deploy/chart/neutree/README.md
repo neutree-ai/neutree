@@ -70,6 +70,44 @@ All `cnpg.*` values are passed to that chart.
   (and `cnpg.imagePullSecrets` if the registry needs them). Rendering fails
   when `global.image.registry` is set and `cnpg.image.repository` is not.
 
+### Offline install
+
+The offline bundle comes from `scripts/builder/build-package.sh --type
+controlplane`. It holds `images/all-images.tar` and `manifest.yaml`. Images in
+the tar keep their original names without the `docker.io/` prefix, for example
+`kong/kong:3.9` and `cloudnative-pg/postgresql:17.6`.
+
+1. Load the tar on a host that can reach your registry, then retag and push
+   each image under `<registry>`, keeping the rest of the path. The `images`
+   list in `manifest.yaml` has the names and tags.
+
+   ```bash
+   docker load -i images/all-images.tar
+   # For every image: docker tag <name>:<tag> <registry>/<name>:<tag>
+   #                  docker push <registry>/<name>:<tag>
+   ```
+
+2. Install with three registry settings. The chart prefixes
+   `global.image.registry` to its own images and to Victoria Metrics. Grafana
+   reads `global.imageRegistry` instead, and the CloudNativePG operator reads
+   `cnpg.image.repository`. Set all three, or some images still point at the
+   public registries.
+
+   ```bash
+   REGISTRY=registry.example.com/neutree
+   helm upgrade --install neutree ./deploy/chart/neutree \
+     --set jwtSecret=<secret> \
+     --set global.image.registry=$REGISTRY \
+     --set global.imageRegistry=$REGISTRY \
+     --set cnpg.image.repository=$REGISTRY/cloudnative-pg/cloudnative-pg
+   ```
+
+   For HA, add `-f deploy/chart/neutree/values-ha.yaml`.
+
+If the registry needs credentials, create a pull secret in the release
+namespace and set `global.imagePullSecrets[0].name=<secret>` and
+`cnpg.imagePullSecrets[0].name=<secret>`.
+
 ## Database layout
 
 PostgreSQL runs as one instance, or as three instances in HA mode (see
