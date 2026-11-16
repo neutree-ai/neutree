@@ -4396,7 +4396,7 @@ func TestRayOrchestrator_EndpointReadyReplicas(t *testing.T) {
 			wantReady: 1,
 		},
 		{
-			name: "running clears deploying ready count",
+			name: "running reports ready replicas",
 			appStatus: dashboard.RayServeApplicationStatus{
 				Status: dashboard.ApplicationStatusRunning,
 				Deployments: map[string]dashboard.Deployment{
@@ -4408,7 +4408,7 @@ func TestRayOrchestrator_EndpointReadyReplicas(t *testing.T) {
 				},
 			},
 			wantPhase: v1.EndpointPhaseRUNNING,
-			wantReady: 0,
+			wantReady: 2,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

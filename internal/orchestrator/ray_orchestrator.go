@@ -862,7 +862,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		endpointStatus := &v1.EndpointStatus{
 			Phase:        phase,
 			ErrorMessage: "",
-			Resources:    resources,
+			Resources:    withReadyReplicas(resources, rayReadyReplicas(status, proxyReady)),
 		}
 		if isBuiltInModelDownloaderEngine && currentModelHash != "" {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
@@ -880,7 +880,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	errorMsg := buildRayApplicationErrorMessage(phase, status, errorMessages)
 
-	if phase == v1.EndpointPhaseDEPLOYING {
+	if phase == v1.EndpointPhaseDEPLOYING || phase == v1.EndpointPhaseMODELDOWNLOADING {
 		resources = withReadyReplicas(resources, rayReadyReplicas(status, proxyReady))
 	}
 

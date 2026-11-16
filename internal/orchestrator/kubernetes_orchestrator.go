@@ -705,7 +705,7 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 	if util.IsDeploymentUpdatedAndReady(dep) {
 		return &v1.EndpointStatus{
 			Phase:     v1.EndpointPhaseRUNNING,
-			Resources: resources,
+			Resources: withReadyReplicas(resources, int(dep.Status.ReadyReplicas)),
 		}, nil
 	}
 
@@ -713,7 +713,7 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseFAILED,
 			ErrorMessage: "Endpoint failed: " + failedMsg,
-			Resources:    resources,
+			Resources:    withReadyReplicas(resources, int(dep.Status.ReadyReplicas)),
 		}, nil
 	}
 
@@ -721,6 +721,7 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
 			ErrorMessage: "Endpoint model download in progress: " + detail,
+			Resources:    withReadyReplicas(resources, int(dep.Status.ReadyReplicas)),
 		}, nil
 	}
 
