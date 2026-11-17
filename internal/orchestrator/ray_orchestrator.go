@@ -870,7 +870,11 @@ func (o *RayOrchestrator) buildEndpointResourceStatus(endpoint *v1.Endpoint) (*v
 		return nil, nil
 	}
 
-	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil)
+	var dashboardClient dashboard.DashboardService
+	if o.cluster != nil && o.cluster.Status != nil && o.cluster.Status.DashboardURL != "" {
+		dashboardClient = dashboard.NewDashboardService(o.cluster.Status.DashboardURL)
+	}
+	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil, dashboardClient)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	return resourceBuilder.BuildEndpointResources(context.Background(), o.cluster, endpoint)

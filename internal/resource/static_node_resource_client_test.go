@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,9 +49,17 @@ func newStaticNodeResourceClientForTest(
 	nodes []*v1.StaticNode,
 	baseClient ResourceClient,
 ) *StaticNodeResourceClient {
+	return newStaticNodeResourceClientForTestWithDashboard(nodes, baseClient, nil)
+}
+
+func newStaticNodeResourceClientForTestWithDashboard(
+	nodes []*v1.StaticNode,
+	baseClient ResourceClient,
+	dashboardClient ...dashboard.DashboardService,
+) *StaticNodeResourceClient {
 	_, lister := staticNodeClusterAndListerForTest(nodes)
 
-	return NewStaticNodeClusterResourceClient(lister, baseClient)
+	return NewStaticNodeClusterResourceClient(lister, baseClient, dashboardClient...)
 }
 
 func staticNodeClusterAndListerForTest(nodes []*v1.StaticNode) (*v1.Cluster, *fakeStaticNodeLister) {
@@ -523,6 +533,43 @@ func TestStaticNodeResourceClientListEndpointInstancesUsesEndpointProductKey(t *
 	assert.Equal(t, "GPU-abc", instances[0].Devices[0].UUID)
 	assert.Equal(t, "NVIDIA-L20", instances[0].Devices[0].Product)
 	assert.Equal(t, "192.168.19.218", instances[0].Devices[0].NodeID)
+}
+
+func TestStaticNodeResourceClientReadsVLLMStartupMemoryFromRayLogs(t *testing.T) {
+	dashboard := &dashboardmocks.MockDashboardService{}
+	dashboard.On("GetActorLog", "actor-1", "out", startupLogTailLines).
+		Return("Model loading took 10.5 GiB\n", nil)
+	dashboard.On("GetActorLog", "actor-1", "err", startupLogTailLines).
+		Return("Available KV cache memory: 4.25 GiB\n", nil)
+
+	client := newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec:     &v1.StaticNodeSpec{IP: "192.168.19.218"},
+			Status: &v1.StaticNodeStatus{
+				Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()},
+				Allocations: []v1.StaticNodeAllocationStatus{{
+					Workspace: "default",
+					Endpoint:  "chat",
+					ReplicaID: "replica-a",
+					RuntimeID: "actor-1",
+					Devices:   []v1.DeviceAllocation{{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 49152, CoreUnits: 100}},
+				}},
+			},
+		},
+	}, nil, dashboard)
+
+	endpoint := testEndpoint("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+	instances, err := client.ListEndpointInstances(context.Background(), staticNodeClusterForTest(), endpoint)
+
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.NotNil(t, instances[0].ModelWeightsMiB)
+	require.InDelta(t, 10752.0, *instances[0].ModelWeightsMiB, 0.01)
+	require.NotNil(t, instances[0].KVCacheCapacityMiB)
+	require.InDelta(t, 4352.0, *instances[0].KVCacheCapacityMiB, 0.01)
+	dashboard.AssertExpectations(t)
 }
 
 func TestStaticNodeResourceClientListEndpointInstancesReturnsNilWhenStaticNodesDoNotExist(t *testing.T) {

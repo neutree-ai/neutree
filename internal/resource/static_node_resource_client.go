@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -14,15 +15,23 @@ var ErrIncompleteStaticNodeDeviceSnapshots = errors.New("incomplete static node 
 type StaticNodeResourceClient struct {
 	nodeLister storage.StaticNodeLister
 	baseClient ResourceClient
+	dashboard  dashboard.DashboardService
 }
 
 func NewStaticNodeClusterResourceClient(
 	nodeLister storage.StaticNodeLister,
 	baseClient ResourceClient,
+	dashboardClients ...dashboard.DashboardService,
 ) *StaticNodeResourceClient {
+	var dashboardClient dashboard.DashboardService
+	if len(dashboardClients) > 0 {
+		dashboardClient = dashboardClients[0]
+	}
+
 	return &StaticNodeResourceClient{
 		nodeLister: nodeLister,
 		baseClient: baseClient,
+		dashboard:  dashboardClient,
 	}
 }
 
@@ -103,6 +112,7 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 				InstanceID: allocation.ReplicaID,
 				ReplicaID:  allocation.ReplicaID,
 				NodeID:     staticNodeResourceKey(node),
+				RuntimeID:  allocation.RuntimeID,
 				Devices:    devices,
 			})
 		}
@@ -112,9 +122,38 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 		return nil, nil
 	}
 
+	c.populateEndpointStartupMemoryStats(endpoint, instances)
+
 	sortEndpointInstanceResources(instances)
 
 	return instances, nil
+}
+
+func (c *StaticNodeResourceClient) populateEndpointStartupMemoryStats(
+	endpoint *v1.Endpoint,
+	instances []EndpointInstanceResource,
+) {
+	if c == nil || c.dashboard == nil || endpoint == nil || endpoint.Spec == nil ||
+		endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
+		return
+	}
+
+	for i := range instances {
+		actorID := instances[i].RuntimeID
+		if actorID == "" {
+			continue
+		}
+
+		var logs string
+		for _, suffix := range []string{"out", "err"} {
+			text, err := c.dashboard.GetActorLog(actorID, suffix, startupLogTailLines)
+			if err == nil {
+				logs += text + "\n"
+			}
+		}
+
+		instances[i].ModelWeightsMiB, instances[i].KVCacheCapacityMiB = parseVLLMStartupMemoryMiB(logs)
+	}
 }
 
 func (c *StaticNodeResourceClient) staticNodes(cluster *v1.Cluster) ([]*v1.StaticNode, error) {

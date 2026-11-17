@@ -19,6 +19,8 @@ type ResourceClient interface {
 
 const BytesPerGiB = 1024 * 1024 * 1024
 
+const startupLogTailLines = 200
+
 type ResourceNode struct {
 	ID                  string
 	Status              *v1.NodeResourceStatus
@@ -29,6 +31,7 @@ type EndpointInstanceResource struct {
 	InstanceID         string
 	ReplicaID          string
 	NodeID             string
+	RuntimeID          string
 	ContainerID        string
 	ModelWeightsMiB    *float64
 	KVCacheCapacityMiB *float64
