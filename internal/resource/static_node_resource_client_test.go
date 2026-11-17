@@ -10,6 +10,7 @@ import (
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,17 +50,18 @@ func newStaticNodeResourceClientForTest(
 	nodes []*v1.StaticNode,
 	baseClient ResourceClient,
 ) *StaticNodeResourceClient {
-	return newStaticNodeResourceClientForTestWithDashboard(nodes, baseClient, nil)
+	return newStaticNodeResourceClientForTestWithDashboard(nodes, baseClient, nil, map[string]struct{}{"actor-1": {}})
 }
 
 func newStaticNodeResourceClientForTestWithDashboard(
 	nodes []*v1.StaticNode,
 	baseClient ResourceClient,
-	dashboardClient ...dashboard.DashboardService,
+	dashboardClient dashboard.DashboardService,
+	runningActors map[string]struct{},
 ) *StaticNodeResourceClient {
 	_, lister := staticNodeClusterAndListerForTest(nodes)
 
-	return NewStaticNodeClusterResourceClient(lister, baseClient, dashboardClient...)
+	return NewStaticNodeClusterResourceClientWithDashboard(lister, baseClient, dashboardClient, runningActors)
 }
 
 func staticNodeClusterAndListerForTest(nodes []*v1.StaticNode) (*v1.Cluster, *fakeStaticNodeLister) {
@@ -537,9 +539,9 @@ func TestStaticNodeResourceClientListEndpointInstancesUsesEndpointProductKey(t *
 
 func TestStaticNodeResourceClientReadsVLLMStartupMemoryFromRayLogs(t *testing.T) {
 	dashboard := &dashboardmocks.MockDashboardService{}
-	dashboard.On("GetActorLog", "actor-1", "out", startupLogTailLines).
+	dashboard.On("GetActorLogHead", mock.Anything, "actor-1", "out", startupLogLimitBytes).
 		Return("Model loading took 10.5 GiB\n", nil)
-	dashboard.On("GetActorLog", "actor-1", "err", startupLogTailLines).
+	dashboard.On("GetActorLogHead", mock.Anything, "actor-1", "err", startupLogLimitBytes).
 		Return("Available KV cache memory: 4.25 GiB\n", nil)
 
 	client := newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{
@@ -557,7 +559,7 @@ func TestStaticNodeResourceClientReadsVLLMStartupMemoryFromRayLogs(t *testing.T)
 				}},
 			},
 		},
-	}, nil, dashboard)
+	}, nil, dashboard, map[string]struct{}{"actor-1": {}})
 
 	endpoint := testEndpoint("chat", "NVIDIA-L20")
 	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
@@ -569,6 +571,79 @@ func TestStaticNodeResourceClientReadsVLLMStartupMemoryFromRayLogs(t *testing.T)
 	require.InDelta(t, 10752.0, *instances[0].ModelWeightsMiB, 0.01)
 	require.NotNil(t, instances[0].KVCacheCapacityMiB)
 	require.InDelta(t, 4352.0, *instances[0].KVCacheCapacityMiB, 0.01)
+	dashboard.AssertExpectations(t)
+}
+
+func startupMemoryStaticNode() *v1.StaticNode {
+	return &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+		Spec:     &v1.StaticNodeSpec{IP: "192.168.19.218"},
+		Status: &v1.StaticNodeStatus{
+			Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()},
+			Allocations: []v1.StaticNodeAllocationStatus{{
+				Workspace: "default", Endpoint: "chat", ReplicaID: "replica-a", RuntimeID: "actor-1",
+				Devices: []v1.DeviceAllocation{{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 49152, CoreUnits: 100}},
+			}},
+		},
+	}
+}
+
+func TestStaticNodeResourceClientReusesStartupMemoryForRunningActor(t *testing.T) {
+	dashboard := &dashboardmocks.MockDashboardService{}
+	client := newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{startupMemoryStaticNode()}, nil, dashboard, map[string]struct{}{"actor-1": {}})
+	weights, kv := 1024.0, 256.0
+	endpoint := testEndpoint("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+	endpoint.Status = &v1.EndpointStatus{Resources: &v1.EndpointResourceStatus{Replicas: []v1.ReplicaDeviceAllocation{{
+		ReplicaID: "replica-a", ContainerID: "actor-1", ModelWeightsMiB: &weights, KVCacheCapacityMiB: &kv,
+	}}}}
+
+	instances, err := client.ListEndpointInstances(context.Background(), staticNodeClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, &weights, instances[0].ModelWeightsMiB)
+	assert.Equal(t, &kv, instances[0].KVCacheCapacityMiB)
+	dashboard.AssertNotCalled(t, "GetActorLogHead", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestStaticNodeResourceClientDoesNotCacheIncompleteOrFailedStartupLogs(t *testing.T) {
+	dashboard := &dashboardmocks.MockDashboardService{}
+	dashboard.On("GetActorLogHead", mock.Anything, "actor-1", mock.Anything, startupLogLimitBytes).
+		Return("", errors.New("dashboard unavailable"))
+	client := newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{startupMemoryStaticNode()}, nil, dashboard, map[string]struct{}{"actor-1": {}})
+	endpoint := testEndpoint("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+
+	instances, err := client.ListEndpointInstances(context.Background(), staticNodeClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Empty(t, instances[0].ContainerID)
+	assert.Nil(t, instances[0].ModelWeightsMiB)
+	assert.Nil(t, instances[0].KVCacheCapacityMiB)
+	dashboard.AssertExpectations(t)
+}
+
+func TestStaticNodeResourceClientSkipsNonRunningActorsAndClearsKVOverride(t *testing.T) {
+	dashboard := &dashboardmocks.MockDashboardService{}
+	client := newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{startupMemoryStaticNode()}, nil, dashboard, map[string]struct{}{})
+	endpoint := testEndpoint("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+	endpoint.Spec.Variables = map[string]interface{}{"engine_args": map[string]interface{}{"num-gpu-blocks-override": 12}}
+
+	instances, err := client.ListEndpointInstances(context.Background(), staticNodeClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	dashboard.AssertNotCalled(t, "GetActorLogHead", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+	dashboard = &dashboardmocks.MockDashboardService{}
+	dashboard.On("GetActorLogHead", mock.Anything, "actor-1", "out", startupLogLimitBytes).Return("Model loading took 10 GiB", nil)
+	dashboard.On("GetActorLogHead", mock.Anything, "actor-1", "err", startupLogLimitBytes).Return("Available KV cache memory: 4 GiB", nil)
+	client = newStaticNodeResourceClientForTestWithDashboard([]*v1.StaticNode{startupMemoryStaticNode()}, nil, dashboard, map[string]struct{}{"actor-1": {}})
+	instances, err = client.ListEndpointInstances(context.Background(), staticNodeClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.NotNil(t, instances[0].ModelWeightsMiB)
+	assert.Nil(t, instances[0].KVCacheCapacityMiB)
 	dashboard.AssertExpectations(t)
 }
 

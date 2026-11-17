@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,4 +45,20 @@ func TestClient_GetActorLog_NonOKStatusReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, got)
 	assert.Contains(t, err.Error(), "500")
+}
+
+func TestClient_GetActorLogHeadReadsFromBeginningWithLimit(t *testing.T) {
+	var capturedQuery map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		_, _ = w.Write([]byte("startup-memory-record"))
+	}))
+	defer srv.Close()
+
+	c := &Client{dashboardURL: srv.URL, client: &http.Client{}}
+	got, err := c.GetActorLogHead(context.Background(), "actor-1", "out", 7)
+
+	require.NoError(t, err)
+	assert.Equal(t, "startup", got)
+	assert.Equal(t, []string{"-1"}, capturedQuery["lines"])
 }

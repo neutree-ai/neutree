@@ -3,6 +3,12 @@ package resource
 import (
 	"regexp"
 	"strconv"
+	"time"
+)
+
+const (
+	startupLogLimitBytes = int64(2 * 1024 * 1024)
+	startupLogTimeout    = 3 * time.Second
 )
 
 var (

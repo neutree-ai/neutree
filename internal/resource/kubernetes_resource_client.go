@@ -7,7 +7,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -23,8 +22,6 @@ import (
 
 const (
 	kubernetesDefaultDeviceCoreUnits = int64(100)
-	startupLogLimitBytes             = int64(2 * 1024 * 1024)
-	startupLogTimeout                = 3 * time.Second
 )
 
 type kubernetesNeutreeDeviceAnnotation struct {

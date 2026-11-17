@@ -13,25 +13,33 @@ import (
 var ErrIncompleteStaticNodeDeviceSnapshots = errors.New("incomplete static node device snapshots")
 
 type StaticNodeResourceClient struct {
-	nodeLister storage.StaticNodeLister
-	baseClient ResourceClient
-	dashboard  dashboard.DashboardService
+	nodeLister    storage.StaticNodeLister
+	baseClient    ResourceClient
+	dashboard     dashboard.DashboardService
+	runningActors map[string]struct{}
 }
 
 func NewStaticNodeClusterResourceClient(
 	nodeLister storage.StaticNodeLister,
 	baseClient ResourceClient,
-	dashboardClients ...dashboard.DashboardService,
 ) *StaticNodeResourceClient {
-	var dashboardClient dashboard.DashboardService
-	if len(dashboardClients) > 0 {
-		dashboardClient = dashboardClients[0]
-	}
-
 	return &StaticNodeResourceClient{
 		nodeLister: nodeLister,
 		baseClient: baseClient,
-		dashboard:  dashboardClient,
+	}
+}
+
+func NewStaticNodeClusterResourceClientWithDashboard(
+	nodeLister storage.StaticNodeLister,
+	baseClient ResourceClient,
+	dashboardClient dashboard.DashboardService,
+	runningActors map[string]struct{},
+) *StaticNodeResourceClient {
+	return &StaticNodeResourceClient{
+		nodeLister:    nodeLister,
+		baseClient:    baseClient,
+		dashboard:     dashboardClient,
+		runningActors: runningActors,
 	}
 }
 
@@ -73,7 +81,7 @@ func (c *StaticNodeResourceClient) ListNodes(ctx context.Context, cluster *v1.Cl
 }
 
 func (c *StaticNodeResourceClient) ListEndpointInstances(
-	_ context.Context,
+	ctx context.Context,
 	cluster *v1.Cluster,
 	endpoint *v1.Endpoint,
 ) ([]EndpointInstanceResource, error) {
@@ -122,7 +130,9 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 		return nil, nil
 	}
 
-	c.populateEndpointStartupMemoryStats(endpoint, instances)
+	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
+	defer cancel()
+	c.populateEndpointStartupMemoryStats(logCtx, endpoint, instances)
 
 	sortEndpointInstanceResources(instances)
 
@@ -130,6 +140,7 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 }
 
 func (c *StaticNodeResourceClient) populateEndpointStartupMemoryStats(
+	ctx context.Context,
 	endpoint *v1.Endpoint,
 	instances []EndpointInstanceResource,
 ) {
@@ -140,20 +151,63 @@ func (c *StaticNodeResourceClient) populateEndpointStartupMemoryStats(
 
 	for i := range instances {
 		actorID := instances[i].RuntimeID
+		if actorID == "" || !isRunningActor(c.runningActors, actorID) {
+			continue
+		}
+
+		key := instances[i].ReplicaID
+		if key == "" {
+			key = instances[i].InstanceID
+		}
+		if endpoint.Status != nil && endpoint.Status.Resources != nil {
+			for _, previous := range endpoint.Status.Resources.Replicas {
+				previousKey := previous.ReplicaID
+				if previousKey == "" {
+					previousKey = previous.InstanceID
+				}
+				if previousKey == key && previous.ContainerID == actorID &&
+					(previous.ModelWeightsMiB != nil || previous.KVCacheCapacityMiB != nil) {
+					instances[i].ContainerID = actorID
+					instances[i].ModelWeightsMiB = previous.ModelWeightsMiB
+					instances[i].KVCacheCapacityMiB = previous.KVCacheCapacityMiB
+					actorID = ""
+					break
+				}
+			}
+		}
 		if actorID == "" {
 			continue
 		}
 
 		var logs string
 		for _, suffix := range []string{"out", "err"} {
-			text, err := c.dashboard.GetActorLog(actorID, suffix, startupLogTailLines)
+			text, err := c.dashboard.GetActorLogHead(ctx, actorID, suffix, startupLogLimitBytes)
 			if err == nil {
 				logs += text + "\n"
 			}
 		}
 
-		instances[i].ModelWeightsMiB, instances[i].KVCacheCapacityMiB = parseVLLMStartupMemoryMiB(logs)
+		weights, kv := parseVLLMStartupMemoryMiB(logs)
+		if endpoint.Spec.Variables != nil {
+			engineArgs, _ := endpoint.Spec.Variables["engine_args"].(map[string]interface{})
+			if _, ok := engineArgs["num_gpu_blocks_override"]; ok {
+				kv = nil
+			}
+			if _, ok := engineArgs["num-gpu-blocks-override"]; ok {
+				kv = nil
+			}
+		}
+		if weights != nil || kv != nil {
+			instances[i].ContainerID = actorID
+			instances[i].ModelWeightsMiB = weights
+			instances[i].KVCacheCapacityMiB = kv
+		}
 	}
+}
+
+func isRunningActor(runningActors map[string]struct{}, actorID string) bool {
+	_, ok := runningActors[actorID]
+	return ok
 }
 
 func (c *StaticNodeResourceClient) staticNodes(cluster *v1.Cluster) ([]*v1.StaticNode, error) {
