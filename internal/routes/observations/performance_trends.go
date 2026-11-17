@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/cacheobservations"
 )
 
@@ -35,12 +36,13 @@ type performanceSeries struct {
 }
 
 type performanceTrends struct {
-	Status string              `json:"status"`
-	Window string              `json:"window"`
-	Start  int64               `json:"start"`
-	End    int64               `json:"end"`
-	Step   int64               `json:"step_seconds"`
-	Series []performanceSeries `json:"series"`
+	Status  string              `json:"status"`
+	Window  string              `json:"window"`
+	Start   int64               `json:"start"`
+	End     int64               `json:"end"`
+	Step    int64               `json:"step_seconds"`
+	Summary map[string]float64  `json:"summary,omitempty"`
+	Series  []performanceSeries `json:"series"`
 }
 
 func performanceRange(q url.Values, now time.Time) (performanceTrends, error) {
@@ -107,33 +109,55 @@ func performanceTrendsHandler(deps *Dependencies) gin.HandlerFunc {
 		// Each point summarizes a rolling interval, independently of the chart's span.
 		interval := strconv.FormatInt(max(int64(60), result.Step), 10) + "s"
 		endpoint := items[0]
-		queries := []string{buildPerformanceQuery(workspace, endpoint.Spec.Cluster, name, interval)}
-
-		if cache := endpoint.Spec.KVCache; cache != nil {
-			provider, _ := deps.KVCacheProviders.Get(cache.Provider)
-			if observer, ok := provider.(cacheobservations.PerformanceProvider); ok {
-				queries = append(queries, observer.PerformanceQueries(cacheobservations.Scope{
-					Workspace: workspace, Cluster: endpoint.Spec.Cluster, Endpoint: name, Window: interval, Nodes: collectEndpointNodes(endpoint.Status),
-				})...)
-			}
-		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		result.Series, err = queryPerformanceTrends(ctx, deps, strings.Join(queries, " or "), result)
+		result.Series, err = queryPerformanceTrends(ctx, deps, performanceQueries(deps, workspace, name, interval, endpoint), result)
 		if err != nil {
 			c.JSON(503, gin.H{"error": "monitoring unavailable"})
 			return
 		}
 
+		// Summary metrics (such as latency and cache hit rate) aggregate over the full selected range.
+		span := strconv.FormatInt(max(int64(60), result.End-result.Start), 10) + "s"
+		summaryBounds := performanceTrends{Start: result.End, End: result.End, Step: result.Step}
+
+		summarySeries, err := queryPerformanceTrends(ctx, deps, performanceQueries(deps, workspace, name, span, endpoint), summaryBounds)
+		if err != nil {
+			c.JSON(503, gin.H{"error": "monitoring unavailable"})
+			return
+		}
+
+		if len(summarySeries) > 0 {
+			result.Summary = make(map[string]float64, len(summarySeries))
+			for _, item := range summarySeries {
+				result.Summary[item.Metric] = item.Points[len(item.Points)-1].Value
+			}
+		}
+
 		result.Status = monitoringNoData
-		if len(result.Series) > 0 {
+		if len(result.Series) > 0 || len(result.Summary) > 0 {
 			result.Status = "ok"
 		}
 
 		c.JSON(200, result)
 	}
+}
+
+func performanceQueries(deps *Dependencies, workspace, name, window string, endpoint v1.Endpoint) string {
+	queries := []string{buildPerformanceQuery(workspace, endpoint.Spec.Cluster, name, window)}
+
+	if cache := endpoint.Spec.KVCache; cache != nil {
+		provider, _ := deps.KVCacheProviders.Get(cache.Provider)
+		if observer, ok := provider.(cacheobservations.PerformanceProvider); ok {
+			queries = append(queries, observer.PerformanceQueries(cacheobservations.Scope{
+				Workspace: workspace, Cluster: endpoint.Spec.Cluster, Endpoint: name, Window: window, Nodes: collectEndpointNodes(endpoint.Status),
+			})...)
+		}
+	}
+
+	return strings.Join(queries, " or ")
 }
 
 func queryPerformanceTrends(ctx context.Context, deps *Dependencies, query string, bounds performanceTrends) ([]performanceSeries, error) {

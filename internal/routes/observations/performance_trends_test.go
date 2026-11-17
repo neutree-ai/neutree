@@ -50,13 +50,21 @@ func TestPerformanceTrendsRoute(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "/api/v1/query_range", r.URL.Path)
 		q := r.URL.Query()
-		require.Equal(t, "100", q.Get("start"))
 		require.Equal(t, "400", q.Get("end"))
 		require.Equal(t, "15", q.Get("step"))
 		require.Contains(t, q.Get("query"), `workspace="tenant",neutree_cluster="cluster-a",application="chat"`)
-		require.Contains(t, q.Get("query"), "[60s]")
 		require.Contains(t, q.Get("query"), "example_cache_performance")
 		require.NotContains(t, q.Get("query"), "cum_")
+		if q.Get("start") == "400" {
+			require.Contains(t, q.Get("query"), "[300s]")
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":"success","data":{"resultType":"matrix","result":[
+   {"metric":{"metric":"ttft_avg_seconds"},"values":[[400,"0.15"]]},
+   {"metric":{"metric":"cum_ttft_avg_seconds"},"values":[[400,"0.2"]]},
+   {"metric":{"metric":"l1_hit_rate"},"values":[[400,"0.75"]]}
+  ]}}`))}, nil
+		}
+		require.Equal(t, "100", q.Get("start"))
+		require.Contains(t, q.Get("query"), "[60s]")
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":"success","data":{"resultType":"matrix","result":[
    {"metric":{"metric":"prompt_tokens_per_second"},"values":[[100,"10"],[115,"0"]]},
    {"metric":{"metric":"generation_tokens_per_second"},"values":[[100,"2"],[115,"0"]]},
@@ -72,6 +80,7 @@ func TestPerformanceTrendsRoute(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Equal(t, "ok", got.Status)
 	require.Equal(t, "custom", got.Window)
+	require.Equal(t, map[string]float64{"ttft_avg_seconds": 0.15, "l1_hit_rate": 0.75}, got.Summary)
 	byMetric := map[string]performanceSeries{}
 	for _, series := range got.Series {
 		byMetric[series.Metric] = series
@@ -117,7 +126,9 @@ type performanceObserver struct {
 }
 
 func (p performanceObserver) PerformanceQueries(scope cacheobservations.Scope) []string {
-	require.Equal(p.t, cacheobservations.Scope{Workspace: "tenant", Cluster: "cluster-a", Endpoint: "chat", Window: "60s", Nodes: []string{"worker.1"}}, scope)
+	require.Contains(p.t, []string{"60s", "300s"}, scope.Window)
+	scope.Window = ""
+	require.Equal(p.t, cacheobservations.Scope{Workspace: "tenant", Cluster: "cluster-a", Endpoint: "chat", Nodes: []string{"worker.1"}}, scope)
 	return []string{"example_cache_performance"}
 }
 
