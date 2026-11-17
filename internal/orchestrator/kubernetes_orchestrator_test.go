@@ -4358,6 +4358,22 @@ func createTestDeployment(t *testing.T, fakeClient *FakeK8sClient, ctx *Orchestr
 	require.NoError(t, fakeClient.Create(context.Background(), dep))
 }
 
+func TestPausedEndpointRemainsPausedWhileClusterUpdates(t *testing.T) {
+	fakeClient := NewFakeK8sClient(t)
+	ctx := makePauseTestCtx(fakeClient, "chat-model")
+	ctx.Cluster.Status.Phase = v1.ClusterPhaseUpdating
+	createTestDeployment(t, fakeClient, ctx, ctx.Endpoint.Metadata.Name, 0)
+
+	o := &kubernetesOrchestrator{}
+	require.NoError(t, o.validateClusterForPauseDelete(ctx))
+	require.NoError(t, o.pauseEndpoint(ctx))
+
+	status, err := o.getEndpointStats(fakeClient, util.ClusterNamespace(ctx.Cluster), ctx.Cluster, ctx.Endpoint)
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhasePAUSED, status.Phase)
+	assert.Empty(t, status.ErrorMessage)
+}
+
 func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 	const name = "chat-model"
 
