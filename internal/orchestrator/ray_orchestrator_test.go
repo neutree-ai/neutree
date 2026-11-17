@@ -279,6 +279,9 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 			Name:      "chat-model",
 		},
 		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine: v1.EngineNameVLLM,
+			},
 			Model: &v1.ModelSpec{
 				Registry: "test-registry",
 				Name:     "test-model",
@@ -298,6 +301,18 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 		Applications: map[string]dashboard.RayServeApplicationStatus{
 			EndpointToServeApplicationName(endpoint): {
 				Status: dashboard.ApplicationStatusRunning,
+				Deployments: map[string]dashboard.Deployment{
+					"BACKEND": {
+						Name: "BACKEND",
+						Replicas: []dashboard.Replica{
+							{
+								ActorID:   "actor-1",
+								ReplicaID: "replica-a",
+								State:     dashboard.ApplicationStatusRunning,
+							},
+						},
+					},
+				},
 			},
 		},
 		Proxies: map[string]dashboard.ProxyStatus{
@@ -306,6 +321,10 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 			},
 		},
 	}, nil)
+	mockDashboard.On("GetActorLogHead", mock.Anything, "actor-1", "out", mock.Anything).
+		Return("Model loading took 10.5 GiB\n", nil).Once()
+	mockDashboard.On("GetActorLogHead", mock.Anything, "actor-1", "err", mock.Anything).
+		Return("Available KV cache memory: 4.25 GiB\n", nil).Once()
 
 	mockStorage := storagemocks.NewMockStorage(t)
 	mockStorage.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
@@ -321,6 +340,7 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 						Workspace: "production",
 						Endpoint:  "chat-model",
 						ReplicaID: "replica-a",
+						RuntimeID: "actor-1",
 						Devices: []v1.DeviceAllocation{
 							{
 								UUID:          "GPU-abc",
@@ -373,6 +393,11 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 	assert.Equal(t, "replica-a", replica.InstanceID)
 	assert.Equal(t, "replica-a", replica.ReplicaID)
 	assert.Equal(t, "10.0.0.1", replica.NodeID)
+	assert.Equal(t, "actor-1", replica.ContainerID)
+	require.NotNil(t, replica.ModelWeightsMiB)
+	assert.InDelta(t, 10752.0, *replica.ModelWeightsMiB, 0.01)
+	require.NotNil(t, replica.KVCacheCapacityMiB)
+	assert.InDelta(t, 4352.0, *replica.KVCacheCapacityMiB, 0.01)
 	require.Len(t, replica.Devices, 1)
 	assert.Equal(t, "GPU-abc", replica.Devices[0].UUID)
 	assert.Equal(t, "NVIDIA-L20", replica.Devices[0].Product)

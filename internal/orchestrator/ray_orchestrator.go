@@ -775,7 +775,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
-	resources, err := o.buildEndpointResourceStatus(endpoint)
+	resources, err := o.buildEndpointResourceStatus(endpoint, dashboardService, status)
 	if err != nil {
 		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
 	}
@@ -865,15 +865,38 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	return endpointStatus, nil
 }
 
-func (o *RayOrchestrator) buildEndpointResourceStatus(endpoint *v1.Endpoint) (*v1.EndpointResourceStatus, error) {
+func (o *RayOrchestrator) buildEndpointResourceStatus(
+	endpoint *v1.Endpoint,
+	dashboardClient dashboard.DashboardService,
+	appStatus dashboard.RayServeApplicationStatus,
+) (*v1.EndpointResourceStatus, error) {
 	if o == nil || o.storage == nil {
 		return nil, nil
 	}
 
-	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil)
+	resourceClient := resourceview.NewStaticNodeClusterResourceClientWithDashboard(
+		o.storage,
+		nil,
+		dashboardClient,
+		runningActorIDs(appStatus),
+	)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	return resourceBuilder.BuildEndpointResources(context.Background(), o.cluster, endpoint)
+}
+
+func runningActorIDs(appStatus dashboard.RayServeApplicationStatus) map[string]struct{} {
+	result := make(map[string]struct{})
+
+	for _, deployment := range appStatus.Deployments {
+		for _, replica := range deployment.Replicas {
+			if replica.State == dashboard.ApplicationStatusRunning && replica.ActorID != "" {
+				result[replica.ActorID] = struct{}{}
+			}
+		}
+	}
+
+	return result
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
