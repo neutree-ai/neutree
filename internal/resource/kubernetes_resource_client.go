@@ -237,7 +237,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 	pods []corev1.Pod,
 	instances []EndpointInstanceResource,
 ) {
-	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
+	if !isVLLMEndpoint(endpoint) {
 		return
 	}
 
@@ -246,35 +246,15 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		podsByName[pod.Name] = pod
 	}
 
-	prevByPod := make(map[string]v1.ReplicaDeviceAllocation)
-
-	if endpoint.Status != nil && endpoint.Status.Resources != nil {
-		for _, prev := range endpoint.Status.Resources.Replicas {
-			key := prev.ReplicaID
-			if key == "" {
-				key = prev.InstanceID
-			}
-
-			if key != "" {
-				prevByPod[key] = prev
-			}
-		}
-	}
+	prevByPod := previousReplicasByKey(endpoint)
+	blocksOverride := hasVLLMBlocksOverride(endpoint)
 
 	// Bound the entire collection pass, including reading response bodies.
 	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
 	defer cancel()
 
-	engineArgs, _ := endpoint.Spec.Variables["engine_args"].(map[string]interface{})
-
-	_, overrideUnderscore := engineArgs["num_gpu_blocks_override"]
-	_, overrideDash := engineArgs["num-gpu-blocks-override"]
-
 	for i := range instances {
-		podName := instances[i].ReplicaID
-		if podName == "" {
-			podName = instances[i].InstanceID
-		}
+		podName := replicaAllocationKey(instances[i].ReplicaID, instances[i].InstanceID)
 
 		pod, ok := podsByName[podName]
 		if !ok {
@@ -287,13 +267,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 
 		if prev, exists := prevByPod[podName]; exists && prev.ContainerID == containerID {
-			instances[i].ContainerID = prev.ContainerID
-			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
-			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
-
-			if overrideUnderscore || overrideDash {
-				instances[i].KVCacheCapacityMiB = nil
-			}
+			applyCachedStartupMemory(&instances[i], prev, blocksOverride)
 
 			continue
 		}
@@ -322,7 +296,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 
 		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs))
-		if overrideUnderscore || overrideDash {
+		if blocksOverride {
 			kvCacheMiB = nil
 		}
 

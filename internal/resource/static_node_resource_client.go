@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
+
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -99,6 +102,7 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 	}
 
 	instances := make([]EndpointInstanceResource, 0)
+	actorIDs := make([]string, 0)
 	product := endpointAcceleratorProduct(endpoint)
 
 	for _, node := range nodes {
@@ -120,9 +124,10 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 				InstanceID: allocation.ReplicaID,
 				ReplicaID:  allocation.ReplicaID,
 				NodeID:     staticNodeResourceKey(node),
-				RuntimeID:  allocation.RuntimeID,
 				Devices:    devices,
 			})
+
+			actorIDs = append(actorIDs, allocation.RuntimeID)
 		}
 	}
 
@@ -130,9 +135,7 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 		return nil, nil
 	}
 
-	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
-	defer cancel()
-	c.populateEndpointStartupMemoryStats(logCtx, endpoint, instances)
+	c.populateEndpointStartupMemoryStats(ctx, endpoint, instances, actorIDs)
 
 	sortEndpointInstanceResources(instances)
 
@@ -143,66 +146,78 @@ func (c *StaticNodeResourceClient) populateEndpointStartupMemoryStats(
 	ctx context.Context,
 	endpoint *v1.Endpoint,
 	instances []EndpointInstanceResource,
+	actorIDs []string,
 ) {
-	if c == nil || c.dashboard == nil || endpoint == nil || endpoint.Spec == nil ||
-		endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
+	if c == nil || c.dashboard == nil || !isVLLMEndpoint(endpoint) {
 		return
 	}
 
+	prevByKey := previousReplicasByKey(endpoint)
+	blocksOverride := hasVLLMBlocksOverride(endpoint)
+
+	// Bound the entire collection pass, including reading response bodies.
+	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
+	defer cancel()
+
 	for i := range instances {
-		actorID := instances[i].RuntimeID
-		if actorID == "" || !isRunningActor(c.runningActors, actorID) {
-			continue
+		if i >= len(actorIDs) {
+			break
 		}
 
-		key := instances[i].ReplicaID
-		if key == "" {
-			key = instances[i].InstanceID
-		}
-		if endpoint.Status != nil && endpoint.Status.Resources != nil {
-			for _, previous := range endpoint.Status.Resources.Replicas {
-				previousKey := previous.ReplicaID
-				if previousKey == "" {
-					previousKey = previous.InstanceID
-				}
-				if previousKey == key && previous.ContainerID == actorID &&
-					(previous.ModelWeightsMiB != nil || previous.KVCacheCapacityMiB != nil) {
-					instances[i].ContainerID = actorID
-					instances[i].ModelWeightsMiB = previous.ModelWeightsMiB
-					instances[i].KVCacheCapacityMiB = previous.KVCacheCapacityMiB
-					actorID = ""
-					break
-				}
-			}
-		}
+		actorID := actorIDs[i]
 		if actorID == "" {
 			continue
 		}
 
-		var logs string
-		for _, suffix := range []string{"out", "err"} {
-			text, err := c.dashboard.GetActorLogHead(ctx, actorID, suffix, startupLogLimitBytes)
-			if err == nil {
-				logs += text + "\n"
-			}
+		key := replicaAllocationKey(instances[i].ReplicaID, instances[i].InstanceID)
+		if prev, exists := prevByKey[key]; exists && prev.ContainerID == actorID {
+			applyCachedStartupMemory(&instances[i], prev, blocksOverride)
+
+			continue
 		}
 
-		weights, kv := parseVLLMStartupMemoryMiB(logs)
-		if endpoint.Spec.Variables != nil {
-			engineArgs, _ := endpoint.Spec.Variables["engine_args"].(map[string]interface{})
-			if _, ok := engineArgs["num_gpu_blocks_override"]; ok {
-				kv = nil
-			}
-			if _, ok := engineArgs["num-gpu-blocks-override"]; ok {
-				kv = nil
-			}
+		if !isRunningActor(c.runningActors, actorID) || logCtx.Err() != nil {
+			continue
 		}
-		if weights != nil || kv != nil {
-			instances[i].ContainerID = actorID
-			instances[i].ModelWeightsMiB = weights
-			instances[i].KVCacheCapacityMiB = kv
+
+		weightsMiB, kvCacheMiB, ok := c.readActorStartupMemoryMiB(logCtx, actorID)
+		if !ok {
+			continue
 		}
+
+		if blocksOverride {
+			kvCacheMiB = nil
+		}
+
+		// A successful read completes collection for this running actor, even without matching logs.
+
+		instances[i].ContainerID = actorID
+		instances[i].ModelWeightsMiB = weightsMiB
+		instances[i].KVCacheCapacityMiB = kvCacheMiB
 	}
+}
+
+func (c *StaticNodeResourceClient) readActorStartupMemoryMiB(
+	ctx context.Context,
+	actorID string,
+) (*float64, *float64, bool) {
+	var logs strings.Builder
+
+	for _, suffix := range []string{"out", "err"} {
+		text, err := c.dashboard.GetActorLogHead(ctx, actorID, suffix, startupLogLimitBytes)
+		if err != nil {
+			klog.V(4).Infof("Skipping startup log parse for actor %s (%s): %v", actorID, suffix, err)
+
+			return nil, nil, false
+		}
+
+		logs.WriteString(text)
+		logs.WriteByte('\n')
+	}
+
+	weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(logs.String())
+
+	return weightsMiB, kvCacheMiB, true
 }
 
 func isRunningActor(runningActors map[string]struct{}, actorID string) bool {

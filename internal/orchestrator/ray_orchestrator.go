@@ -887,6 +887,7 @@ func (o *RayOrchestrator) buildEndpointResourceStatus(
 
 func runningActorIDs(appStatus dashboard.RayServeApplicationStatus) map[string]struct{} {
 	result := make(map[string]struct{})
+
 	for _, deployment := range appStatus.Deployments {
 		for _, replica := range deployment.Replicas {
 			if replica.State == dashboard.ApplicationStatusRunning && replica.ActorID != "" {
@@ -894,6 +895,7 @@ func runningActorIDs(appStatus dashboard.RayServeApplicationStatus) map[string]s
 			}
 		}
 	}
+
 	return result
 }
 

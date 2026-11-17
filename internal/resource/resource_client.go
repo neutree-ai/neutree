@@ -29,7 +29,6 @@ type EndpointInstanceResource struct {
 	InstanceID         string
 	ReplicaID          string
 	NodeID             string
-	RuntimeID          string
 	ContainerID        string
 	ModelWeightsMiB    *float64
 	KVCacheCapacityMiB *float64
