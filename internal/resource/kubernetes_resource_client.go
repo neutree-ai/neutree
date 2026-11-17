@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -22,6 +25,13 @@ import (
 
 const (
 	kubernetesDefaultDeviceCoreUnits = int64(100)
+	startupLogLimitBytes             = int64(2 * 1024 * 1024)
+	startupLogTimeout                = 3 * time.Second
+)
+
+var (
+	vllmModelLoadingRegex     = regexp.MustCompile(`Model loading took ([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
+	vllmAvailableKVCacheRegex = regexp.MustCompile(`Available KV cache memory:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
 )
 
 type kubernetesNeutreeDeviceAnnotation struct {
@@ -237,7 +247,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 	pods []corev1.Pod,
 	instances []EndpointInstanceResource,
 ) {
-	if !isVLLMEndpoint(endpoint) {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
 		return
 	}
 
@@ -246,15 +256,35 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		podsByName[pod.Name] = pod
 	}
 
-	prevByPod := previousReplicasByKey(endpoint)
-	blocksOverride := hasVLLMBlocksOverride(endpoint)
+	prevByPod := make(map[string]v1.ReplicaDeviceAllocation)
+
+	if endpoint.Status != nil && endpoint.Status.Resources != nil {
+		for _, prev := range endpoint.Status.Resources.Replicas {
+			key := prev.ReplicaID
+			if key == "" {
+				key = prev.InstanceID
+			}
+
+			if key != "" {
+				prevByPod[key] = prev
+			}
+		}
+	}
 
 	// Bound the entire collection pass, including reading response bodies.
 	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
 	defer cancel()
 
+	engineArgs, _ := endpoint.Spec.Variables["engine_args"].(map[string]interface{})
+
+	_, overrideUnderscore := engineArgs["num_gpu_blocks_override"]
+	_, overrideDash := engineArgs["num-gpu-blocks-override"]
+
 	for i := range instances {
-		podName := replicaAllocationKey(instances[i].ReplicaID, instances[i].InstanceID)
+		podName := instances[i].ReplicaID
+		if podName == "" {
+			podName = instances[i].InstanceID
+		}
 
 		pod, ok := podsByName[podName]
 		if !ok {
@@ -267,7 +297,13 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 
 		if prev, exists := prevByPod[podName]; exists && prev.ContainerID == containerID {
-			applyCachedStartupMemory(&instances[i], prev, blocksOverride)
+			instances[i].ContainerID = prev.ContainerID
+			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
+			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
+
+			if overrideUnderscore || overrideDash {
+				instances[i].KVCacheCapacityMiB = nil
+			}
 
 			continue
 		}
@@ -296,7 +332,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 
 		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs))
-		if blocksOverride {
+		if overrideUnderscore || overrideDash {
 			kvCacheMiB = nil
 		}
 
@@ -326,6 +362,36 @@ func mainContainerReadyStatus(pod corev1.Pod) (string, string, bool) {
 	}
 
 	return containerName, "", false
+}
+
+func parseVLLMStartupMemoryMiB(logs string) (*float64, *float64) {
+	return parseStartupMemoryMiB(vllmModelLoadingRegex, logs, false),
+		parseStartupMemoryMiB(vllmAvailableKVCacheRegex, logs, true)
+}
+
+// Startup logs provide replica-level representative values: maximum model
+// weights and minimum available KV memory among the records read.
+func parseStartupMemoryMiB(pattern *regexp.Regexp, logs string, takeMin bool) *float64 {
+	var value float64
+
+	for _, match := range pattern.FindAllStringSubmatch(logs, -1) {
+		gib, err := strconv.ParseFloat(match[1], 64)
+		if err != nil || gib <= 0 {
+			continue
+		}
+
+		if value == 0 || (takeMin && gib < value) || (!takeMin && gib > value) {
+			value = gib
+		}
+	}
+
+	if value == 0 {
+		return nil
+	}
+
+	mib := roundFloat64ToTwoDecimals(value * 1024)
+
+	return &mib
 }
 
 func kubernetesPodResourceContext(pod corev1.Pod) resourceparser.KubernetesPodResourceContext {
