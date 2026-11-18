@@ -706,6 +706,7 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 	if err != nil {
 		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
 	}
+
 	resources = withReadyReplicas(resources, readyReplicas)
 
 	// Check if all pods are ready and updated
