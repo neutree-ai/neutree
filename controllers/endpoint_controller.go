@@ -347,6 +347,7 @@ func (c *EndpointController) preserveResources(obj *v1.Endpoint, status *v1.Endp
 		preserved := *obj.Status.Resources
 		preserved.ReadyReplicas = 0
 		status.Resources = &preserved
+
 		return
 	}
 
