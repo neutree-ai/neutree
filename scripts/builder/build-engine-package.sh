@@ -201,6 +201,7 @@ Options:
     -o, --output FILE         Output package file path (default: ENGINE-VERSION-<arch>.tar.gz)
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
+    --manifest-version VERSION Manifest protocol version (default: 1.0)
     --mirror-registry URL     Mirror prefix for canonical images (e.g., registry.example.com/project)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
@@ -284,6 +285,7 @@ SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
 PLATFORM="linux/amd64"
+MANIFEST_VERSION="1.0"
 MIRROR_REGISTRY=""
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
@@ -362,6 +364,14 @@ while [[ $# -gt 0 ]]; do
             PLATFORM="$2"
             shift 2
             ;;
+        --manifest-version)
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                print_error "$1 requires a value"
+                exit 1
+            fi
+            MANIFEST_VERSION="$2"
+            shift 2
+            ;;
         --mirror-registry)
             MIRROR_REGISTRY="$2"
             shift 2
@@ -403,9 +413,15 @@ if [ -z "$IMAGES" ]; then
     exit 1
 fi
 
+if [[ ! "$MANIFEST_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    print_error "Invalid manifest version '$MANIFEST_VERSION': expected a non-empty single-line YAML scalar"
+    exit 1
+fi
+
+PACKAGE_ARCH="${PLATFORM##*/}"
+
 # Set default output file
 if [ -z "$OUTPUT_FILE" ]; then
-    PACKAGE_ARCH="${PLATFORM##*/}"
     OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}-${PACKAGE_ARCH}.tar.gz"
 fi
 
@@ -723,7 +739,7 @@ ${PLAYGROUND_BODY}"
     fi
 
     cat > "$PACKAGE_DIR/manifest.yaml" << EOF
-manifest_version: "1.0"
+manifest_version: "$MANIFEST_VERSION"
 
 metadata:
   description: "${DESCRIPTION:-Engine version $ENGINE_VERSION}"
@@ -763,7 +779,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 
     # Copy standalone manifest.yaml for release
-    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
+    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-${PACKAGE_ARCH}-manifest.yaml"
     cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
     print_info "Standalone manifest copied to: $OUTPUT_DIR/$MANIFEST_OUTPUT"
     # Calculate checksum
@@ -795,7 +811,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
 else
     # Manifest-only: output just the manifest file
     mkdir -p "$OUTPUT_DIR"
-    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-manifest.yaml"
+    MANIFEST_OUTPUT="${ENGINE_NAME}-${ENGINE_VERSION}-${PACKAGE_ARCH}-manifest.yaml"
     cp "$PACKAGE_DIR/manifest.yaml" "$OUTPUT_DIR/$MANIFEST_OUTPUT"
 
     print_info "Manifest generated successfully!"
