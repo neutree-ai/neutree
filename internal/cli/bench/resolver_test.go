@@ -55,6 +55,10 @@ func (f fakeDashboardService) GetActorLog(string, string, int) (string, error) {
 	return "", nil
 }
 
+func (f fakeDashboardService) GetActorLogHead(context.Context, string, string, int64) (string, error) {
+	return "", nil
+}
+
 func (f fakeDashboardService) ListActors([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error) {
 	return f.actors, f.actorsErr
 }
