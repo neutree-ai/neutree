@@ -210,6 +210,7 @@ func expandCases(inputLens, outputLens, concurrencies []int) []Case {
 	if len(concurrencyValues) == 0 {
 		concurrencyValues = []int{0}
 	}
+
 	cases := make([]Case, 0, len(inputs)*len(outputs)*len(concurrencyValues))
 
 	for _, inputLen := range inputs {

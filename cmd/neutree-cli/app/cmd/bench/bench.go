@@ -66,7 +66,12 @@ benchmark running on the GPU.`,
 	flags.StringVar(&opts.workload, "workload", "", "Workload preset: throughput, long-context, or generation-heavy")
 	flags.StringSliceVar(&opts.inputLens, "input-lens", []string{"16384"}, "Input token lengths, comma-separated or repeated")
 	flags.StringSliceVar(&opts.outputLens, "output-lens", []string{"2048"}, "Output token lengths, comma-separated or repeated")
-	flags.StringSliceVar(&opts.concurrencies, "concurrencies", []string{"2"}, "Maximum request concurrencies, comma-separated or repeated; workload presets omit this unless set")
+	flags.StringSliceVar(
+		&opts.concurrencies,
+		"concurrencies",
+		[]string{"2"},
+		"Maximum request concurrencies, comma-separated or repeated; workload presets omit this unless set",
+	)
 	flags.IntVar(&opts.numPrompts, "num-prompts", 20, "Number of prompts per benchmark case")
 	flags.StringVar(&opts.requestRate, "request-rate", "inf", "Request rate per second, or inf")
 	flags.StringVarP(&opts.outputDir, "output-dir", "o", ".", "Directory on the CLI host in which to create the benchmark result directory")
@@ -86,19 +91,24 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 	concurrencyValues := raw.concurrencies
 	requestRate := raw.requestRate
 	numPrompts := raw.numPrompts
+
 	if workload != "" {
 		if !cmd.Flags().Changed("input-lens") {
 			inputValues = []string{strconv.Itoa(preset.InputLen)}
 		}
+
 		if !cmd.Flags().Changed("output-lens") {
 			outputValues = []string{strconv.Itoa(preset.OutputLen)}
 		}
+
 		if !cmd.Flags().Changed("request-rate") {
 			requestRate = preset.RequestRate
 		}
+
 		if !cmd.Flags().Changed("num-prompts") {
 			numPrompts = preset.NumPrompts
 		}
+
 		if !cmd.Flags().Changed("concurrencies") {
 			concurrencyValues = nil
 		}
@@ -113,6 +123,7 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 		return err
 	}
 	var concurrencies []int
+
 	if len(concurrencyValues) > 0 {
 		concurrencies, err = internalbench.ParsePositiveIntegerList(concurrencyValues, "concurrencies")
 		if err != nil {

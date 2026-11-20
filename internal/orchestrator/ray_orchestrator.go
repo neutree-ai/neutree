@@ -900,6 +900,8 @@ func runningActorIDs(appStatus dashboard.RayServeApplicationStatus) map[string]s
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
+//
+//nolint:gocyclo // This adapter must preserve the independent engine, registry, and cluster compatibility branches.
 func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	modelRegistry *v1.ModelRegistry, engine *v1.Engine, imageRegistry *v1.ImageRegistry,
 	acceleratorMgr accelerator.Manager) (dashboard.RayServeApplication, error) {
