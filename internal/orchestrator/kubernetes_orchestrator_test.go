@@ -4085,7 +4085,8 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
-	assert.Nil(t, status.Resources)
+	require.NotNil(t, status.Resources)
+	assert.Equal(t, 1, status.Resources.ReadyReplicas)
 }
 
 // TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
@@ -4781,4 +4782,104 @@ func TestEndpointStatusDoesNotReportOldSpecAsRunning(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, v1.EndpointPhaseDEPLOYING, status.Phase)
 	require.Contains(t, status.ErrorMessage, "current endpoint configuration")
+}
+
+func TestKubernetesOrchestrator_EndpointReadyReplicas(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ep := &v1.Endpoint{Metadata: &v1.Metadata{Name: "ep"}, Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: pointer.Int(2)}}}
+	specHash, err := computeEndpointSpecHash(ep)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name      string
+		specHash  string
+		replicas  int32
+		ready     int32
+		updated   int32
+		available int32
+		wantPhase v1.EndpointPhase
+		wantReady int
+	}{
+		{name: "cold start 0/2 ready", specHash: specHash, replicas: 2, ready: 0, updated: 2, available: 0, wantPhase: v1.EndpointPhaseDEPLOYING, wantReady: 0},
+		{name: "scale up 1/2 ready with spec pending", specHash: "previous", replicas: 2, ready: 1, updated: 1, available: 1, wantPhase: v1.EndpointPhaseDEPLOYING, wantReady: 1},
+		{name: "scale up 1/2 ready", specHash: specHash, replicas: 2, ready: 1, updated: 2, available: 1, wantPhase: v1.EndpointPhaseDEPLOYING, wantReady: 1},
+		{name: "running 2/2 ready", specHash: specHash, replicas: 2, ready: 2, updated: 2, available: 2, wantPhase: v1.EndpointPhaseRUNNING, wantReady: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dep := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ep", Namespace: "ns", Generation: 1,
+					Annotations: map[string]string{annEndpointSpecHash: tc.specHash},
+				},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: pointer.Int32(tc.replicas),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"endpoint": "ep"}},
+				},
+				Status: appsv1.DeploymentStatus{
+					ObservedGeneration: 1,
+					Replicas:           tc.replicas,
+					ReadyReplicas:      tc.ready,
+					UpdatedReplicas:    tc.updated,
+					AvailableReplicas:  tc.available,
+					Conditions: []appsv1.DeploymentCondition{
+						{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue},
+						{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).Build()
+			status, err := (&kubernetesOrchestrator{}).getEndpointStats(c, "ns", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPhase, status.Phase)
+			gotReady := 0
+			if status.Resources != nil {
+				gotReady = status.Resources.ReadyReplicas
+			}
+			assert.Equal(t, tc.wantReady, gotReady)
+		})
+	}
+}
+
+func TestKubernetesOrchestrator_ModelDownloadingReportsReadyReplicas(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ep := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "chat-model"},
+		Spec:     &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: pointer.Int(2)}},
+	}
+	client := NewFakeK8sClient(t).
+		WithDeployment(ep.Metadata.Name, 2, 1, 1).
+		WithCompletedAndRunningInitContainers(modelDownloaderInitContainerName)
+
+	status, err := (&kubernetesOrchestrator{}).getEndpointStats(
+		client, "test-namespace", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseMODELDOWNLOADING, status.Phase)
+	require.NotNil(t, status.Resources)
+	assert.Equal(t, 1, status.Resources.ReadyReplicas)
+}
+
+func TestKubernetesOrchestrator_ProgressDeadlineFailureReportsReadyReplicas(t *testing.T) {
+	ep := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "chat-model"},
+		Spec:     &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: pointer.Int(2)}},
+	}
+	client := NewFakeK8sClient(t).WithDeploymentWithCondition(
+		ep.Metadata.Name, 2, 1, 1,
+		string(appsv1.DeploymentProgressing), "ProgressDeadlineExceeded", "deployment timed out",
+	)
+
+	status, err := (&kubernetesOrchestrator{}).getEndpointStats(
+		client, "test-namespace", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhaseFAILED, status.Phase)
+	require.NotNil(t, status.Resources)
+	assert.Equal(t, 1, status.Resources.ReadyReplicas)
 }

@@ -313,7 +313,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 						Models:       []string{"gone"},
 						Phase:        v1.ExternalEndpointUpstreamPhaseFailed,
 						ErrorMessage: "internal endpoint ep-deleted not found",
-					}},
+					}, {Ref: "ready", Phase: v1.ExternalEndpointUpstreamPhaseReady}},
 				}
 				return e
 			}(),
@@ -324,7 +324,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 					Models:       []string{"gone"},
 					Phase:        v1.ExternalEndpointUpstreamPhaseFailed,
 					ErrorMessage: "internal endpoint ep-deleted not found",
-				}}, nil)
+				}, {Ref: "ready", Phase: v1.ExternalEndpointUpstreamPhaseReady}}, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
 				// No UpdateExternalEndpoint: nothing user-visible moved.
 			},
@@ -384,22 +384,22 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			// Nothing resolved: the gateway hard-fails, and the per-upstream detail
-			// still rides along so the status explains why.
+			// The unavailable configuration was applied successfully; status still
+			// reports Failed while periodic reconciliation waits for recovery.
 			name: "total upstream failure stays Failed and keeps upstream detail",
 			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
 				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{{
 					Ref:   "ep-deleted",
 					Phase: v1.ExternalEndpointUpstreamPhaseFailed,
-				}}, assert.AnError)
+				}}, nil)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil &&
 						ee.Status.Phase == v1.ExternalEndpointPhaseFAILED &&
 						len(ee.Status.UpstreamStatuses) == 1
 				})).Return(nil)
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "empty serve URL preserves existing serviceURL",
