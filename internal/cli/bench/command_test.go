@@ -33,3 +33,15 @@ func TestBuildBenchCommandUsesExplicitModelAndTokenizer(t *testing.T) {
 func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 	require.Equal(t, "'model'\"'\"'s path'", shellQuote("model's path"))
 }
+
+func TestBuildBenchCommandOmitsUnsetConcurrency(t *testing.T) {
+	command := buildBenchCommand(
+		BenchTarget{BaseURL: "http://router", Model: "model", Tokenizer: "/models/model"},
+		Case{InputLen: 1024, OutputLen: 128},
+		1000,
+		"1000",
+		"/tmp/bench-case",
+	)
+
+	require.NotContains(t, command, "--max-concurrency")
+}

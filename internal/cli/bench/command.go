@@ -49,7 +49,6 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 		"--random-input-len", shellQuote(strconv.Itoa(benchmarkCase.InputLen)),
 		"--random-output-len", shellQuote(strconv.Itoa(benchmarkCase.OutputLen)),
 		"--num-prompts", shellQuote(strconv.Itoa(numPrompts)),
-		"--max-concurrency", shellQuote(strconv.Itoa(benchmarkCase.Concurrency)),
 		"--request-rate", shellQuote(requestRate),
 		"--save-result",
 		"--result-dir", shellQuote(resultDir),
@@ -58,6 +57,9 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 		"--metric-percentiles", shellQuote(benchmarkPercentiles),
 		"--percentile-metrics", shellQuote(benchmarkPercentileMetrics),
 		"--tokenizer", shellQuote(target.Tokenizer),
+	}
+	if benchmarkCase.Concurrency > 0 {
+		args = append(args, "--max-concurrency", shellQuote(strconv.Itoa(benchmarkCase.Concurrency)))
 	}
 
 	// `exec` replaces the shell with the benchmark, so the monitor is the

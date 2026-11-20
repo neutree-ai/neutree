@@ -592,7 +592,9 @@ func TestRunBenchmarkCollectsCaseArtifacts(t *testing.T) {
 	progress := captureBenchmarkProgress(t)
 
 	_, target := resolvedTarget(runner)
-	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	options := validOptions(t.TempDir())
+	options.Workload = WorkloadThroughput
+	output, err := runResolvedBenchmark(t, options, target)
 	require.NoError(t, err)
 	require.DirExists(t, output)
 
@@ -618,6 +620,9 @@ func TestRunBenchmarkCollectsCaseArtifacts(t *testing.T) {
 	manifest, err := os.ReadFile(filepath.Join(output, manifestFileName))
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), `"measurement_scope": "endpoint-route"`)
+	require.Contains(t, string(manifest), `"workload": "throughput"`)
+	require.Contains(t, string(manifest), `"num_prompts": 20`)
+	require.Contains(t, string(manifest), `"request_rate": "inf"`)
 	require.Contains(t, string(manifest), `"model_selection": "first-served-model"`)
 	require.Contains(t, string(manifest), `"model": "router-model"`)
 	require.Contains(t, string(manifest), `"status": "Succeeded"`)

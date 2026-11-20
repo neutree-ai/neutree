@@ -51,6 +51,9 @@ type manifestTarget struct {
 	Platform       string `json:"platform"`
 	RuntimeID      string `json:"runtime_id"`
 	BaseURL        string `json:"base_url"`
+	Workload       string `json:"workload,omitempty"`
+	NumPrompts     int    `json:"num_prompts"`
+	RequestRate    string `json:"request_rate"`
 	Model          string `json:"model,omitempty"`
 	Tokenizer      string `json:"tokenizer"`
 	ModelSelection string `json:"model_selection"`
@@ -143,6 +146,9 @@ func runBenchmark(
 			Platform:       target.Platform,
 			RuntimeID:      target.RuntimeID,
 			BaseURL:        target.BaseURL,
+			Workload:       options.Workload,
+			NumPrompts:     options.NumPrompts,
+			RequestRate:    options.RequestRate,
 			Model:          target.Model,
 			Tokenizer:      target.Tokenizer,
 			ModelSelection: "first-served-model",
