@@ -454,6 +454,11 @@ func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr 
 	switch {
 	case command == benchmarkPreflightCommand():
 		_, _ = io.WriteString(stdout, "usage\n")
+	case strings.Contains(command, "# neutree-bench-monitor"):
+		_, _ = io.WriteString(stdout, "benchmark output\n")
+		_, _ = io.WriteString(stderr, "benchmark diagnostics\n")
+	case strings.HasPrefix(command, "touch -- "), strings.HasPrefix(command, ": > "):
+		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
 		return nil
 	case strings.HasPrefix(command, "cat -- "):
@@ -514,7 +519,9 @@ func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.
 	switch {
 	case command == benchmarkPreflightCommand(),
 		strings.HasPrefix(command, "umask 077 && mkdir -- "),
-		strings.HasPrefix(command, "rm -rf -- "):
+		strings.HasPrefix(command, "rm -rf -- "),
+		strings.HasPrefix(command, "touch -- "),
+		strings.HasPrefix(command, ": > "):
 		return nil
 	default:
 		_, _ = io.WriteString(stdout, "benchmark output\n")
@@ -568,7 +575,7 @@ func resolvedTarget(runner remoteRunner) (v1.Endpoint, BenchTarget) {
 	}
 }
 
-func runResolvedBenchmark(t *testing.T, options Options, target BenchTarget) (string, error) {
+func runResolvedBenchmark(ctx context.Context, t *testing.T, options Options, target BenchTarget) (string, error) {
 	t.Helper()
 
 	endpoint, _ := resolvedTarget(target.runner)
@@ -576,7 +583,7 @@ func runResolvedBenchmark(t *testing.T, options Options, target BenchTarget) (st
 	require.NoError(t, err)
 
 	err = runBenchmark(
-		context.Background(),
+		ctx,
 		&endpoint,
 		target,
 		options,
@@ -594,7 +601,7 @@ func TestRunBenchmarkCollectsCaseArtifacts(t *testing.T) {
 	_, target := resolvedTarget(runner)
 	options := validOptions(t.TempDir())
 	options.Workload = WorkloadThroughput
-	output, err := runResolvedBenchmark(t, options, target)
+	output, err := runResolvedBenchmark(context.Background(), t, options, target)
 	require.NoError(t, err)
 	require.DirExists(t, output)
 
@@ -628,6 +635,13 @@ func TestRunBenchmarkCollectsCaseArtifacts(t *testing.T) {
 	require.Contains(t, string(manifest), `"status": "Succeeded"`)
 
 	require.Equal(t, benchmarkPreflightCommand(), runner.commands[0])
+	monitor := findBenchCommand(runner.commands, func(value string) bool {
+		return strings.Contains(value, "# neutree-bench-monitor")
+	})
+	require.Contains(t, monitor, "vllm bench serve")
+	require.Contains(t, monitor, "benchmark.log")
+	require.Contains(t, monitor, ".neutree-bench-renew")
+	require.Contains(t, monitor, ".neutree-bench-cancel")
 
 	require.Equal(t, 2, countBenchCommands(runner.snapshot(), func(value string) bool {
 		return strings.HasPrefix(value, "rm -rf -- ")
@@ -654,7 +668,7 @@ func TestRunBenchmarkKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testin
 	progress := captureBenchmarkProgress(t)
 
 	_, target := resolvedTarget(runner)
-	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	output, err := runResolvedBenchmark(context.Background(), t, validOptions(t.TempDir()), target)
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
 	require.Contains(t, progress.String(), "benchmark case 1/1 completed: result=")
@@ -667,7 +681,7 @@ func TestRunBenchmarkRecordsPreflightAndCaseFailures(t *testing.T) {
 		progress := captureBenchmarkProgress(t)
 
 		_, target := resolvedTarget(outputRunner{err: fmt.Errorf("preflight failed")})
-		output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+		output, err := runResolvedBenchmark(context.Background(), t, validOptions(t.TempDir()), target)
 		require.ErrorContains(t, err, "preflight")
 		require.Contains(t, progress.String(), "benchmark preflight failed: vllm benchmark preflight failed: preflight failed")
 		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark preflight failed:`, progress.String())
@@ -681,7 +695,7 @@ func TestRunBenchmarkRecordsPreflightAndCaseFailures(t *testing.T) {
 		progress := captureBenchmarkProgress(t)
 
 		_, target := resolvedTarget(&caseFailureRunner{})
-		output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+		output, err := runResolvedBenchmark(context.Background(), t, validOptions(t.TempDir()), target)
 		require.ErrorContains(t, err, "benchmark case")
 		require.Contains(t, progress.String(), "benchmark case 1/1 failed: case failed")
 		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark case 1/1 failed:`, progress.String())
@@ -698,7 +712,7 @@ func TestRunBenchmarkFailsCaseWhenNoRequestCompletes(t *testing.T) {
 	progress := captureBenchmarkProgress(t)
 
 	_, target := resolvedTarget(runner)
-	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	output, err := runResolvedBenchmark(context.Background(), t, validOptions(t.TempDir()), target)
 	require.ErrorContains(t, err, "benchmark completed 0 requests")
 	require.Contains(t, progress.String(), "benchmark case 1/1 failed: benchmark completed 0 requests")
 
