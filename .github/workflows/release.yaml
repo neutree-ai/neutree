@@ -12,18 +12,44 @@ on:
         required: true
         type: string
       ui_version:
-        description: "the ui release version (e.g : v0.1.0)"
-        required: true
-        type: string
-      cluster_version:
-        description: "the default cluster version (e.g : v1)"
-        required: true
+        description: "the ui release version (optional, defaults to the release tag)"
+        required: false
         type: string
 jobs:
+  resolve_versions:
+    runs-on: ubuntu-latest
+    name: resolve release versions
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      ui_version: ${{ steps.resolve.outputs.ui_version }}
+    steps:
+      - name: Resolve release tag and UI version
+        id: resolve
+        env:
+          RELEASE_TAG_INPUT: ${{ github.event.inputs.tag }}
+          RELEASE_TAG_REF: ${{ github.ref_name }}
+          UI_VERSION_INPUT: ${{ github.event.inputs.ui_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_tag="${RELEASE_TAG_INPUT:-$RELEASE_TAG_REF}"
+          [[ -n "$release_tag" ]] || {
+            echo "release tag must not be empty" >&2
+            exit 1
+          }
+          ui_version="${UI_VERSION_INPUT:-$release_tag}"
+
+          {
+            printf 'release_tag=%s\n' "$release_tag"
+            printf 'ui_version=%s\n' "$ui_version"
+          } >> "$GITHUB_OUTPUT"
+          printf 'release_tag=%s ui_version=%s\n' "$release_tag" "$ui_version"
+
   build-amd64-image:
+    needs: resolve_versions
     env:
-      UI_VERSION: ${{ secrets.RELEASE_UI_VERSION }}
-      CLUSTER_VERSION: ${{ secrets.RELEASE_CLUSTER_VERSION }}
+      UI_VERSION: ${{ needs.resolve_versions.outputs.ui_version }}
     runs-on: ubuntu-22.04
     name: build amd64 image
     steps:
@@ -31,9 +57,7 @@ jobs:
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
         run: |
-          git fetch --all && git checkout ${{ github.event.inputs.tag }}
-          echo "UI_VERSION=${{ github.event.inputs.ui_version }}" >> $GITHUB_ENV
-          echo "CLUSTER_VERSION=${{ github.event.inputs.cluster_version }}" >> $GITHUB_ENV
+          git fetch --all && git checkout ${{ needs.resolve_versions.outputs.release_tag }}
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -49,9 +73,9 @@ jobs:
           IMAGE_PROJECT: ${{ secrets.RELEASE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.IMAGE_REPO }}
   build-arm64-image:
+    needs: resolve_versions
     env:
-      UI_VERSION: ${{ secrets.RELEASE_UI_VERSION }}
-      CLUSTER_VERSION: ${{ secrets.RELEASE_CLUSTER_VERSION }}
+      UI_VERSION: ${{ needs.resolve_versions.outputs.ui_version }}
     runs-on: ubuntu-22.04-arm
     name: build arm64 image
     steps:
@@ -59,9 +83,7 @@ jobs:
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
         run: |
-          git fetch --all && git checkout ${{ github.event.inputs.tag }}
-          echo "UI_VERSION=${{ github.event.inputs.ui_version }}" >> $GITHUB_ENV
-          echo "CLUSTER_VERSION=${{ github.event.inputs.cluster_version }}" >> $GITHUB_ENV
+          git fetch --all && git checkout ${{ needs.resolve_versions.outputs.release_tag }}
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -80,13 +102,14 @@ jobs:
     runs-on: ubuntu-latest
     name: merge and push manifests
     needs:
+      - resolve_versions
       - build-amd64-image
       - build-arm64-image
     steps:
       - uses: actions/checkout@v2
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
-        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+        run: git fetch --all && git checkout ${{ needs.resolve_versions.outputs.release_tag }}
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -101,32 +124,25 @@ jobs:
     runs-on: ubuntu-latest
     name: release
     needs:
+      - resolve_versions
       - push-manifests
     steps:
       - uses: actions/checkout@v2
       - name: Check out specific tag when manually triggered
         if: github.event_name == 'workflow_dispatch'
-        run: git fetch --all && git checkout ${{ github.event.inputs.tag }}
+        run: git fetch --all && git checkout ${{ needs.resolve_versions.outputs.release_tag }}
       - name: Set up go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
       - name: generate release artifacts
         run: make release
-      - name: Set release tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "RELEASE_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
-          fi
-
       - name: Generate draft release
         uses: softprops/action-gh-release@v1
         with:
           draft: true
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.resolve_versions.outputs.release_tag }}
+          name: Release ${{ needs.resolve_versions.outputs.release_tag }}
           files: out/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
