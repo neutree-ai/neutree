@@ -152,6 +152,14 @@ func TestOptionsValidate(t *testing.T) {
 			},
 			wantErr: "workload must be",
 		},
+		{
+			name: "blank workload still requires concurrency",
+			mutate: func(o *Options) {
+				o.Workload = " "
+				o.Concurrencies = nil
+			},
+			wantErr: "concurrencies must not be empty",
+		},
 	}
 
 	for _, tt := range tests {

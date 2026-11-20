@@ -84,7 +84,8 @@ func (o Options) Validate() error {
 		return fmt.Errorf("endpoint is required")
 	}
 
-	if _, _, err := ParseWorkload(o.Workload); err != nil {
+	workload, _, err := ParseWorkload(o.Workload)
+	if err != nil {
 		return err
 	}
 
@@ -100,7 +101,7 @@ func (o Options) Validate() error {
 		if err := validatePositiveValues(o.Concurrencies, "concurrencies"); err != nil {
 			return err
 		}
-	} else if o.Workload == "" {
+	} else if workload == "" {
 		return fmt.Errorf("concurrencies must not be empty")
 	}
 
