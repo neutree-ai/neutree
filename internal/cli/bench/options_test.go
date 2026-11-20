@@ -145,6 +145,13 @@ func TestOptionsValidate(t *testing.T) {
 				o.Concurrencies = nil
 			},
 		},
+		{
+			name: "unknown workload is rejected",
+			mutate: func(o *Options) {
+				o.Workload = "unknown"
+			},
+			wantErr: "workload must be",
+		},
 	}
 
 	for _, tt := range tests {

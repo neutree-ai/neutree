@@ -84,6 +84,10 @@ func (o Options) Validate() error {
 		return fmt.Errorf("endpoint is required")
 	}
 
+	if _, _, err := ParseWorkload(o.Workload); err != nil {
+		return err
+	}
+
 	if err := validatePositiveValues(o.InputLens, "input-lens"); err != nil {
 		return err
 	}
