@@ -2,6 +2,7 @@ package bench
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,7 +13,7 @@ import (
 
 type benchOptions struct {
 	workspace     string
-	cases         []string
+	workload      string
 	inputLens     []string
 	outputLens    []string
 	concurrencies []string
@@ -38,9 +39,8 @@ single inference replica.
 The command derives the engine from the Endpoint. This experimental release
 supports vLLM Endpoints only.
 
-Use --cases to run an explicit set of input:output:concurrency points. When
---cases is omitted, the input, output, and concurrency lists form a Cartesian
-product.
+Use --workload to select a workload preset. Explicit input/output/rate/prompt
+flags override the preset values.
 
 This command requires the default Admin API key because it reads the target
 Cluster's kubeconfig or SSH credential through the existing credentials API.
@@ -63,10 +63,10 @@ benchmark running on the GPU.`,
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace containing the Endpoint")
-	flags.StringSliceVar(&opts.cases, "cases", nil, "Explicit benchmark cases as input:output:concurrency, comma-separated or repeated")
-	flags.StringSliceVar(&opts.inputLens, "input-lens", []string{"16384"}, "Input token lengths, comma-separated or repeated when --cases is not set")
+	flags.StringVar(&opts.workload, "workload", "", "Workload preset: throughput, long-context, or generation-heavy")
+	flags.StringSliceVar(&opts.inputLens, "input-lens", []string{"16384"}, "Input token lengths, comma-separated or repeated")
 	flags.StringSliceVar(&opts.outputLens, "output-lens", []string{"2048"}, "Output token lengths, comma-separated or repeated")
-	flags.StringSliceVar(&opts.concurrencies, "concurrencies", []string{"2"}, "Maximum request concurrencies, comma-separated or repeated when --cases is not set")
+	flags.StringSliceVar(&opts.concurrencies, "concurrencies", []string{"2"}, "Maximum request concurrencies, comma-separated or repeated; workload presets omit this unless set")
 	flags.IntVar(&opts.numPrompts, "num-prompts", 20, "Number of prompts per benchmark case")
 	flags.StringVar(&opts.requestRate, "request-rate", "inf", "Request rate per second, or inf")
 	flags.StringVarP(&opts.outputDir, "output-dir", "o", ".", "Directory on the CLI host in which to create the benchmark result directory")
@@ -76,25 +76,45 @@ benchmark running on the GPU.`,
 }
 
 func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
-	cases, err := parseBenchCases(raw.cases)
+	workload, preset, err := internalbench.ParseWorkload(raw.workload)
 	if err != nil {
 		return err
 	}
 
-	var inputLens, outputLens, concurrencies []int
-
-	if len(cases) == 0 {
-		inputLens, err = internalbench.ParsePositiveIntegerList(raw.inputLens, "input-lens")
-		if err != nil {
-			return err
+	inputValues := raw.inputLens
+	outputValues := raw.outputLens
+	concurrencyValues := raw.concurrencies
+	requestRate := raw.requestRate
+	numPrompts := raw.numPrompts
+	if workload != "" {
+		if !cmd.Flags().Changed("input-lens") {
+			inputValues = []string{strconv.Itoa(preset.InputLen)}
 		}
-
-		outputLens, err = internalbench.ParsePositiveIntegerList(raw.outputLens, "output-lens")
-		if err != nil {
-			return err
+		if !cmd.Flags().Changed("output-lens") {
+			outputValues = []string{strconv.Itoa(preset.OutputLen)}
 		}
+		if !cmd.Flags().Changed("request-rate") {
+			requestRate = preset.RequestRate
+		}
+		if !cmd.Flags().Changed("num-prompts") {
+			numPrompts = preset.NumPrompts
+		}
+		if !cmd.Flags().Changed("concurrencies") {
+			concurrencyValues = nil
+		}
+	}
 
-		concurrencies, err = internalbench.ParsePositiveIntegerList(raw.concurrencies, "concurrencies")
+	inputLens, err := internalbench.ParsePositiveIntegerList(inputValues, "input-lens")
+	if err != nil {
+		return err
+	}
+	outputLens, err := internalbench.ParsePositiveIntegerList(outputValues, "output-lens")
+	if err != nil {
+		return err
+	}
+	var concurrencies []int
+	if len(concurrencyValues) > 0 {
+		concurrencies, err = internalbench.ParsePositiveIntegerList(concurrencyValues, "concurrencies")
 		if err != nil {
 			return err
 		}
@@ -103,12 +123,12 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 	options := internalbench.Options{
 		Workspace:     raw.workspace,
 		Endpoint:      endpoint,
-		Cases:         cases,
+		Workload:      workload,
 		InputLens:     inputLens,
 		OutputLens:    outputLens,
 		Concurrencies: concurrencies,
-		NumPrompts:    raw.numPrompts,
-		RequestRate:   raw.requestRate,
+		NumPrompts:    numPrompts,
+		RequestRate:   requestRate,
 		OutputDir:     raw.outputDir,
 		Timeout:       raw.timeout,
 	}
@@ -127,12 +147,4 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 	}
 
 	return runErr
-}
-
-func parseBenchCases(values []string) ([]internalbench.Case, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-
-	return internalbench.ParseCases(values)
 }

@@ -32,7 +32,7 @@ func run(ctx context.Context, api *client.Client, options Options) (string, erro
 		return "", err
 	}
 
-	benchmarkCases := expandConfiguredCases(options)
+	benchmarkCases := expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
 	klog.Infof(
 		"benchmark starting: endpoint=%s/%s cases=%d",
 		options.Workspace,

@@ -50,36 +50,23 @@ func TestParsePositiveIntegerList(t *testing.T) {
 	}
 }
 
-func TestParseCases(t *testing.T) {
+func TestParseWorkload(t *testing.T) {
 	tests := []struct {
 		name    string
-		values  []string
-		want    []Case
+		value   string
+		want    string
+		preset  WorkloadPreset
 		wantErr string
 	}{
-		{
-			name:   "comma separated and repeated values",
-			values: []string{"8:32:2,4:16:1", "8:32:2"},
-			want: []Case{
-				{InputLen: 4, OutputLen: 16, Concurrency: 1},
-				{InputLen: 8, OutputLen: 32, Concurrency: 2},
-			},
-		},
-		{
-			name:    "missing concurrency is invalid",
-			values:  []string{"4:16"},
-			wantErr: "input:output:concurrency",
-		},
-		{
-			name:    "zero is invalid",
-			values:  []string{"4:0:1"},
-			wantErr: "positive integers",
-		},
+		{name: "throughput", value: "throughput", want: WorkloadThroughput, preset: WorkloadPreset{InputLen: 1024, OutputLen: 128, RequestRate: "1000", NumPrompts: 1000}},
+		{name: "long context alias", value: "long_context", want: WorkloadLongContext, preset: WorkloadPreset{InputLen: 32000, OutputLen: 100, RequestRate: "1", NumPrompts: 100}},
+		{name: "generation heavy", value: "generation-heavy", want: WorkloadGenerationHeavy, preset: WorkloadPreset{InputLen: 1000, OutputLen: 2000, RequestRate: "1", NumPrompts: 200}},
+		{name: "unknown", value: "unknown", wantErr: "workload must be"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseCases(tt.values)
+			got, preset, err := ParseWorkload(tt.value)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				return
@@ -87,6 +74,7 @@ func TestParseCases(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.preset, preset)
 		})
 	}
 }
@@ -151,20 +139,11 @@ func TestOptionsValidate(t *testing.T) {
 			wantErr: "output-dir",
 		},
 		{
-			name: "explicit cases replace the lists",
+			name: "workload can omit concurrency",
 			mutate: func(o *Options) {
-				o.Cases = []Case{{InputLen: 4, OutputLen: 16, Concurrency: 1}}
-				o.InputLens = nil
-				o.OutputLens = nil
+				o.Workload = WorkloadThroughput
 				o.Concurrencies = nil
 			},
-		},
-		{
-			name: "explicit case concurrency above prompt count",
-			mutate: func(o *Options) {
-				o.Cases = []Case{{InputLen: 4, OutputLen: 16, Concurrency: 32}}
-			},
-			wantErr: "concurrency 32 exceeds num-prompts 20",
 		},
 	}
 
@@ -197,4 +176,11 @@ func TestExpandCasesUsesStableCartesianProduct(t *testing.T) {
 		{InputLen: 8, OutputLen: 32, Concurrency: 2},
 	}, cases)
 	require.Equal(t, "input-4-output-16-concurrency-1", cases[0].Name())
+}
+
+func TestExpandCasesWithoutConcurrencyCreatesOneOpenLoopCase(t *testing.T) {
+	cases := expandCases([]int{1024}, []int{128}, nil)
+
+	require.Equal(t, []Case{{InputLen: 1024, OutputLen: 128}}, cases)
+	require.Equal(t, "input-1024-output-128", cases[0].Name())
 }
