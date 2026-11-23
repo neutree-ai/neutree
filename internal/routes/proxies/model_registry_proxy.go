@@ -40,7 +40,7 @@ func RegisterModelRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 		storage.MODEL_REGISTRY_TABLE,
 		validateModelRegistryDeletion(deps.Storage),
 	)
-	handler := CreateStructProxyHandler[v1.ModelRegistry](deps, storage.MODEL_REGISTRY_TABLE)
+	handler := CreateStructProxyHandler[v1.ModelRegistry](proxyGroup, deps, storage.MODEL_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

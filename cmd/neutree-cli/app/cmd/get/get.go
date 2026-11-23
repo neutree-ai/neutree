@@ -60,7 +60,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (ignored for Workspace kind)")
+	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (ignored for global kinds such as Workspace)")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", "table", "Output format: table, json, yaml")
 	cmd.Flags().BoolVar(&opts.watch, "watch", false, "Watch for changes and print updates")
 	cmd.Flags().DurationVar(&opts.interval, "interval", 5*time.Second, "Watch poll interval")
@@ -231,7 +231,7 @@ func (p *resourcePrinter) printTable(items []json.RawMessage) error {
 	w := tabwriter.NewWriter(p.writer(), 0, 4, 2, ' ', 0)
 
 	if !p.headerPrinted {
-		if p.kind == "Workspace" {
+		if client.IsGlobalKind(p.kind) {
 			fmt.Fprintln(w, "NAME\tID\tPHASE\tAGE")
 		} else {
 			fmt.Fprintln(w, "NAME\tID\tWORKSPACE\tPHASE\tAGE")
@@ -253,7 +253,7 @@ func (p *resourcePrinter) printTable(items []json.RawMessage) error {
 		phase := client.ExtractPhase(item)
 		age := formatAge(client.ExtractMetadataField(item, "creation_timestamp"))
 
-		if p.kind == "Workspace" {
+		if client.IsGlobalKind(p.kind) {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, id, phase, age)
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, id, workspace, phase, age)

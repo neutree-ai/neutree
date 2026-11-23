@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 // metricsAcceleratorPlan keeps profile-level decisions separate from a
@@ -16,10 +17,11 @@ import (
 // NodeAgent runtime without inventing a DaemonSet.
 type metricsAcceleratorPlan struct {
 	AcceleratorType             string
+	OperatorManaged             bool
 	Exporter                    *metricsAcceleratorExporter
 	NodeAgentRuntime            *v1.NodeAgentRuntimeProfile
 	VirtualizationMetricsTarget *v1.MetricsTargetProfile
-	ExternalMetricsTarget       *v1.MetricsTargetProfile
+	ExporterTarget              *v1.MetricsTargetProfile
 }
 
 func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metricsAcceleratorPlan, error) {
@@ -34,6 +36,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 
 	for _, acceleratorType := range acceleratorTypes {
 		plan, ok := m.buildAcceleratorPlan(ctx, acceleratorType)
+
 		if ok {
 			candidates = append(candidates, plan)
 		}
@@ -46,9 +49,10 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 	ctx context.Context,
 	acceleratorType string,
 ) (metricsAcceleratorPlan, bool) {
-	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
+	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, publicaccelerator.AcceleratorProfileInput{AcceleratorType: acceleratorType, Cluster: m.cluster})
 	if err != nil {
-		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
+		klog.Warningf("Skipping accelerator metrics plan for %s: %v", acceleratorType, err)
+
 		return metricsAcceleratorPlan{}, false
 	}
 
@@ -56,16 +60,25 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		return metricsAcceleratorPlan{}, false
 	}
 
+	_, operatorManaged := m.acceleratorOperators[acceleratorType]
+
 	plan := metricsAcceleratorPlan{
 		AcceleratorType:             acceleratorType,
+		OperatorManaged:             operatorManaged,
 		NodeAgentRuntime:            profile.NodeAgentRuntime,
 		VirtualizationMetricsTarget: resolveVirtualizationMetricsTargetNamespace(profile.VirtualizationMetricsTarget, m.namespace),
-		ExternalMetricsTarget:       cloneMetricsTarget(profile.ExternalMetricsTarget),
+	}
+	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+
+	if external {
+		plan.ExporterTarget = cloneMetricsTarget(profile.ExternalMetricsTarget)
+		if plan.ExporterTarget != nil {
+			plan.ExporterTarget.MetricsPath = metricsTargetPath(plan.ExporterTarget.MetricsPath)
+		}
 	}
 
 	if profile.MetricsExporter == nil {
-		if m.acceleratorExporterMode() != v1.ClusterAcceleratorExporterModeExternal ||
-			plan.ExternalMetricsTarget == nil {
+		if !external || plan.ExporterTarget == nil {
 			return metricsAcceleratorPlan{}, false
 		}
 
@@ -78,6 +91,13 @@ func (m *MetricsComponent) buildAcceleratorPlan(
 		m.imagePrefix,
 	)
 
+	if !external {
+		plan.ExporterTarget = &v1.MetricsTargetProfile{
+			Namespace: m.namespace, PodSelector: managedAcceleratorExporterSelector(acceleratorType),
+			Port: plan.Exporter.Port, MetricsPath: plan.Exporter.MetricsPath,
+		}
+	}
+
 	return plan, true
 }
 
@@ -89,30 +109,41 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 		return nil, nil
 	}
 
-	nodes, err := m.clusterNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	var nodes []corev1.Node
+	nodesLoaded := false
 	var matching []metricsAcceleratorPlan
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	for _, plan := range candidates {
-		if external && plan.ExternalMetricsTarget == nil {
+		if external && plan.ExporterTarget == nil {
 			continue
 		}
 
-		if plan.Exporter == nil {
-			continue
-		}
+		// Operator plans already matched hardware through MatchCluster; selectors only gate scheduling.
+		if !plan.OperatorManaged {
+			if plan.Exporter == nil {
+				continue
+			}
 
-		if external && len(plan.Exporter.NodeSelector) == 0 {
-			continue
-		}
+			if external && len(plan.Exporter.NodeSelector) == 0 {
+				continue
+			}
 
-		if len(plan.Exporter.NodeSelector) > 0 &&
-			!acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes) {
-			continue
+			if !nodesLoaded {
+				var err error
+
+				nodes, err = m.clusterNodes(ctx)
+				if err != nil {
+					return nil, err
+				}
+
+				nodesLoaded = true
+			}
+
+			if len(plan.Exporter.NodeSelector) > 0 &&
+				!acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes) {
+				continue
+			}
 		}
 
 		matching = append(matching, plan)

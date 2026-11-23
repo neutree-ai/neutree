@@ -67,6 +67,9 @@ _G.kong = {
 -- name, so the tests do not depend on the kong.plugins.* directory nesting being
 -- present -- the plugin dir is often bind-mounted on its own.
 local spec_dir = (debug.getinfo(1, "S").source:sub(2)):match("(.*/)") or "./"
+package.preload["kong.plugins.neutree-ai-access.global_counter"] = function()
+    return assert(loadfile(spec_dir .. "../global_counter.lua"))()
+end
 local handler = assert(loadfile(spec_dir .. "../handler.lua"))()
 
 local WORKSPACE_PREFIX = "/workspace/ws/endpoint/ep-a"
@@ -100,7 +103,7 @@ local function run(conf, fields)
     request.method = fields.method or "POST"
     request.path = fields.path
     request.body = fields.body
-    request.consumer = { custom_id = "key-1" }
+    request.consumer = fields.consumer or { custom_id = "key-1" }
 
     kong.ctx.plugin = {}
     kong.ctx.shared = {
@@ -126,7 +129,7 @@ local function filter_response(conf, fields, chunks)
     request.method = fields.method or "GET"
     request.path = fields.path
     request.body = nil
-    request.consumer = { custom_id = "key-1" }
+    request.consumer = fields.consumer or { custom_id = "key-1" }
 
     kong.ctx.plugin = {}
     kong.ctx.shared = {
@@ -434,5 +437,126 @@ describe("neutree-ai-access model allowlist: model-list responses", function()
         assert.are.equal(original, filter_response(CHAT_ALLOWLIST, {
             path = WORKSPACE_PREFIX .. "/v1/models",
         }, { original }))
+    end)
+end)
+
+describe("neutree-ai-access model denylist", function()
+    local CHAT = WORKSPACE_PREFIX .. "/v1/chat/completions"
+
+    it("denies a denied model with the allowlist's answer", function()
+        assert_denied(run(conf_with(nil, { denied_models = { "deepseek-v4-flash" } }), {
+            path = CHAT,
+            model = "deepseek-v4-flash",
+            endpoint_type = "external",
+        }), "model_not_permitted")
+    end)
+
+    it("lets any other model through, known to the workspace or not", function()
+        local conf = conf_with(nil, { denied_models = { "deepseek-v4-flash" } })
+        for _, model in ipairs({ "deepseek-v4-pro", "brand-new-model" }) do
+            assert.is_nil(run(conf, { path = CHAT, model = model, endpoint_type = "external" }))
+        end
+    end)
+
+    it("wins over the allowlist", function()
+        local conf = conf_with({ { model = "a" }, { model = "b" } }, { denied_models = { "a" } })
+        assert_denied(run(conf, { path = CHAT, model = "a" }), "model_not_permitted")
+        assert.is_nil(run(conf, { path = CHAT, model = "b" }))
+    end)
+
+    it("reads the model from the body when no model was stashed", function()
+        assert_denied(run(conf_with(nil, { denied_models = { "a" } }), {
+            path = CHAT,
+            body = '{"model":"a"}',
+        }), "model_not_permitted")
+    end)
+
+    it("does not judge a request that names no model, nor the model list", function()
+        local conf = conf_with(nil, { denied_models = { "a" } })
+        assert.is_nil(run(conf, { path = CHAT, body = "{}" }))
+        assert.is_nil(run(conf, { method = "GET", path = WORKSPACE_PREFIX .. "/v1/models" }))
+    end)
+
+    it("an empty list denies nothing", function()
+        assert.is_nil(run(conf_with(nil, { denied_models = {} }), { path = CHAT, model = "a" }))
+    end)
+
+    it("drops denied models from a model list", function()
+        local body = filter_response(conf_with(nil, { denied_models = { "a" } }), {
+            path = WORKSPACE_PREFIX .. "/v1/models",
+        }, { [[{"object":"list","data":[{"id":"a"},{"id":"b"}]}]] })
+
+        local decoded = assert(cjson.decode(body))
+        assert.are.same({ "b" }, { decoded.data[1].id })
+        assert.are.equal(1, #decoded.data)
+    end)
+end)
+
+-- The global fallback instance runs only for a consumer whose own instance Kong
+-- has not loaded yet. A consumer created with the rules tag must have its own
+-- instance, so the fallback rejects it; an untagged (older) consumer passes.
+describe("neutree-ai-access fallback instance", function()
+    local FALLBACK = { fallback = true }
+    local NEW_KEY = { custom_id = "key-1", tags = { "other", "neutree-access-rules" } }
+    local OLD_KEY = { custom_id = "key-1" }
+    local INFERENCE = {
+        path = WORKSPACE_PREFIX .. "/v1/chat/completions",
+        model = "llama-3-8b",
+        body = [[{"model":"llama-3-8b"}]],
+    }
+
+    local function with_consumer(fields, consumer)
+        local out = { consumer = consumer }
+        for k, v in pairs(fields) do
+            out[k] = v
+        end
+        return out
+    end
+
+    it("rejects inference for a tagged consumer whose rules are not loaded", function()
+        local res = run(FALLBACK, with_consumer(INFERENCE, NEW_KEY))
+        assert_denied(res, "access_rules_not_ready")
+        assert.are.equal("not_permitted", res.body.error.type)
+    end)
+
+    it("rejects a model-list request for a tagged consumer", function()
+        assert_denied(run(FALLBACK, with_consumer({
+            method = "GET",
+            path = WORKSPACE_PREFIX .. "/v1/models",
+        }, NEW_KEY)), "access_rules_not_ready")
+    end)
+
+    it("replaces a synthesized external model list for a tagged consumer", function()
+        local body, headers, status = filter_response(FALLBACK, {
+            path = "/workspace/ws/external-endpoint/provider-a/v1/models",
+            endpoint_type = "external",
+            endpoint_name = "provider-a",
+            consumer = NEW_KEY,
+        }, { [[{"object":"list","data":[{"id":"any-model"}]}]] })
+
+        local decoded = assert(cjson.decode(body))
+        assert.are.equal(403, status)
+        assert.are.equal(true, headers["Content-Length"])
+        assert.are.equal("access_rules_not_ready", decoded.error.code)
+    end)
+
+    it("lets an untagged consumer through", function()
+        assert.is_nil(run(FALLBACK, with_consumer(INFERENCE, OLD_KEY)))
+        local original = [[{"object":"list","data":[{"id":"any-model"}]}]]
+        assert.are.equal(original, filter_response(FALLBACK, {
+            path = WORKSPACE_PREFIX .. "/v1/models",
+            consumer = OLD_KEY,
+        }, { original }))
+    end)
+
+    it("does not reject a tagged consumer through its own unrestricted instance", function()
+        assert.is_nil(run(conf_with(nil), with_consumer(INFERENCE, NEW_KEY)))
+    end)
+
+    it("still applies a tagged consumer's own allowlist", function()
+        assert_denied(run(CHAT_ALLOWLIST, with_consumer({
+            path = WORKSPACE_PREFIX .. "/v1/chat/completions",
+            model = "other-model",
+        }, NEW_KEY)), "model_not_permitted")
     end)
 end)

@@ -3,6 +3,17 @@ sources:
     type: http_server
     address: 0.0.0.0:30122
     encode: json
+  vector_metrics:
+    type: internal_metrics
+  # Vector's disk buffer sometimes misses the wakeup for a record and only
+  # reads it when the next one is written, so the last usage record before an
+  # idle period could wait indefinitely. A periodic record bounds that delay.
+  buffer_heartbeat:
+    type: demo_logs
+    format: shuffle
+    lines:
+      - heartbeat
+    interval: 10
 transforms:
   parse_kong_logs:
     type: remap
@@ -54,6 +65,14 @@ transforms:
       } else {
           ._has_usage = false
       }
+  # record_api_usage answers an unknown key with 200 before writing anything,
+  # so the nil key passes the buffer without a row or a retry.
+  prepare_usage_heartbeat:
+    type: remap
+    inputs:
+      - buffer_heartbeat
+    source: |
+      . = {"p_api_key_id": "00000000-0000-0000-0000-000000000000", "p_request_id": "heartbeat", "p_usage_amount": 0}
   filter_usage_logs:
     type: filter
     inputs:
@@ -207,10 +226,16 @@ transforms:
           . = events
       }
 sinks:
+  vector_metrics_exporter:
+    type: prometheus_exporter
+    inputs:
+      - vector_metrics
+    address: 0.0.0.0:9598
   postgrest_rpc:
     type: http
     inputs:
       - prepare_postgrest_payload
+      - prepare_usage_heartbeat
     encoding:
       codec: json
     framing:
@@ -226,6 +251,11 @@ sinks:
     batch:
       max_events: 1
       timeout_secs: 1
+    # Disk buffers keep undelivered events across Vector restarts; they live
+    # under the data dir mounted from the host.
+    buffer:
+      type: disk
+      max_size: 536870912
   ai_trace_file:
     type: file
     inputs:
@@ -252,3 +282,8 @@ sinks:
     batch:
       max_events: 100
       timeout_secs: 1
+    # Drop traces when full: blocking would back-pressure parse_kong_logs and stall usage.
+    buffer:
+      type: disk
+      max_size: 1073741824
+      when_full: drop_newest

@@ -15,6 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/images"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
+	"github.com/neutree-ai/neutree/internal/routes/observations"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 )
@@ -46,6 +47,17 @@ func NewBuilder() *Builder {
 		"endpoint-logs":   LogsRouteFactory(logs.RegisterEndpointLogsRoutes),
 		"ai-traces":       LogsRouteFactory(logs.RegisterAITraceRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
+		"accelerator-observations": func(deps *RouteOptions) error {
+			observations.RegisterRoutes(deps.Group, deps.Middlewares, &observations.Dependencies{
+				ClusterCacheProviders:   deps.Config.ClusterCacheProviders,
+				KVCacheProviders:        deps.Config.KVCacheProviders,
+				Storage:                 deps.Config.Storage,
+				MetricsURL:              deps.Config.MetricsURL,
+				ExtraAcceleratorMetrics: deps.Config.ExtraAcceleratorMetrics,
+				ExtraAcceleratorLabels:  deps.Config.ExtraAcceleratorLabels,
+			})
+			return nil
+		},
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
 		// Credentials route is used for get resource with sensitive data
@@ -54,25 +66,33 @@ func NewBuilder() *Builder {
 		// Auth middleware is applied to:
 		// - Validate and pass-through JWT tokens to PostgREST
 		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
-		"rest/api-keys":             ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
-		"rest/workspaces":           ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
-		"rest/roles":                ProxiesRouteFactory(proxies.RegisterRoleRoutes),
-		"rest/role-assignments":     ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
-		"rest/user-profiles":        ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
-		"rest/clusters":             ProxiesRouteFactory(proxies.RegisterClusterRoutes),
-		"clusters":                  ClustersRouteFactory(clusters.RegisterClusterRoutes),
-		"images":                    ImagesRouteFactory(images.RegisterImageRoutes),
-		"rest/static-node-clusters": ProxiesRouteFactory(proxies.RegisterStaticNodeClusterRoutes),
-		"rest/static-nodes":         ProxiesRouteFactory(proxies.RegisterStaticNodeRoutes),
-		"rest/image-registries":     ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
-		"rest/model-registries":     ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
-		"rest/endpoints":            ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
-		"rest/engines":              ProxiesRouteFactory(proxies.RegisterEngineRoutes),
-		"rest/model-catalogs":       ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
-		"rest/oem-configs":          ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
-		"rest/rpc":                  ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
-		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
-		"rest/identity-sources":     ProxiesRouteFactory(proxies.RegisterIdentitySourceRoutes),
+		"rest/api-keys":                     ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
+		"rest/workspaces":                   ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
+		"rest/roles":                        ProxiesRouteFactory(proxies.RegisterRoleRoutes),
+		"rest/role-assignments":             ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
+		"rest/user-profiles":                ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
+		"rest/clusters":                     ProxiesRouteFactory(proxies.RegisterClusterRoutes),
+		"clusters":                          ClustersRouteFactory(clusters.RegisterClusterRoutes),
+		"images":                            ImagesRouteFactory(images.RegisterImageRoutes),
+		"rest/static-node-clusters":         ProxiesRouteFactory(proxies.RegisterStaticNodeClusterRoutes),
+		"rest/static-nodes":                 ProxiesRouteFactory(proxies.RegisterStaticNodeRoutes),
+		"rest/image-registries":             ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
+		"rest/model-registries":             ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
+		"rest/endpoints":                    ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
+		"rest/engines":                      ProxiesRouteFactory(proxies.RegisterEngineRoutes),
+		"rest/model-catalogs":               ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
+		"rest/oem-configs":                  ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/rpc":                          ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
+		"rest/external-endpoints":           ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
+		"rest/identity-sources":             ProxiesRouteFactory(proxies.RegisterIdentitySourceRoutes),
+		"rest/log-sinks":                    ProxiesRouteFactory(proxies.RegisterLogSinkRoutes),
+		"rest/org-units":                    ProxiesRouteFactory(proxies.RegisterOrgUnitRoutes),
+		"rest/org-unit-members":             ProxiesRouteFactory(proxies.RegisterOrgUnitMemberRoutes),
+		"rest/teams":                        ProxiesRouteFactory(proxies.RegisterTeamRoutes),
+		"rest/team-members":                 ProxiesRouteFactory(proxies.RegisterTeamMemberRoutes),
+		"rest/group-policies":               ProxiesRouteFactory(proxies.RegisterGroupPolicyRoutes),
+		"rest/service-accounts":             ProxiesRouteFactory(proxies.RegisterServiceAccountRoutes),
+		"rest/team-application-permissions": ProxiesRouteFactory(proxies.RegisterTeamApplicationPermissionRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -89,35 +109,44 @@ func NewBuilder() *Builder {
 	}
 	// Register default middlewares to routes
 	defaultRoutesToMiddlewares := map[string][]string{
-		"models":        {"auth"},
-		"serve-proxy":   {"auth"},
-		"k8s-proxy":     {"auth"},
-		"system":        {"auth"},
-		"endpoint-logs": {"auth"},
-		"ai-traces":     {"auth"},
+		"models":                   {"auth"},
+		"serve-proxy":              {"auth"},
+		"k8s-proxy":                {"auth"},
+		"system":                   {"auth"},
+		"endpoint-logs":            {"auth"},
+		"accelerator-observations": {"auth"},
+		"ai-traces":                {"auth"},
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens
-		"rest/api-keys":             {"auth"},
-		"rest/workspaces":           {"auth"},
-		"rest/roles":                {"auth"},
-		"rest/role-assignments":     {"auth"},
-		"rest/user-profiles":        {"auth"},
-		"rest/clusters":             {"auth"},
-		"clusters":                  {"auth"},
-		"images":                    {"auth"},
-		"rest/static-node-clusters": {"auth"},
-		"rest/static-nodes":         {"auth"},
-		"rest/image-registries":     {"auth"},
-		"rest/model-registries":     {"auth"},
-		"rest/endpoints":            {"auth"},
-		"rest/engines":              {"auth"},
-		"rest/model-catalogs":       {"auth"},
-		"rest/oem-configs":          {"auth"},
-		"rest/rpc":                  {"auth"},
-		"rest/external-endpoints":   {"auth"},
-		"rest/identity-sources":     {"auth"},
-		"credentials":               {"auth"},
+		"rest/api-keys":                     {"auth"},
+		"rest/workspaces":                   {"auth"},
+		"rest/roles":                        {"auth"},
+		"rest/role-assignments":             {"auth"},
+		"rest/user-profiles":                {"auth"},
+		"rest/clusters":                     {"auth"},
+		"clusters":                          {"auth"},
+		"images":                            {"auth"},
+		"rest/static-node-clusters":         {"auth"},
+		"rest/static-nodes":                 {"auth"},
+		"rest/image-registries":             {"auth"},
+		"rest/model-registries":             {"auth"},
+		"rest/endpoints":                    {"auth"},
+		"rest/engines":                      {"auth"},
+		"rest/model-catalogs":               {"auth"},
+		"rest/oem-configs":                  {"auth"},
+		"rest/rpc":                          {"auth"},
+		"rest/external-endpoints":           {"auth"},
+		"rest/identity-sources":             {"auth"},
+		"rest/log-sinks":                    {"auth"},
+		"rest/org-units":                    {"auth"},
+		"rest/org-unit-members":             {"auth"},
+		"rest/teams":                        {"auth"},
+		"rest/team-members":                 {"auth"},
+		"rest/group-policies":               {"auth"},
+		"rest/service-accounts":             {"auth"},
+		"rest/team-application-permissions": {"auth"},
+		"credentials":                       {"auth"},
 	}
 
 	for route, middlewares := range defaultRoutesToMiddlewares {
@@ -200,6 +229,7 @@ func (b *Builder) Build() (*App, error) {
 
 	// register static file serving middleware
 	b.config.GinEngine.Use(static.Serve("/", static.LocalFile(b.config.StaticConfig.Dir, true)))
+	b.config.GinEngine.NoRoute(spaFallback())
 
 	// register health check endpoint
 	b.config.GinEngine.GET("/health", func(c *gin.Context) {

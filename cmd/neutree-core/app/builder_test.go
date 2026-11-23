@@ -14,6 +14,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func TestNewBuilder(t *testing.T) {
@@ -83,6 +84,23 @@ func TestBuilderBuildDoesNotRegisterExternalPluginEndpoint(t *testing.T) {
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("POST /v1/plugin/register status = %d, want 404", recorder.Code)
+	}
+}
+
+func TestBuilderBuildServesHealthz(t *testing.T) {
+	engine := gin.New()
+	builder := NewBuilder().WithConfig(&config.CoreConfig{GinEngine: engine})
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, config.HealthzPath, nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200", config.HealthzPath, recorder.Code)
 	}
 }
 
@@ -172,7 +190,7 @@ func (internalTestPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) 
 	return v1.RuntimeConfig{}, nil
 }
 
-func (internalTestPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+func (internalTestPlugin) GetAcceleratorProfile(context.Context, publicaccelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error) {
 	return nil, nil
 }
 

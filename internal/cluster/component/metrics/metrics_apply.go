@@ -6,8 +6,11 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/component/metrics/manifests"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -32,7 +35,9 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
 
 	acceleratorPlans := []metricsAcceleratorPlan(nil)
-	acceleratorExporterTargets := []metricsScrapeTarget(nil)
+	acceleratorExporterTargets := []metricsconfig.Target(nil)
+	virtualizationTargets := []metricsconfig.Target(nil)
+	var nodeAgents []nodeAgentDeploymentPlan
 	virtualizationEnabled := m.cluster.Spec.AcceleratorVirtualizationEnabled()
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
@@ -42,11 +47,10 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 			return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
 		}
 
-		acceleratorExporterTargets = m.acceleratorExporterScrapeTargets(acceleratorPlans, external)
-		variables.AcceleratorExporterScrapeTargets = acceleratorExporterTargets
+		acceleratorExporterTargets = m.acceleratorExporterScrapeTargets(acceleratorPlans)
 
 		if virtualizationEnabled {
-			variables.VirtualizationMetricsScrapeTargets = virtualizationMetricsScrapeTargets(acceleratorPlans)
+			virtualizationTargets = m.virtualizationMetricsScrapeTargets(acceleratorPlans)
 		}
 
 		if enableManagedMetricsExporters && !external {
@@ -55,18 +59,38 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableNeutreeNodeAgentMetrics {
-		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), acceleratorPlans, acceleratorExporterTargets)
+		variables.ScrapeTargets = append(variables.ScrapeTargets, m.nodeAgentScrapeTargets(variables.NeutreeNodeAgentMetricsName)...)
+	}
+
+	variables.ScrapeTargets = append(variables.ScrapeTargets, acceleratorExporterTargets...)
+	variables.ScrapeTargets = append(variables.ScrapeTargets, virtualizationTargets...)
+
+	if m.metricsTargets != nil {
+		snapshot, err := m.metricsTargets.Snapshot()
+		if err != nil {
+			return nil, errors.Wrap(err, "read registered scrape targets")
+		}
+
+		variables.ScrapeTargets = append(variables.ScrapeTargets, snapshot.Targets...)
+	}
+
+	if variables.EnableNeutreeNodeAgentMetrics {
+		nodeAgents, err = m.planMetricsNodeAgents(acceleratorPlans)
 		if err != nil {
 			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
 		}
 
-		variables.NodeAgent = nodeAgent
-		if nodeAgent.Image != "" {
-			variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, nodeAgent.Image)
-		}
+		variables = m.nodeAgentManifestVariables(variables, nodeAgents[0])
 	}
 
 	if variables.EnableVMAgent {
+		for _, name := range m.cacheProviders.Names() {
+			provider, _ := m.cacheProviders.Get(name)
+			if metricsProvider, ok := provider.(clustercache.MetricsProvider); ok {
+				variables.CacheScrapeConfig += metricsProvider.MetricsScrapeConfig(m.cluster, m.namespace)
+			}
+		}
+
 		vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
@@ -76,17 +100,47 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if !variables.EnableVMAgent && !variables.EnableKubeStateMetrics && !variables.EnableNodeExporter &&
-		len(variables.AcceleratorExporters) == 0 && len(variables.AcceleratorExporterScrapeTargets) == 0 &&
-		len(variables.VirtualizationMetricsScrapeTargets) == 0 {
+		!variables.EnableNeutreeNodeAgentMetrics && len(variables.AcceleratorExporters) == 0 {
 		return &unstructured.UnstructuredList{}, nil
 	}
 
-	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
+	objs, err := util.RenderKubernetesManifest(manifests.Template, variables)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render metrics manifest for cluster %s", m.cluster.Metadata.Name)
 	}
 
+	for index, plan := range nodeAgents {
+		if index == 0 {
+			continue
+		}
+
+		agentResources, err := util.RenderKubernetesManifest(manifests.NodeAgentTemplate, m.nodeAgentManifestVariables(variables, plan))
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to render node agent %s", plan.Name)
+		}
+
+		objs.Items = append(objs.Items, agentResources.Items...)
+	}
+
 	return objs, nil
+}
+
+func (m *MetricsComponent) nodeAgentManifestVariables(variables MetricsManifestVariables, plan nodeAgentDeploymentPlan) MetricsManifestVariables {
+	variables.NeutreeNodeAgentMetricsName = plan.Name
+	variables.NodeAgent = plan.NodeAgent
+	variables.NodeAgent.InitContainers = rewriteInitContainerImages(plan.NodeAgent.InitContainers, m.imagePrefix)
+
+	if plan.NodeAgent.Image != "" {
+		variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, plan.NodeAgent.Image)
+	}
+
+	for i := range variables.NodeAgent.InitContainers {
+		if variables.NodeAgent.InitContainers[i].Image == "" {
+			variables.NodeAgent.InitContainers[i].Image = variables.NeutreeNodeAgentMetricsImage
+		}
+	}
+
+	return variables
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {

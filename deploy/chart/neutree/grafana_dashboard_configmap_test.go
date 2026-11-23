@@ -28,6 +28,7 @@ func TestGrafanaDashboardConfigMaps(t *testing.T) {
 	resources := renderChart(t, nil)
 	dashboardConfigMaps, grafana := renderedGrafanaDashboards(t, resources.Items)
 	require.Contains(t, dashboardConfigMaps, longestGrafanaDashboardConfigMap)
+	require.Contains(t, dashboardConfigMaps, "router-grafana-dashboard")
 	projectedConfigMaps := projectedDashboardConfigMaps(t, *grafana)
 	require.Equal(t, dashboardConfigMaps, projectedConfigMaps)
 	assertDashboardVolumeMount(t, *grafana)
@@ -53,6 +54,21 @@ func renderChart(t *testing.T, overrides map[string]interface{}) *unstructured.U
 }
 
 func renderChartWithError(overrides map[string]interface{}) (*unstructured.UnstructuredList, error) {
+	return renderChartForRelease(overrides, chartutil.ReleaseOptions{
+		Name:      "neutree",
+		Namespace: "default",
+		Revision:  1,
+		IsInstall: true,
+	})
+}
+
+func renderChartForRelease(overrides map[string]interface{}, release chartutil.ReleaseOptions) (*unstructured.UnstructuredList, error) {
+	return renderChartWithAPIs(overrides, release, true)
+}
+
+// renderChartWithAPIs renders the chart; withCNPG controls whether the
+// CloudNativePG API is reported as installed.
+func renderChartWithAPIs(overrides map[string]interface{}, release chartutil.ReleaseOptions, withCNPG bool) (*unstructured.UnstructuredList, error) {
 	valuesOverrides := map[string]interface{}{
 		"jwtSecret":     "render-test-secret",
 		"adminPassword": "render-test-password",
@@ -66,16 +82,21 @@ func renderChartWithError(overrides map[string]interface{}) (*unstructured.Unstr
 		return nil, err
 	}
 
+	// As helm install does: drop disabled subcharts and apply aliases.
+	if err := chartutil.ProcessDependenciesWithMerge(chart, valuesOverrides); err != nil {
+		return nil, err
+	}
+
+	capabilities := chartutil.DefaultCapabilities.Copy()
+	if withCNPG {
+		capabilities.APIVersions = append(capabilities.APIVersions, "postgresql.cnpg.io/v1")
+	}
+
 	values, err := chartutil.ToRenderValuesWithSchemaValidation(
 		chart,
 		valuesOverrides,
-		chartutil.ReleaseOptions{
-			Name:      "neutree",
-			Namespace: "default",
-			Revision:  1,
-			IsInstall: true,
-		},
-		chartutil.DefaultCapabilities.Copy(),
+		release,
+		capabilities,
 		true,
 	)
 	if err != nil {

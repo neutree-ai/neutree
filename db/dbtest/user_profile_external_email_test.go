@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// These tests cover migration 108: the profile email of a user from an
+// These tests cover the user_profile_identity_source trigger: the profile email of a user from an
 // identity source is read-only, except for the value the system sets itself,
 // and every profile carries a read-only neutree.ai/identity-source label that
 // tells external users apart.
@@ -235,7 +235,7 @@ func TestUserProfileExternalEmail_Label(t *testing.T) {
 	}
 }
 
-// The 107 backfill writes the directory mail, which the guard lets through.
+// The external_user_profile_email backfill writes the directory mail, which the guard lets through.
 func TestUserProfileExternalEmail_BackfillStillApplies(t *testing.T) {
 	user := createExternalEmailUser(t, "ldap", "backfill")
 	db := GetTestDB(t)
@@ -252,7 +252,7 @@ func TestUserProfileExternalEmail_BackfillStillApplies(t *testing.T) {
 		`SET LOCAL session_replication_role = replica`,
 		`UPDATE api.user_profiles p SET spec = ROW(u.email)::api.user_profile_spec FROM auth.users u WHERE p.id = u.id AND p.id = '` + user.id + `'`,
 		`SET LOCAL session_replication_role = origin`,
-		// The 107 backfill, verbatim.
+		// The external_user_profile_email backfill, verbatim.
 		`UPDATE api.user_profiles p
 		 SET spec = ROW(u.raw_user_meta_data->>'email')::api.user_profile_spec
 		 FROM auth.users u
@@ -277,7 +277,7 @@ func TestUserProfileExternalEmail_BackfillStillApplies(t *testing.T) {
 
 const identitySourceNameLabel = "neutree.ai/identity-source-name"
 
-// The 108 backfill of app_metadata.identity_source_name, verbatim.
+// The backfill of app_metadata.identity_source_name, verbatim.
 const identitySourceNameBackfill = `
 UPDATE auth.users u
 SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)

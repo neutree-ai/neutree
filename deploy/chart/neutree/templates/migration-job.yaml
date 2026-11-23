@@ -17,14 +17,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.migration) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
         - name: wait-auth-service
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
@@ -47,7 +45,8 @@ spec:
         args:
           - -source=file://migrations
           - -database
-          - "postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable"
+          # lib/pq forwards unknown keys to the server as settings, so no keepalive parameters here.
+          - {{ include "neutree.db.url" (dict "root" $ "user" .Values.db.user "password" .Values.db.password "params" "sslmode=disable") | quote }}
           - up
         volumeMounts:
           - name: migrations

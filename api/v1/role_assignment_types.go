@@ -6,13 +6,36 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
-// RoleAssignmentSpec defines the desired state of RoleAssignment
+// RoleAssignmentSpec defines the desired state of RoleAssignment.
+//
+// A role assignment has one scope: Global, a Workspace, or an OrgUnit subtree
+// (OrgUnit is the metadata.name of the OrgUnit; Global is false and Workspace
+// empty). An OrgUnit scope grants the role's permissions only on the users and
+// OrgUnits of that subtree.
+//
+// The subject is a user (SubjectKind User or empty, UserID set) or a group
+// (SubjectKind Team or OrgUnit, SubjectName the group's metadata.name, UserID
+// empty). A Team assignment applies to its members while the Team is Active;
+// an OrgUnit assignment applies to the members of its whole subtree.
 type RoleAssignmentSpec struct {
-	UserID    string `json:"user_id"` // UUID represented as string
-	Workspace string `json:"workspace,omitempty"`
-	Global    bool   `json:"global,omitempty"`
-	Role      string `json:"role"`
+	UserID      string `json:"user_id,omitempty"` // UUID represented as string
+	Workspace   string `json:"workspace,omitempty"`
+	Global      bool   `json:"global,omitempty"`
+	Role        string `json:"role"`
+	OrgUnit     string `json:"org_unit,omitempty"`
+	SubjectKind string `json:"subject_kind,omitempty"`
+	SubjectName string `json:"subject_name,omitempty"`
+	// Team scopes the assignment to one Team (its metadata.name); Global is
+	// false and Workspace and OrgUnit are empty.
+	Team string `json:"team,omitempty"`
 }
+
+// Subject kinds of a role assignment.
+const (
+	RoleAssignmentSubjectUser    = "User"
+	RoleAssignmentSubjectTeam    = "Team"
+	RoleAssignmentSubjectOrgUnit = "OrgUnit"
+)
 
 // RoleAssignmentPhase represents the current phase of a RoleAssignment.
 type RoleAssignmentPhase string

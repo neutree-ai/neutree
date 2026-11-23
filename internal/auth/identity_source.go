@@ -25,7 +25,7 @@ const (
 
 	// IdentitySourceLabel is the read-only user profile label naming the
 	// identity source of an external user. The database sets it from
-	// app_metadata on every profile write (migration 108), so no write can
+	// app_metadata on every profile write (trigger user_profile_identity_source), so no write can
 	// add, change or remove it; local users never have it.
 	IdentitySourceLabel = "neutree.ai/identity-source"
 

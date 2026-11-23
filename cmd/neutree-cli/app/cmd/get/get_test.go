@@ -33,23 +33,27 @@ func TestPrintTableIncludesIDColumn(t *testing.T) {
 	assert.Equal(t, "ACTIVE", row[3])
 }
 
-func TestPrintTableWorkspaceKindOmitsWorkspaceColumnButKeepsID(t *testing.T) {
-	var buf bytes.Buffer
+func TestPrintTableGlobalKindOmitsWorkspaceColumnButKeepsID(t *testing.T) {
+	for _, kind := range []string{"Workspace", "LogSink"} {
+		t.Run(kind, func(t *testing.T) {
+			var buf bytes.Buffer
 
-	p := &resourcePrinter{kind: "Workspace", format: "table", out: &buf}
+			p := &resourcePrinter{kind: kind, format: "table", out: &buf}
 
-	items := []json.RawMessage{
-		json.RawMessage(`{"id":7,"metadata":{"name":"default"},"status":{"phase":"READY"}}`),
+			items := []json.RawMessage{
+				json.RawMessage(`{"id":7,"metadata":{"name":"default"},"status":{"phase":"READY"}}`),
+			}
+			require.NoError(t, p.printTable(items))
+
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			require.Len(t, lines, 2)
+			assert.Equal(t, []string{"NAME", "ID", "PHASE", "AGE"}, strings.Fields(lines[0]))
+			row := strings.Fields(lines[1])
+			assert.Equal(t, "default", row[0])
+			assert.Equal(t, "7", row[1])
+			assert.Equal(t, "READY", row[2])
+		})
 	}
-	require.NoError(t, p.printTable(items))
-
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	require.Len(t, lines, 2)
-	assert.Equal(t, []string{"NAME", "ID", "PHASE", "AGE"}, strings.Fields(lines[0]))
-	row := strings.Fields(lines[1])
-	assert.Equal(t, "default", row[0])
-	assert.Equal(t, "7", row[1])
-	assert.Equal(t, "READY", row[2])
 }
 
 // itemA and itemB stand in for resources returned by the API.

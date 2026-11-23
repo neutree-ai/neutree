@@ -341,6 +341,7 @@ func newMetricDescriptors() []*metricDescriptor {
 		newMetricDescriptor("neutree_accelerator_utilization_ratio", physicalAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_accelerator_memory_used_bytes", physicalAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_accelerator_memory_total_bytes", physicalAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
+		newMetricDescriptor("neutree_accelerator_power_usage_watts", physicalAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_accelerator_temperature_celsius", physicalAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		// PCIe throughput is a per-second rate, so it is a gauge. Naming it as a
 		// counter would invite rate() over an already-divided value.

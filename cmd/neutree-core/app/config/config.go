@@ -5,9 +5,10 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/auth"
-	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
+	"github.com/neutree-ai/neutree/internal/leader"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/internal/observability/logsink"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
@@ -15,6 +16,9 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// HealthzPath is served by every core replica for kubelet probes.
+const HealthzPath = "/healthz"
 
 type ControllerConfig struct {
 	Workers int
@@ -31,6 +35,13 @@ type ModelRegistryConfig struct {
 	Builtin model_registry.BuiltinConfig
 }
 
+// LogSinkConfig is how LogSinks reach and are observed in Vector.
+type LogSinkConfig struct {
+	Syncer               logsink.Syncer
+	MetricsURL           string
+	TracePipelineEnabled bool
+}
+
 type ServerConfig struct {
 	Port int
 	Host string
@@ -45,10 +56,12 @@ type CoreConfig struct {
 	RepositoryService       registry.RepositoryService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
-	EngineRegistry          engine.Registry
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 	AuthClient              auth.Client
+
+	// LeaderElector gates background work; nil means always leader.
+	LeaderElector leader.Elector
 
 	// global controller configs
 	ControllerConfig *ControllerConfig
@@ -61,6 +74,9 @@ type CoreConfig struct {
 
 	// model registry provisioning config
 	ModelRegistryConfig *ModelRegistryConfig
+
+	// log sink delivery config
+	LogSinkConfig *LogSinkConfig
 
 	Scheme *scheme.Scheme
 }

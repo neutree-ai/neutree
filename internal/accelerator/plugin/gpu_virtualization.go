@@ -6,8 +6,6 @@ import (
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -56,12 +54,21 @@ func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 		return nil, err
 	}
 
-	clusterPolicies, err := listGPUOperatorClusterPolicies(ctx, ctrlClient)
+	clusterPolicies, err := accelerator.ListGPUOperatorClusterPolicies(ctx, ctrlClient)
 	if err != nil {
 		return nil, err
 	}
 
+	runtimeClass := ""
+	if len(NvidiaVirtualizationCandidateNodes(nodes)) > 0 {
+		runtimeClass, err = accelerator.SelectRuntimeClass(ctx, ctrlClient, cluster, clusterPolicies)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return p.ResolveVirtualizationConfig(ctx, VirtualizationConfigInput{
+		RuntimeClassName:           runtimeClass,
 		Nodes:                      nodes,
 		GPUOperatorClusterPolicies: clusterPolicies,
 	})
@@ -71,17 +78,40 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	_ context.Context,
 	input VirtualizationConfigInput,
 ) (*accelerator.VirtualizationConfig, error) {
-	configPatch := map[string]interface{}{
-		"devicePlugin": map[string]interface{}{
-			"enabled":          true,
-			"migStrategy":      "none",
-			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
-			"nvidiaNodeSelector": map[string]interface{}{
-				"gpu":                           nil,
-				NvidiaGPUVirtualizationLabelKey: "true",
-			},
+	devicePlugin := map[string]interface{}{
+		"enabled":          true,
+		"migStrategy":      "none",
+		"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
+		"nvidiaNodeSelector": map[string]interface{}{
+			"gpu":                           nil,
+			NvidiaGPUVirtualizationLabelKey: "true",
 		},
 	}
+	configPatch := map[string]interface{}{"devicePlugin": devicePlugin}
+
+	managed, _, err := accelerator.NvidiaOperatorRuntime(input.GPUOperatorClusterPolicies)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.RuntimeClassName != "" {
+		devicePlugin["runtimeClassName"] = input.RuntimeClassName
+	}
+
+	if managed {
+		// Hami keeps ownership of the device-plugin and virtualization label;
+		// only pass GPU Operator runtime compatibility through chart values.
+		if err := unstructured.SetNestedField(configPatch, accelerator.NvidiaGPUDiscoveryLabelValue,
+			"devicePlugin", "nvidiaNodeSelector", accelerator.NvidiaGPUClientLabel); err != nil {
+			return nil, err
+		}
+
+		devicePlugin["gpuOperatorToolkitReady"] = map[string]interface{}{
+			"enabled":  true,
+			"hostPath": accelerator.NvidiaValidationPath,
+		}
+	}
+
 	blockingReasons := make([]string, 0)
 
 	for _, policy := range input.GPUOperatorClusterPolicies {
@@ -114,6 +144,12 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	if len(candidateNodes) == 0 {
 		blockingReasons = append(blockingReasons,
 			"No NVIDIA GPU nodes available for vGPU virtualization")
+	}
+
+	if len(candidateNodes) > 0 && input.RuntimeClassName == "" {
+		// Keep scope available so deletion can remove virtualization labels without a RuntimeClass.
+		blockingReasons = append(blockingReasons,
+			"NVIDIA RuntimeClass is unavailable; reconcile the NVIDIA accelerator operator before generating virtualization config")
 	}
 
 	return &accelerator.VirtualizationConfig{
@@ -170,37 +206,4 @@ func listNvidiaVirtualizationNodes(ctx context.Context, ctrlClient client.Reader
 	}
 
 	return nodeList.Items, nil
-}
-
-func listGPUOperatorClusterPolicies(
-	ctx context.Context,
-	ctrlClient client.Reader,
-) ([]GPUOperatorClusterPolicy, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetAPIVersion("nvidia.com/v1")
-	list.SetKind("ClusterPolicyList")
-
-	if err := ctrlClient.List(ctx, list); err != nil {
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-			return nil, nil
-		}
-
-		return nil, errors.Wrap(err, "failed to list NVIDIA GPU Operator ClusterPolicy resources")
-	}
-
-	policies := make([]GPUOperatorClusterPolicy, 0, len(list.Items))
-
-	for _, item := range list.Items {
-		spec, _, err := unstructured.NestedMap(item.Object, "spec")
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read NVIDIA GPU Operator ClusterPolicy %s spec", item.GetName())
-		}
-
-		policies = append(policies, GPUOperatorClusterPolicy{
-			Name: item.GetName(),
-			Spec: spec,
-		})
-	}
-
-	return policies, nil
 }

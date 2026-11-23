@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 	testEnvVars       = map[string]interface{}{"ENV1": "value1", "ENV2": "value2"}
 	testPortForward   = []string{"8080:localhost:8080"}
 	testSSHOptions    = []string{
+		"-T",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
@@ -58,6 +60,7 @@ func TestSSHCommandRunner_Run_Success(t *testing.T) {
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
+		assert.Equal(t, "-T", cmd[0])
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
 	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("success"), nil)
@@ -72,38 +75,44 @@ func TestSSHCommandRunner_Run_Success(t *testing.T) {
 func TestSSHCommandRunner_Run_WithError(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
+	executeErr := errors.New("ssh failed: with error")
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
-	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("with error"), errors.New("ssh failed"))
+	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("partial stdout"), executeErr)
 
-	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+	output, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "SSH command failed")
-	assert.Contains(t, err.Error(), "with error")
+	assert.EqualError(t, err, "SSH command failed: "+executeErr.Error())
+	assert.ErrorIs(t, err, executeErr)
+	assert.NotErrorIs(t, err, ErrConnectionFailed)
+	assert.Empty(t, output)
 	mockExec.AssertExpectations(t)
 }
 
 func TestSSHCommandRunner_Run_ExitOnFail(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
+	executeErr := errors.New("ssh failed: with error")
 
 	sshOptionsWithCommand := append(testSSHOptions, testCommand)
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
-	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("error"), errors.New("ssh failed"))
+	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("partial stdout"), executeErr)
 
-	output, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
+	output, err := runner.Run(context.Background(), testCommand, true, nil, true, nil, "", false)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "command failed")
-	assert.Equal(t, "", output)
+	assert.EqualError(t, err, "command failed: "+executeErr.Error())
+	assert.ErrorIs(t, err, executeErr)
+	assert.NotErrorIs(t, err, ErrConnectionFailed)
+	assert.Empty(t, output)
 	mockExec.AssertExpectations(t)
 }
 
@@ -128,7 +137,7 @@ func TestSSHCommandRunner_Run_WithPortForward(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
-	expectedArgs := append([]string{"ssh", "-L", "8080:localhost:8080"}, testSSHOptions...)
+	expectedArgs := append([]string{"ssh", "-T", "-L", "8080:localhost:8080"}, testSSHOptions[1:]...)
 	expectedArgs = append(expectedArgs, testCommand)
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
@@ -184,6 +193,7 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 	overrideKey := "override_key"
 	expectedArgs := []string{
 		"ssh",
+		"-T",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
@@ -298,14 +308,14 @@ func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFa
 	mockExec.AssertExpectations(t)
 }
 
-func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFailureDetail(t *testing.T) {
+func TestSSHCommandRunner_CheckConnection_PreservesExecutorErrorAsConnectionFailureDetail(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
-	}).Return([]byte("ssh: connect to host 127.0.0.1 port 22: Connection refused\n"), errors.New("exit status 255")).Once()
+	}).Return([]byte(""), errors.New("exit status 255: ssh: connect to host 127.0.0.1 port 22: Connection refused")).Once()
 
 	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
 
@@ -315,7 +325,7 @@ func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFai
 	assert.Contains(t, err.Error(), "exit status 255",
 		"message should preserve the process exit status")
 	assert.Contains(t, err.Error(), "Connection refused",
-		"message should preserve SSH stderr returned as executor output")
+		"message should preserve SSH stderr included in the executor error")
 	assert.Contains(t, err.Error(), "hint:",
 		"message should include the static-cluster troubleshooting hint section")
 	mockExec.AssertExpectations(t)

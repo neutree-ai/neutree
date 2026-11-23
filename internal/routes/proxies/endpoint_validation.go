@@ -112,7 +112,7 @@ func validateEndpoint(store storage.Storage, providers ...kvcache.Providers) gin
 			}
 
 			if err := kvcache.Validate(input.New, cluster, provider); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"message": err.Error(), "code": "INVALID_CACHE_CONFIGURATION"})
+				c.JSON(http.StatusBadRequest, providerValidationError(err, "INVALID_CACHE_CONFIGURATION"))
 				c.Abort()
 
 				return
@@ -426,7 +426,7 @@ func endpointPatchMayAffectModelSourceValidation(endpoint *v1.Endpoint) bool {
 // supported value meaning "whatever the registry calls its default", and every
 // registry type resolves it: getDeployedModelRealVersion passes "" through to
 // Hugging Face and ModelScope so the hub picks the repository's default branch,
-// and looks the latest version up for BentoML. Migration 045 dropped the
+// and looks the latest version up for BentoML. remove_model_version_validation dropped the
 // presence trigger for exactly this reason, so endpoints without a version have
 // been legal -- and deployable -- ever since; demanding one here would strand
 // them on any spec change, including the resume that follows a pause.

@@ -353,6 +353,10 @@ func (f fakeRuntimeDashboard) GetActorLog(_, _ string, _ int) (string, error) {
 	return "", nil
 }
 
+func (f fakeRuntimeDashboard) GetActorLogHead(context.Context, string, string, int64) (string, error) {
+	return "", nil
+}
+
 func (f fakeRuntimeDashboard) ListActors(filters []dashboard.ActorFilter, _ bool, _ int) (*dashboard.ActorsResponse, error) {
 	actorID := ""
 	for _, filter := range filters {

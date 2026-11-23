@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"k8s.io/utils/ptr"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -27,6 +28,7 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 				NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA_L20",
 			},
 			expected: &v1.ResourceInfo{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 					v1.AcceleratorTypeNVIDIAGPU: {
 						Quantity: 4,
@@ -47,6 +49,7 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 				NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA_L20",
 			},
 			expected: &v1.ResourceInfo{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 					v1.AcceleratorTypeNVIDIAGPU: {
 						Quantity: 0,
@@ -144,6 +147,7 @@ func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesNativeGPUResourceQu
 				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
 					"Tesla-T4": {
 						MemoryTotalMiB: 15360,
+						PeakFP16TFLOPS: ptr.To(65.0),
 					},
 				},
 			},
@@ -193,6 +197,7 @@ func TestNVIDIAGPU_ParseFromKubernetesDoesNotInferVirtualizationFromHAMiResource
 				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
 					"Tesla-T4": {
 						MemoryTotalMiB: 15360,
+						PeakFP16TFLOPS: ptr.To(65.0),
 					},
 				},
 			},
@@ -285,6 +290,7 @@ func TestGPUParser_ParserFromRay(t *testing.T) {
 				"custom_resource_example": 5,
 			},
 			expected: &v1.ResourceInfo{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 					v1.AcceleratorTypeNVIDIAGPU: {
 						Quantity: 2,
@@ -304,6 +310,7 @@ func TestGPUParser_ParserFromRay(t *testing.T) {
 				"custom_resource_example": 5,
 			},
 			expected: &v1.ResourceInfo{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 					v1.AcceleratorTypeNVIDIAGPU: {
 						Quantity: 0,

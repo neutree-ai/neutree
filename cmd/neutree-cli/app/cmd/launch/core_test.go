@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -572,6 +573,79 @@ func TestPrepareNeutreeCoreDeployConfig_DecodesEndpointName(t *testing.T) {
 		"endpoint_name = .extracted_data.url_split[4]")
 }
 
+// A full trace buffer must drop traces, not back-pressure the shared Kong log
+// source that also feeds usage recording.
+func TestPrepareNeutreeCoreDeployConfig_TraceSinkDropsWhenBufferFull(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+
+	var config struct {
+		Sinks map[string]struct {
+			Buffer map[string]interface{} `json:"buffer"`
+		} `json:"sinks"`
+	}
+	require.NoError(t, yaml.Unmarshal(vector, &config))
+	require.Equal(t, "drop_newest", config.Sinks["ai_trace_victorialogs"].Buffer["when_full"])
+	require.NotContains(t, config.Sinks["postgrest_rpc"].Buffer, "when_full", "usage sink must keep the default blocking buffer")
+}
+
+// The usage sink's disk buffer can hold the last record until the next write,
+// so a heartbeat must reach it; record_api_usage ignores the nil key.
+func TestPrepareNeutreeCoreDeployConfig_UsageSinkHeartbeat(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+
+	var config struct {
+		Sources    map[string]map[string]interface{} `json:"sources"`
+		Transforms map[string]struct {
+			Inputs []string `json:"inputs"`
+			Source string   `json:"source"`
+		} `json:"transforms"`
+		Sinks map[string]struct {
+			Inputs []string               `json:"inputs"`
+			Buffer map[string]interface{} `json:"buffer"`
+		} `json:"sinks"`
+	}
+	require.NoError(t, yaml.Unmarshal(vector, &config))
+
+	require.Equal(t, "demo_logs", config.Sources["buffer_heartbeat"]["type"])
+	require.Equal(t, []string{"buffer_heartbeat"}, config.Transforms["prepare_usage_heartbeat"].Inputs)
+	assert.Contains(t, config.Transforms["prepare_usage_heartbeat"].Source,
+		`"p_api_key_id": "00000000-0000-0000-0000-000000000000"`)
+	require.Equal(t, "disk", config.Sinks["postgrest_rpc"].Buffer["type"])
+	require.Equal(t, []string{"prepare_postgrest_payload", "prepare_usage_heartbeat"}, config.Sinks["postgrest_rpc"].Inputs)
+}
+
 func currentNeutreeCoreReleaseVersion() *semver.Version {
 	minVersion := semver.MustParse(neutreeCoreCompatibilityPolicyForCurrentRelease.targetMin)
 	return semver.New(minVersion.Major(), minVersion.Minor(), minVersion.Patch(), "", "")
@@ -590,6 +664,38 @@ func previousNeutreeCoreReleaseVersion(t *testing.T) string {
 
 	require.NotZero(t, currentVersion.Major())
 	return fmt.Sprintf("v%d.0.0", currentVersion.Major()-1)
+}
+
+// neutree-core reads LogSink health from this exporter and writes logsinks.yaml
+// into the mounted Vector config dir.
+func TestPrepareNeutreeCoreDeployConfig_VectorLogSinkWiring(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(vector), "type: prometheus_exporter")
+	assert.Contains(t, string(vector), "address: 0.0.0.0:9598")
+	assert.Contains(t, string(vector), "type: internal_metrics")
+
+	compose, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "docker-compose.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(compose), filepath.Join(tempDir, "neutree-core")+"/vector:/etc/neutree/vector")
+	assert.Contains(t, string(compose), "--vector-config-dir=/etc/neutree/vector")
+	assert.Contains(t, string(compose), "--vector-metrics-url=http://vector:9598/metrics")
+	assert.NotContains(t, string(compose), "9598:9598", "Vector metrics stay on the compose network")
 }
 
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
@@ -793,6 +899,8 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 				version:   "v1.0.0",
 			},
 			setupMock: func(m *mocks.MockExecutor) {
+				expectNoPostgres(m)
+				expectNoRetiredContainers(m)
 				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
 					return args[0] == "compose" && args[1] == "-p"
 				})).Return([]byte("success"), nil)
@@ -863,6 +971,8 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 	})
 
 	mockExecutor := &mocks.MockExecutor{}
+	expectNoPostgres(mockExecutor)
+	expectNoRetiredContainers(mockExecutor)
 	mockExecutor.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
 		return args[0] == "compose" && args[1] == "-p"
 	})).Return([]byte("success"), nil)
@@ -901,7 +1011,11 @@ func TestInstallNeutreeCoreSingleNodeByDockerUsesStopTimeout(t *testing.T) {
 	}
 
 	mockExecutor := &mocks.MockExecutor{}
-	mockExecutor.On("Execute", mock.Anything, "docker", mock.Anything).
+	expectNoPostgres(mockExecutor)
+	expectNoRetiredContainers(mockExecutor)
+	mockExecutor.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
+		return args[0] == "compose"
+	})).
 		Run(func(args mock.Arguments) {
 			assert.Equal(t, wantArgs, args.Get(2).([]string))
 		}).
@@ -1055,4 +1169,21 @@ func captureStdout(t *testing.T, fn func()) string {
 	require.NoError(t, err)
 
 	return string(output)
+}
+
+func TestMetricsQueryURLRendering(t *testing.T) {
+	for _, tc := range []struct{ name, write, query, want string }{
+		{name: "local obs stack", want: "http://192.168.1.1:8481/select/0/prometheus"},
+		{name: "external query", write: "http://external/insert", query: "http://external/select/0/prometheus", want: "http://external/select/0/prometheus"},
+		{name: "external write is not query", write: "http://external/insert"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := neutreeCoreInstallOptions{commonOptions: &commonOptions{workDir: dir, nodeIP: "192.168.1.1", deployType: constants.DeployTypeLocal, deployMode: constants.DeployModeSingle}, jwtSecret: "test-secret", version: "v1.0.0", metricsRemoteWriteURL: tc.write, metricsQueryURL: tc.query}
+			require.NoError(t, prepareNeutreeCoreDeployConfig(opts))
+			data, err := os.ReadFile(filepath.Join(dir, "neutree-core", "docker-compose.yml"))
+			require.NoError(t, err)
+			require.Contains(t, string(data), "--metrics-url=${NEUTREE_METRICS_QUERY_URL:-"+tc.want+"}")
+		})
+	}
 }

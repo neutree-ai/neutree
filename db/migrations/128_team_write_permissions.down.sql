@@ -1,0 +1,2 @@
+-- No-op. PostgreSQL cannot remove enum values; the manual_teams down migration takes the
+-- team write permissions out of every role.

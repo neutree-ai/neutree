@@ -250,6 +250,15 @@ func verifyAPIKeyNotRevoked(store storage.Storage, keyID string) error {
 		return errors.New("API key is disabled")
 	}
 
+	ownerActive, err := store.ApiKeyOwnerActive(keyID)
+	if err != nil {
+		return fmt.Errorf("%w: %s", errAPIKeyStateUnknown, err.Error())
+	}
+
+	if !ownerActive {
+		return errors.New("the owner of the API key is deactivated")
+	}
+
 	return nil
 }
 

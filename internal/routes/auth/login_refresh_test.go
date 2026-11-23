@@ -32,7 +32,10 @@ func TestLDAPToken_LaterLoginRefreshesProfile(t *testing.T) {
 	id := testIdentity()
 
 	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, id.ExternalID).
-		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+		Return(&storage.ExternalIdentity{
+			Source: testLDAPLinkSource, ExternalID: id.ExternalID, UserID: userID.String(),
+			Username: id.Username, Email: "old@example.org",
+		}, nil).Once()
 	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: testPlaceholderEmail,
@@ -50,6 +53,9 @@ func TestLDAPToken_LaterLoginRefreshesProfile(t *testing.T) {
 	d.storage.EXPECT().UpdateUserProfile(userID.String(), &v1.UserProfile{
 		Metadata: &v1.Metadata{Name: "profile-name", DisplayName: id.DisplayName, Labels: map[string]string{"k": "v"}},
 		Spec:     &v1.UserProfileSpec{Email: id.Email},
+	}).Return(nil).Once()
+	d.storage.EXPECT().UpdateExternalIdentityAccount(&storage.ExternalIdentity{
+		Source: testLDAPLinkSource, ExternalID: id.ExternalID, Username: id.Username, Email: id.Email,
 	}).Return(nil).Once()
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
 		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
@@ -88,7 +94,10 @@ func TestOIDCCallback_LaterLoginRefreshesProfile(t *testing.T) {
 	userID := uuid.New()
 
 	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
-		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+		Return(&storage.ExternalIdentity{
+			Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID.String(),
+			Username: "kc.alice", Email: "alice@example.org",
+		}, nil).Once()
 	e.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: e.placeholderEmail(),
@@ -113,6 +122,7 @@ func TestOIDCCallback_LaterLoginRefreshesProfile(t *testing.T) {
 	_, fragment := redirectFragment(t, e.loginFlow(t))
 
 	assert.Equal(t, url.Values{"token_hash": {"hashed-token"}, "type": {"magiclink"}}, fragment)
+	e.storage.AssertNotCalled(t, "UpdateExternalIdentityAccount", mock.Anything)
 }
 
 // A later login of a user created before identity_source_name was recorded
@@ -123,7 +133,10 @@ func TestLDAPToken_LaterLoginRecordsIdentitySourceName(t *testing.T) {
 	id := testIdentity()
 
 	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, id.ExternalID).
-		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+		Return(&storage.ExternalIdentity{
+			Source: testLDAPLinkSource, ExternalID: id.ExternalID, UserID: userID.String(),
+			Username: id.Username, Email: id.Email,
+		}, nil).Once()
 	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: testPlaceholderEmail,

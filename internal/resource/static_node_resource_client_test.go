@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,9 +49,18 @@ func newStaticNodeResourceClientForTest(
 	nodes []*v1.StaticNode,
 	baseClient ResourceClient,
 ) *StaticNodeResourceClient {
+	return newStaticNodeResourceClientForTestWithDashboard(nodes, baseClient, nil, map[string]struct{}{"actor-1": {}})
+}
+
+func newStaticNodeResourceClientForTestWithDashboard(
+	nodes []*v1.StaticNode,
+	baseClient ResourceClient,
+	dashboardClient dashboard.DashboardService,
+	runningActors map[string]struct{},
+) *StaticNodeResourceClient {
 	_, lister := staticNodeClusterAndListerForTest(nodes)
 
-	return NewStaticNodeClusterResourceClient(lister, baseClient)
+	return NewStaticNodeClusterResourceClientWithDashboard(lister, baseClient, dashboardClient, runningActors)
 }
 
 func staticNodeClusterAndListerForTest(nodes []*v1.StaticNode) (*v1.Cluster, *fakeStaticNodeLister) {
@@ -168,6 +179,7 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 					{
 						Devices: []v1.DeviceAllocation{
 							{UUID: "GPU-abc", MemoryMiB: 7680, CoreUnits: 50},
+							{UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50},
 						},
 					},
 				},
@@ -187,18 +199,23 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 	allocatableProduct := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, allocatableProduct.Virtualization)
-	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
-	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
+	assert.Equal(t, float64(1), allocatableProduct.Quantity)
+	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
 	assert.Equal(t, float64(1), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	availableProduct := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
-	assert.Equal(t, float64(7680), availableProduct.Virtualization.MemoryMiB)
-	assert.Equal(t, float64(50), availableProduct.Virtualization.CoreUnits)
+	assert.Equal(t, float64(1), availableProduct.Quantity)
+	assert.Equal(t, float64(15360), availableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(100), availableProduct.Virtualization.CoreUnits)
 	require.Len(t, nodes[0].Status.Devices, 2)
+	assert.True(t, nodes[0].Status.Devices[0].Health)
 	assert.Equal(t, int64(7680), nodes[0].Status.Devices[0].Available.MemoryMiB)
 	assert.Equal(t, int64(50), nodes[0].Status.Devices[0].Available.CoreUnits)
-	assert.Equal(t, int64(0), nodes[0].Status.Devices[1].Allocatable.MemoryMiB)
+	assert.False(t, nodes[0].Status.Devices[1].Health)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Allocatable)
+	assert.Equal(t, nodes[0].Status.Devices[0].Available, nodes[0].Status.Devices[1].Available)
 	require.NotNil(t, nodes[0].Status.Devices[0].Order)
 	assert.Equal(t, 1, *nodes[0].Status.Devices[0].Order)
 	require.NotNil(t, nodes[0].Status.Devices[1].Order)
@@ -258,8 +275,8 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 				Accelerator: &v1.StaticNodeAcceleratorStatus{
 					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
-						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: false},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: false},
 					},
 				},
 				Allocations: []v1.StaticNodeAllocationStatus{
@@ -311,6 +328,7 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 	assert.Equal(t, float64(1.5), allocatable.Quantity)
 	assert.Equal(t, float64(1.5), allocatable.ProductGroups["NVIDIA_Tesla_T4"])
 	assert.Equal(t, float64(1.5), allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
+	require.NotNil(t, allocatable.Products["NVIDIA_Tesla_T4"].Virtualization)
 	assert.Equal(t, float64(30720), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
 	assert.Equal(t, float64(200), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 
@@ -319,6 +337,7 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 	assert.Equal(t, float64(0.5), available.Quantity)
 	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
 	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	require.NotNil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
 	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
 	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
@@ -334,8 +353,8 @@ func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAv
 				Accelerator: &v1.StaticNodeAcceleratorStatus{
 					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
-						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: false},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: false},
 					},
 				},
 				Allocations: []v1.StaticNodeAllocationStatus{
@@ -515,6 +534,196 @@ func TestStaticNodeResourceClientListEndpointInstancesUsesEndpointProductKey(t *
 	assert.Equal(t, "GPU-abc", instances[0].Devices[0].UUID)
 	assert.Equal(t, "NVIDIA-L20", instances[0].Devices[0].Product)
 	assert.Equal(t, "192.168.19.218", instances[0].Devices[0].NodeID)
+}
+
+type fakeRayLogDashboard struct {
+	dashboard.DashboardService
+	calls int
+	out   string
+	err   string
+	get   func(ctx context.Context, actorID, suffix string, maxBytes int64) (string, error)
+}
+
+func (f *fakeRayLogDashboard) GetActorLogHead(
+	ctx context.Context,
+	actorID, suffix string,
+	maxBytes int64,
+) (string, error) {
+	f.calls++
+	if f.get != nil {
+		return f.get(ctx, actorID, suffix, maxBytes)
+	}
+
+	if suffix == "err" {
+		return f.err, nil
+	}
+
+	return f.out, nil
+}
+
+func TestStaticNodeResourceClientCollectsVLLMStartupMemory(t *testing.T) {
+	node := &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+		Spec:     &v1.StaticNodeSpec{IP: "192.168.19.218"},
+		Status: &v1.StaticNodeStatus{
+			Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()},
+			Allocations: []v1.StaticNodeAllocationStatus{{
+				Workspace: "default",
+				Endpoint:  "chat",
+				ReplicaID: "replica-a",
+				RuntimeID: "actor-1",
+				Devices:   []v1.DeviceAllocation{{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 49152, CoreUnits: 100}},
+			}},
+		},
+	}
+
+	cluster, lister := staticNodeClusterAndListerForTest([]*v1.StaticNode{node})
+	endpoint := testEndpoint("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM}
+	dash := &fakeRayLogDashboard{
+		out: "Model loading took 10.5 GiB\n",
+		err: "Available KV cache memory: 4.25 GiB\n",
+	}
+
+	// Non-running actors are not queried yet and must not lock empty cache state.
+	idleClient := NewStaticNodeClusterResourceClientWithDashboard(lister, nil, dash, map[string]struct{}{})
+	idleStatus, err := NewResourceViewBuilder(idleClient).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Len(t, idleStatus.Replicas, 1)
+	require.Equal(t, 0, dash.calls)
+	require.Empty(t, idleStatus.Replicas[0].ContainerID)
+	require.Nil(t, idleStatus.Replicas[0].ModelWeightsMiB)
+
+	// Running actor populates weights, KV cache, and actor ContainerID from startup head logs.
+	client := NewStaticNodeClusterResourceClientWithDashboard(lister, nil, dash, map[string]struct{}{"actor-1": {}})
+	status, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Len(t, status.Replicas, 1)
+	require.Equal(t, 2, dash.calls)
+	require.Equal(t, "actor-1", status.Replicas[0].ContainerID)
+	require.NotNil(t, status.Replicas[0].ModelWeightsMiB)
+	require.InDelta(t, 10752.0, *status.Replicas[0].ModelWeightsMiB, 0.01)
+	require.NotNil(t, status.Replicas[0].KVCacheCapacityMiB)
+	require.InDelta(t, 4352.0, *status.Replicas[0].KVCacheCapacityMiB, 0.01)
+
+	// Subsequent reconciles reuse cached values without re-reading logs (even while draining).
+	endpoint.Status = &v1.EndpointStatus{Resources: status}
+	for _, running := range []map[string]struct{}{{"actor-1": {}}, {}} {
+		c := NewStaticNodeClusterResourceClientWithDashboard(lister, nil, dash, running)
+		cachedStatus, err := NewResourceViewBuilder(c).BuildEndpointResources(context.Background(), cluster, endpoint)
+		require.NoError(t, err)
+		require.Equal(t, 2, dash.calls)
+		require.Equal(t, "actor-1", cachedStatus.Replicas[0].ContainerID)
+		require.Equal(t, status.Replicas[0].ModelWeightsMiB, cachedStatus.Replicas[0].ModelWeightsMiB)
+		require.Equal(t, status.Replicas[0].KVCacheCapacityMiB, cachedStatus.Replicas[0].KVCacheCapacityMiB)
+	}
+
+	// num_gpu_blocks_override clears KV cache capacity for both cached and uncached reads.
+	for _, key := range []string{"num_gpu_blocks_override", "num-gpu-blocks-override"} {
+		endpoint.Spec.Variables = map[string]interface{}{"engine_args": map[string]interface{}{key: 128}}
+		for _, cached := range []bool{true, false} {
+			endpoint.Status.Resources = status
+			if !cached {
+				endpoint.Status.Resources = nil
+			}
+			got, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+			require.NoError(t, err)
+			require.NotNil(t, got.Replicas[0].ModelWeightsMiB)
+			require.InDelta(t, 10752.0, *got.Replicas[0].ModelWeightsMiB, 0.01)
+			require.Nil(t, got.Replicas[0].KVCacheCapacityMiB, key)
+		}
+	}
+	endpoint.Spec.Variables = nil
+
+	// A successful read with no matching startup lines caches completion for this running actor.
+	endpoint.Status.Resources = nil
+	dash.out, dash.err = "starting up\n", ""
+	calls := dash.calls
+	empty, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, dash.calls)
+	require.Equal(t, "actor-1", empty.Replicas[0].ContainerID)
+	require.Nil(t, empty.Replicas[0].ModelWeightsMiB)
+	require.Nil(t, empty.Replicas[0].KVCacheCapacityMiB)
+
+	endpoint.Status.Resources = empty
+	dash.out, dash.err = "Model loading took 6 GiB\n", "Available KV cache memory: 8 GiB\n"
+	stillEmpty, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, dash.calls)
+	require.Nil(t, stillEmpty.Replicas[0].ModelWeightsMiB)
+	require.Nil(t, stillEmpty.Replicas[0].KVCacheCapacityMiB)
+
+	// A new actor reads logs fresh even when the previous actor cached (nil, nil).
+	lister.nodes[0].Status.Allocations[0].RuntimeID = "actor-2"
+	client = NewStaticNodeClusterResourceClientWithDashboard(lister, nil, dash, map[string]struct{}{"actor-2": {}})
+	filled, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+4, dash.calls)
+	require.Equal(t, "actor-2", filled.Replicas[0].ContainerID)
+	require.InDelta(t, 6144.0, *filled.Replicas[0].ModelWeightsMiB, 0.01)
+	require.InDelta(t, 8192.0, *filled.Replicas[0].KVCacheCapacityMiB, 0.01)
+
+	// Partial stream failure ("out" succeeds, "err" fails) must not lock partial results.
+	endpoint.Status.Resources = nil
+	dash.get = func(_ context.Context, _, suffix string, _ int64) (string, error) {
+		if suffix == "out" {
+			return "Model loading took 6 GiB\n", nil
+		}
+
+		return "", errors.New("stderr unavailable")
+	}
+	partialFailed, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Empty(t, partialFailed.Replicas[0].ContainerID)
+	require.Nil(t, partialFailed.Replicas[0].ModelWeightsMiB)
+	require.Nil(t, partialFailed.Replicas[0].KVCacheCapacityMiB)
+
+	// Expired context skips reads without locking cache.
+	endpoint.Status.Resources = partialFailed
+	expiredCtx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	calls = dash.calls
+	timedOut, err := NewResourceViewBuilder(client).BuildEndpointResources(expiredCtx, cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls, dash.calls)
+	require.Empty(t, timedOut.Replicas[0].ContainerID)
+
+	// Full failure short-circuits before stderr, stays uncached, and retries cleanly on recovery.
+	dash.get = func(ctx context.Context, _, _ string, _ int64) (string, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), startupLogTimeout)
+
+		return "", errors.New("dashboard unavailable")
+	}
+	calls = dash.calls
+	fullFailed, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, dash.calls)
+	require.Empty(t, fullFailed.Replicas[0].ContainerID)
+
+	endpoint.Status.Resources = fullFailed
+	dash.get = nil
+	calls = dash.calls
+	retried, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, dash.calls)
+	require.Equal(t, "actor-2", retried.Replicas[0].ContainerID)
+	require.NotNil(t, retried.Replicas[0].ModelWeightsMiB)
+	require.NotNil(t, retried.Replicas[0].KVCacheCapacityMiB)
+
+	// Non-vLLM engines never query actor logs.
+	for _, engine := range []string{v1.EngineNameSGLang, v1.EngineNameLlamaCpp, "custom"} {
+		endpoint.Spec.Engine.Engine = engine
+		endpoint.Status.Resources = nil
+		calls = dash.calls
+		result, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
+		require.NoError(t, err)
+		require.Equal(t, calls, dash.calls, engine)
+		require.Empty(t, result.Replicas[0].ContainerID)
+		require.Nil(t, result.Replicas[0].ModelWeightsMiB)
+	}
 }
 
 func TestStaticNodeResourceClientListEndpointInstancesReturnsNilWhenStaticNodesDoNotExist(t *testing.T) {

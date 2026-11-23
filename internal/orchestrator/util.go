@@ -3,7 +3,10 @@ package orchestrator
 import (
 	"fmt"
 	"maps"
+	"math"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -17,6 +20,105 @@ import (
 )
 
 const acceleratorTypeCPU = "cpu"
+
+var vllmHumanReadableIntPattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)([kKmMgGtT])$`)
+
+// normalizeVLLMEngineArgs converts vLLM's human-readable KV-cache size to the
+// native integer expected by its Python API, canonicalizing the hyphenated CLI
+// flag form to the underscore field name AsyncEngineArgs accepts. Callers must
+// pass a runtime copy, not the map stored on the Endpoint, so the user's
+// readable value is retained.
+func normalizeVLLMEngineArgs(args map[string]interface{}) error {
+	const (
+		key     = "kv_cache_memory_bytes"
+		dashKey = "kv-cache-memory-bytes"
+	)
+
+	value, hasUnderscore := args[key]
+	dashValue, hasDash := args[dashKey]
+
+	if !hasUnderscore && !hasDash {
+		return nil
+	}
+
+	if hasUnderscore && hasDash {
+		return errors.Errorf("conflicting vLLM engine arguments %s and %s", key, dashKey)
+	}
+
+	sourceKey := key
+	if hasDash {
+		sourceKey = dashKey
+		value = dashValue
+	}
+
+	parsed, err := parseVLLMHumanReadableInt(value)
+	if err != nil {
+		return errors.Wrapf(err, "invalid vLLM engine argument %s", sourceKey)
+	}
+
+	delete(args, dashKey)
+	args[key] = parsed
+
+	return nil
+}
+
+func parseVLLMHumanReadableInt(value interface{}) (int64, error) {
+	switch value := value.(type) {
+	case int:
+		if value < 0 {
+			return 0, errors.Errorf("expected a non-negative integer, got %d", value)
+		}
+
+		return int64(value), nil
+	case int64:
+		if value < 0 {
+			return 0, errors.Errorf("expected a non-negative integer, got %d", value)
+		}
+
+		return value, nil
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || math.Trunc(value) != value || value >= float64(uint64(1)<<63) {
+			return 0, errors.Errorf("expected a non-negative integer, got %v", value)
+		}
+
+		return int64(value), nil
+	case string:
+		value = strings.TrimSpace(value)
+		if plain, err := strconv.ParseInt(value, 10, 64); err == nil && plain >= 0 {
+			return plain, nil
+		}
+
+		matches := vllmHumanReadableIntPattern.FindStringSubmatch(value)
+		if matches == nil {
+			return 0, errors.Errorf("expected integer bytes or a k/K/m/M/g/G/t/T suffix, got %q", value)
+		}
+
+		number, suffix := matches[1], matches[2]
+		multipliers := map[string]int64{
+			"k": 1_000, "m": 1_000_000, "g": 1_000_000_000, "t": 1_000_000_000_000,
+			"K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40,
+		}
+		multiplier := multipliers[suffix]
+
+		if suffix == strings.ToUpper(suffix) {
+			integer, err := strconv.ParseInt(number, 10, 64)
+			if err != nil || integer > math.MaxInt64/multiplier {
+				return 0, errors.Errorf("value %q is not a representable binary size", value)
+			}
+
+			return integer * multiplier, nil
+		}
+
+		decimal, err := strconv.ParseFloat(number, 64)
+		if err != nil || decimal*float64(multiplier) >= float64(uint64(1)<<63) {
+			return 0, errors.Errorf("value %q is not a representable decimal size", value)
+		}
+
+		return int64(decimal * float64(multiplier)), nil
+	default:
+		return 0, errors.Errorf("expected integer or string, got %T", value)
+	}
+}
 
 // engineTPArgKey returns the underscore-form engine_args key the engine
 // uses for tensor parallel size. vLLM uses `tensor_parallel_size`; SGLang's

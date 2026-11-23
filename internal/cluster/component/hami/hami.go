@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 type HAMiComponent struct {
@@ -150,10 +151,15 @@ func (h *HAMiComponent) UpdateStatus(ctx context.Context) error {
 }
 
 func (h *HAMiComponent) setNotReadyStatus(reason, message string) {
+	hamiVersion, err := clusterversion.HAMiVersionForCluster(h.cluster.GetVersion())
+	if err != nil {
+		h.logger.Info("Failed to resolve HAMi version for component status", "error", err)
+	}
+
 	h.writeStatus(&v1.ComponentStatus{
 		Phase:   v1.ComponentPhaseNotReady,
 		Managed: true,
-		Version: Version,
+		Version: hamiVersion,
 		Reason:  reason,
 		Message: message,
 	})

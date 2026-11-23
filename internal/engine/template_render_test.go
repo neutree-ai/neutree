@@ -28,9 +28,9 @@ func TestVLLMTemplateTaskTranslation(t *testing.T) {
 			template: vllmV0_24_0DeployTemplate,
 		},
 		{
-			name:     "vllm v0.31.0",
-			version:  "v0.31.0",
-			template: vllmV0_31_0DeployTemplate,
+			name:     "vllm v0.32.0",
+			version:  "v0.32.0",
+			template: vllmV0_32_0DeployTemplate,
 		},
 	}
 
@@ -133,8 +133,8 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 			template: vllmV0_24_0DeployTemplate,
 		},
 		{
-			name:     "vllm v0.31.0",
-			template: vllmV0_31_0DeployTemplate,
+			name:     "vllm v0.32.0",
+			template: vllmV0_32_0DeployTemplate,
 		},
 		{
 			name:     "sglang v0.5.10",
@@ -173,8 +173,8 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 			template: vllmV0_24_0DeployTemplate,
 		},
 		{
-			name:     "vllm v0.31.0",
-			template: vllmV0_31_0DeployTemplate,
+			name:     "vllm v0.32.0",
+			template: vllmV0_32_0DeployTemplate,
 		},
 		{
 			name:     "sglang v0.5.10",
@@ -210,7 +210,7 @@ func TestVLLMTemplatePreservesListEngineArgs(t *testing.T) {
 		template string
 	}{
 		{version: "v0.24.0", template: vllmV0_24_0DeployTemplate},
-		{version: "v0.31.0", template: vllmV0_31_0DeployTemplate},
+		{version: "v0.32.0", template: vllmV0_32_0DeployTemplate},
 	}
 
 	for _, tmpl := range templates {

@@ -30,47 +30,46 @@ func IsNeutreeACLGroup(group string) bool {
 	return strings.HasPrefix(group, NeutreeACLGroupPrefix)
 }
 
-const (
-	permissionEndpointRead         = "endpoint:read"
-	permissionExternalEndpointRead = "external_endpoint:read"
-)
+// permissionModelInvoke lets a key reach every endpoint and external endpoint
+// of its workspace. endpoint:read no longer counts: reading an endpoint and
+// calling its model are granted apart.
+const permissionModelInvoke = "model:invoke"
 
 func (k *Kong) desiredAPIKeyACLGroups(apiKey *v1.ApiKey) ([]string, error) {
-	if apiKey == nil || apiKey.Metadata == nil || apiKey.Metadata.Workspace == "" || apiKey.UserID == "" {
+	if apiKey == nil || apiKey.Metadata == nil || apiKey.Metadata.Workspace == "" || apiKey.OwnerID() == "" {
 		return nil, nil
 	}
 
 	workspace := apiKey.Metadata.Workspace
-	groups := make([]string, 0)
 
-	canEndpoint, err := k.hasGatewayPermission(apiKey.UserID, workspace, permissionEndpointRead)
+	// The owner is a user or a ServiceAccount; both are decided by their own
+	// role assignments.
+	canInvoke, err := k.hasGatewayPermission(apiKey.OwnerID(), workspace, permissionModelInvoke)
 	if err != nil {
 		return nil, err
 	}
 
-	if canEndpoint {
-		endpointGroups, err := k.endpointACLGroups(workspace)
-		if err != nil {
-			return nil, err
-		}
-
-		groups = append(groups, endpointGroups...)
+	if !canInvoke {
+		return []string{}, nil
 	}
 
-	canExternalEndpoint, err := k.hasGatewayPermission(apiKey.UserID, workspace, permissionExternalEndpointRead)
+	return k.workspaceACLGroups(workspace)
+}
+
+// workspaceACLGroups are the ACL groups of every live endpoint and external
+// endpoint of workspace, sorted.
+func (k *Kong) workspaceACLGroups(workspace string) ([]string, error) {
+	groups, err := k.endpointACLGroups(workspace)
 	if err != nil {
 		return nil, err
 	}
 
-	if canExternalEndpoint {
-		externalGroups, err := k.externalEndpointACLGroups(workspace)
-		if err != nil {
-			return nil, err
-		}
-
-		groups = append(groups, externalGroups...)
+	externalGroups, err := k.externalEndpointACLGroups(workspace)
+	if err != nil {
+		return nil, err
 	}
 
+	groups = append(groups, externalGroups...)
 	sort.Strings(groups)
 
 	return groups, nil

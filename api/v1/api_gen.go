@@ -441,10 +441,14 @@ type ApiRoleStatus struct {
 }
 
 type ApiRoleAssignmentSpec struct {
-	UserId    string      `json:"user_id"`
-	Workspace string      `json:"workspace"`
-	Global    interface{} `json:"global"`
-	Role      string      `json:"role"`
+	UserId      string      `json:"user_id"`
+	Workspace   string      `json:"workspace"`
+	Global      interface{} `json:"global"`
+	Role        string      `json:"role"`
+	OrgUnit     string      `json:"org_unit"`
+	SubjectKind string      `json:"subject_kind"`
+	SubjectName string      `json:"subject_name"`
+	Team        string      `json:"team"`
 }
 
 type ApiRoleAssignmentStatus struct {
@@ -524,6 +528,7 @@ type ApiEndpointSpec struct {
 }
 
 type ApiEndpointStatus struct {
+	ServedModels               []string    `json:"served_models"`
 	Phase                      string      `json:"phase"`
 	ServiceUrl                 string      `json:"service_url"`
 	LastTransitionTime         interface{} `json:"last_transition_time"`

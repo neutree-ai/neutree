@@ -11,6 +11,9 @@ return {
         type = "record",
         fields = {
           { disabled = { type = "boolean", default = false } },
+          -- Set only on the global instance. It runs for a consumer whose own
+          -- instance is not loaded yet and rejects consumers that should have one.
+          { fallback = { type = "boolean", default = false } },
           {
             -- Endpoint-scoped model allowlist. Each entry is { model, type?,
             -- endpoint_name? }: a request is permitted when its client-facing model
@@ -35,6 +38,15 @@ return {
                   { endpoint_name = { type = "string", required = false } },
                 },
               },
+            },
+          },
+          {
+            -- Client-facing model names refused on any endpoint (group deny
+            -- rules). Empty or unset = none.
+            denied_models = {
+              type = "array",
+              required = false,
+              elements = { type = "string" },
             },
           },
           { concurrency = { type = "integer", required = false } },

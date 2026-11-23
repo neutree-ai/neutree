@@ -30,4 +30,4 @@ if [ -z "$busted_bin" ]; then
     exit 1
 fi
 
-exec luajit "$busted_bin" spec/ ../neutree-metrics/spec/ ../neutree-ai-access/spec/ "$@"
+exec luajit "$busted_bin" spec/ ../neutree-metrics/spec/ ../neutree-ai-access/spec/ ../neutree-ai-quota/spec/ "$@"

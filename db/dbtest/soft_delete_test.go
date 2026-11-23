@@ -63,7 +63,7 @@ func createUserWithPermissions(t *testing.T, tx *sql.Tx, username, email string,
 			'v1',
 			'RoleAssignment',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
+			ROW($2::uuid, NULL, TRUE, $3, NULL, NULL, NULL, NULL)::api.role_assignment_spec
 		)
 	`, username+"-role-assignment", user.ID, roleName)
 	if err != nil {
@@ -71,6 +71,66 @@ func createUserWithPermissions(t *testing.T, tx *sql.Tx, username, email string,
 	}
 
 	return user.ID
+}
+
+// roleAssignment is a row seedRoleAssignment stores. Empty strings are NULL.
+type roleAssignment struct {
+	Name        string // newOrgName("ra") when empty
+	UserID      string
+	Workspace   string
+	Global      bool
+	Role        string
+	OrgUnit     string
+	SubjectKind string
+	SubjectName string
+	Team        string
+	// Replica bypasses the triggers, so the write checks do not apply.
+	Replica bool
+}
+
+// rowExecer is a *sql.DB or a *sql.Tx.
+type rowExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// insertRoleAssignment stores ra as the caller of ex and returns its name.
+func insertRoleAssignment(ex rowExecer, ra roleAssignment) (string, error) {
+	if ra.Name == "" {
+		ra.Name = newOrgName("ra")
+	}
+
+	if ra.Replica {
+		if _, err := ex.Exec(`SET LOCAL session_replication_role = replica`); err != nil {
+			return ra.Name, err
+		}
+	}
+
+	_, err := ex.Exec(`
+		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
+		VALUES ('v1', 'RoleAssignment',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW($2::uuid, $3, $4, $5, $6, $7, $8, $9)::api.role_assignment_spec)`,
+		ra.Name, nullIfEmpty(ra.UserID), nullIfEmpty(ra.Workspace), ra.Global, ra.Role,
+		nullIfEmpty(ra.OrgUnit), nullIfEmpty(ra.SubjectKind), nullIfEmpty(ra.SubjectName), nullIfEmpty(ra.Team))
+
+	return ra.Name, err
+}
+
+// seedRoleAssignment stores ra as postgres, in a transaction of its own, and
+// returns its name.
+func seedRoleAssignment(t *testing.T, db *sql.DB, ra roleAssignment) string {
+	t.Helper()
+
+	var name string
+	if err := execWithContext(t, db, nil, func(tx *sql.Tx) error {
+		var err error
+		name, err = insertRoleAssignment(tx, ra)
+		return err
+	}); err != nil {
+		t.Fatalf("seeding role assignment %+v failed: %v", ra, err)
+	}
+
+	return name
 }
 
 // executeAsUser executes a function within a transaction as the specified user

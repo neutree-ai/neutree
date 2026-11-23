@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -116,6 +117,56 @@ func (s *postgrestStorage) GetImageRegistry(id string) (*v1.ImageRegistry, error
 	)
 
 	responseContent, _, err := s.postgrestClient.From(IMAGE_REGISTRY_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListLogSink(option ListOption) ([]v1.LogSink, error) {
+	var response []v1.LogSink
+	err := s.genericList(LOG_SINK_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateLogSink(data *v1.LogSink) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteLogSink(id string) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateLogSink(id string, data *v1.LogSink) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetLogSink(id string) (*v1.LogSink, error) {
+	var response []v1.LogSink
+
+	responseContent, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
 	if err != nil {
 		return nil, err
 	}
@@ -632,6 +683,14 @@ func (s *postgrestStorage) UpdateApiKey(id string, data *v1.ApiKey) error {
 	return nil
 }
 
+func (s *postgrestStorage) ApiKeyOwnerActive(id string) (bool, error) {
+	var active bool
+
+	err := s.CallDatabaseFunction("api_key_owner_active", map[string]interface{}{"p_key_id": id}, &active)
+
+	return active, err
+}
+
 func (s *postgrestStorage) GetApiKey(id string) (*v1.ApiKey, error) {
 	var (
 		response []v1.ApiKey
@@ -1127,7 +1186,7 @@ const uniqueViolationCode = "(23505)"
 func (s *postgrestStorage) GetExternalIdentity(source, externalID string) (*ExternalIdentity, error) {
 	var response []ExternalIdentity
 
-	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id", "", false).
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id,username,email", "", false).
 		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
 	if err != nil {
 		return nil, err
@@ -1151,6 +1210,50 @@ func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error 
 	}
 
 	return err
+}
+
+func (s *postgrestStorage) SetExternalIdentityDeactivation(source, externalID, marker string) error {
+	update := map[string]interface{}{"sync_deactivated": nullIfEmpty(marker)}
+
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
+		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateExternalIdentityAccount(data *ExternalIdentity) error {
+	update := map[string]interface{}{
+		"username": nullIfEmpty(data.Username),
+		"email":    nullIfEmpty(data.Email),
+	}
+
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
+		Filter("source", "eq", data.Source).Filter("external_id", "eq", data.ExternalID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error) {
+	response := []IdentitySourceSyncUser{}
+	if err := s.CallDatabaseFunction("list_identity_source_sync_users", map[string]interface{}{
+		"p_identity_source": identitySource,
+	}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (s *postgrestStorage) RevokeUserSessions(userID string) error {
+	return s.CallDatabaseFunction("revoke_user_sessions", map[string]interface{}{"p_user_id": userID}, nil)
+}
+
+func nullIfEmpty(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+
+	return v
 }
 
 func (s *postgrestStorage) CreateIdentitySource(data *v1.IdentitySource) error {
@@ -1229,4 +1332,81 @@ func (s *postgrestStorage) GetIdentitySourceSecrets(name string) (*IdentitySourc
 	}
 
 	return &response[0], nil
+}
+
+func (s *postgrestStorage) CreateOrgUnit(data *v1.OrgUnit) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Insert(data, false, "", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateOrgUnit(id string, data *v1.OrgUnit) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Update(data, "minimal", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListOrgUnit(option ListOption) ([]v1.OrgUnit, error) {
+	var response []v1.OrgUnit
+	err := s.genericList(ORG_UNIT_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) SetOrgUnitMember(data *OrgUnitMember) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_MEMBER_TABLE).Insert(data, true, "user_id", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteOrgUnitMember(userID string) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_MEMBER_TABLE).Delete("minimal", "").Filter("user_id", "eq", userID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error) {
+	var response []OrgUnitMember
+	err := s.genericList(ORG_UNIT_MEMBER_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateTeam(data *v1.Team) error {
+	_, _, err := s.postgrestClient.From(TEAM_TABLE).Insert(data, false, "", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateTeam(id string, data *v1.Team) error {
+	_, _, err := s.postgrestClient.From(TEAM_TABLE).Update(data, "minimal", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListTeam(option ListOption) ([]v1.Team, error) {
+	var response []v1.Team
+	err := s.genericList(TEAM_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) AddTeamMember(data *TeamMember) error {
+	_, _, err := s.postgrestClient.From(TEAM_MEMBER_TABLE).Insert(data, true, "team_id,user_id", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteTeamMember(teamID int, userID string) error {
+	_, _, err := s.postgrestClient.From(TEAM_MEMBER_TABLE).Delete("minimal", "").
+		Filter("team_id", "eq", strconv.Itoa(teamID)).Filter("user_id", "eq", userID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListTeamMember(option ListOption) ([]TeamMember, error) {
+	var response []TeamMember
+	err := s.genericList(TEAM_MEMBER_TABLE, &response, option)
+
+	return response, err
 }

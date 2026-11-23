@@ -67,6 +67,9 @@ bash scripts/check-boundaries.sh
 
 # ── Gate 5: migration hygiene ──
 echo "[5/7] migration hygiene..."
+if git diff --cached --name-only -- db/migrations/ | grep -q .; then
+  bash scripts/check-migrations.sh --update-latest
+fi
 bash scripts/check-migrations.sh
 
 # ── Gate 6: golangci-lint (full) ──

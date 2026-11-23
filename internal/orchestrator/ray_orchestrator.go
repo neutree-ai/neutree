@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
@@ -32,7 +33,7 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 		return false, nil
 	}
 
-	isNew, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	isNew, err := clusterversion.SupportsEngineIsolation(cluster.Spec.Version)
 	if err != nil {
 		return false, errors.Errorf("failed to parse cluster version %q: %v", cluster.Spec.Version, err)
 	}
@@ -774,7 +775,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
-	resources, err := o.buildEndpointResourceStatus(endpoint)
+	resources, err := o.buildEndpointResourceStatus(endpoint, dashboardService, status)
 	if err != nil {
 		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
 	}
@@ -864,15 +865,38 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	return endpointStatus, nil
 }
 
-func (o *RayOrchestrator) buildEndpointResourceStatus(endpoint *v1.Endpoint) (*v1.EndpointResourceStatus, error) {
+func (o *RayOrchestrator) buildEndpointResourceStatus(
+	endpoint *v1.Endpoint,
+	dashboardClient dashboard.DashboardService,
+	appStatus dashboard.RayServeApplicationStatus,
+) (*v1.EndpointResourceStatus, error) {
 	if o == nil || o.storage == nil {
 		return nil, nil
 	}
 
-	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil)
+	resourceClient := resourceview.NewStaticNodeClusterResourceClientWithDashboard(
+		o.storage,
+		nil,
+		dashboardClient,
+		runningActorIDs(appStatus),
+	)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
 	return resourceBuilder.BuildEndpointResources(context.Background(), o.cluster, endpoint)
+}
+
+func runningActorIDs(appStatus dashboard.RayServeApplicationStatus) map[string]struct{} {
+	result := make(map[string]struct{})
+
+	for _, deployment := range appStatus.Deployments {
+		for _, replica := range deployment.Replicas {
+			if replica.State == dashboard.ApplicationStatusRunning && replica.ActorID != "" {
+				result[replica.ActorID] = struct{}{}
+			}
+		}
+	}
+
+	return result
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.
@@ -1025,6 +1049,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	app.Args["model"] = modelArgs
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
+
+	if engineArgs, ok := app.Args["engine_args"].(map[string]interface{}); ok {
+		engineArgs = maps.Clone(engineArgs)
+		if endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
+			if err := normalizeVLLMEngineArgs(engineArgs); err != nil {
+				return dashboard.RayServeApplication{}, err
+			}
+		}
+
+		app.Args["engine_args"] = engineArgs
+	}
 
 	setDefaultSGLangEnableMetricsForApplication(endpoint, &app)
 
@@ -1281,26 +1316,12 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
 	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
-			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
+			isNew, err := clusterversion.SupportsEngineIsolation(deployedCluster.Spec.Version)
 			if err == nil && !isNew {
 				applicationEnv["VLLM_SKIP_P2P_CHECK"] = "1"
 			}
 		}
 	}
-}
-
-// formatServiceURL constructs the service URL for an endpoint.
-func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {
-	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
-		return "", errors.New("cluster dashboard URL is not available")
-	}
-
-	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
-	}
-	// Ray serve applications are typically exposed on port 8000 by default
-	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
 }
 
 func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {

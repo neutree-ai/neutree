@@ -4,6 +4,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 // buildComponentVolumes projects trusted management-plane profile fields into
@@ -55,6 +56,8 @@ func componentHostPath(source *v1.ComponentHostPathVolumeSource) *corev1.HostPat
 	switch source.Type {
 	case v1.ComponentHostPathTypeDirectory:
 		hostPathType = corev1.HostPathDirectory
+	case v1.ComponentHostPathTypeDirectoryOrCreate:
+		hostPathType = corev1.HostPathDirectoryOrCreate
 	case v1.ComponentHostPathTypeSocket:
 		hostPathType = corev1.HostPathSocket
 	case v1.ComponentHostPathTypeFile:
@@ -107,4 +110,13 @@ func runtimeSecurityContext(privileged bool, capabilities *corev1.Capabilities) 
 	}
 
 	return securityContext
+}
+
+func rewriteInitContainerImages(containers []corev1.Container, imagePrefix string) []corev1.Container {
+	rewritten := append([]corev1.Container(nil), containers...)
+	for i := range rewritten {
+		rewritten[i].Image = util.RewriteImageRef(imagePrefix, rewritten[i].Image)
+	}
+
+	return rewritten
 }

@@ -241,3 +241,31 @@ func TestBaseController_reconcileAll(t *testing.T) {
 		})
 	}
 }
+
+// A failed reconcile (e.g. a gateway call that timed out) is not dropped: the
+// next periodic reconcileAll queues the object again.
+func TestBaseController_failedReconcileRetriedNextTick(t *testing.T) {
+	obj := &v1.ApiKey{ID: "1"}
+
+	mockReader := new(mocks.MockObjectReader)
+	mockReader.On("List").Return(&v1.ApiKeyList{Items: []v1.ApiKey{*obj}}, nil)
+	mockReader.On("Get", "1").Return(obj, nil)
+
+	mockReconciler := new(mocks.MockReconciler)
+	mockReconciler.On("Reconcile", obj).Return(errors.New("timeout awaiting response headers")).Once()
+	mockReconciler.On("Reconcile", obj).Return(nil).Once()
+
+	bc := &BaseController{
+		queue:     workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		objReader: mockReader,
+	}
+
+	assert.NoError(t, bc.reconcileAll())
+	assert.True(t, bc.processNextWorkItem(mockReconciler))
+	assert.Equal(t, 0, bc.queue.Len())
+
+	assert.NoError(t, bc.reconcileAll())
+	assert.True(t, bc.processNextWorkItem(mockReconciler))
+
+	mockReconciler.AssertExpectations(t)
+}

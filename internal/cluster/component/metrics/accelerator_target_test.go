@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -20,7 +22,8 @@ import (
 func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -69,10 +72,10 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 	assert.False(t, hasMetricsDaemonSet(objects, "vendor-accelerator-vendor-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "label: app=vendor-exporter")
-	assert.Contains(t, vmagentConfig, "names:\n      - vendor-system")
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=vendor-exporter"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "vendor-system"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:19401")
-	assert.Contains(t, vmagentConfig, "metrics_path: /custom-metrics")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/custom-metrics"))
 	assert.NotContains(t, vmagentConfig, "neutree.ai/metrics-target=accelerator-exporter")
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
@@ -91,7 +94,10 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"other_accelerator", v1.AcceleratorTypeNVIDIAGPU.String()})
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).Return(&v1.AcceleratorProfile{
+	for _, acceleratorType := range []string{"other_accelerator", v1.AcceleratorTypeNVIDIAGPU.String()} {
+		acceleratorMgr.On("GetPlugin", acceleratorType).Return(metricsLegacyPlugin{resource: acceleratorType}, true).Maybe()
+	}
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput(v1.AcceleratorTypeNVIDIAGPU.String())).Return(&v1.AcceleratorProfile{
 		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/nvidia-node-agent:v1",
@@ -109,7 +115,7 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 			Port:        9400,
 		},
 	}, nil)
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "other_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("other_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "other_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/other-node-agent:v1",
@@ -155,9 +161,9 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 	assert.False(t, hasMetricsDaemonSet(objects, "other-accelerator-other-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'")
-	assert.Contains(t, vmagentConfig, "label: app=nvidia-dcgm-exporter")
-	assert.NotContains(t, vmagentConfig, "job_name: 'accelerator-exporter-other-accelerator'")
+	assert.True(t, configHasJob(t, vmagentConfig, "accelerator-exporter-nvidia-gpu"))
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=nvidia-dcgm-exporter"))
+	assert.False(t, configHasJob(t, vmagentConfig, "accelerator-exporter-other-accelerator"))
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
@@ -168,7 +174,8 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -214,10 +221,10 @@ func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T
 	assert.False(t, hasMetricsDaemonSet(objects, "vendor-accelerator-external"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "label: app=upstream-exporter")
-	assert.Contains(t, vmagentConfig, "names:\n      - upstream-system")
+	assert.True(t, configHasSelector(t, vmagentConfig, "app=upstream-exporter"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "upstream-system"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:19402")
-	assert.Contains(t, vmagentConfig, "metrics_path: /metrics/custom")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/metrics/custom"))
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
@@ -228,7 +235,8 @@ func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T
 func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmpty(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
@@ -290,16 +298,15 @@ func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmp
 func metricsScrapeJobConfig(t *testing.T, config string, jobName string) string {
 	t.Helper()
 
-	start := "- job_name: '" + jobName + "'"
-	startIndex := strings.Index(config, start)
-	require.NotEqual(t, -1, startIndex, "job %q was not rendered", jobName)
-
-	jobConfig := config[startIndex:]
-	if nextJob := strings.Index(jobConfig[len(start):], "\n- job_name:"); nextJob >= 0 {
-		jobConfig = jobConfig[:len(start)+nextJob]
+	for _, job := range parsedScrapeJobs(t, config) {
+		if job["job_name"] == jobName {
+			data, err := yaml.Marshal(job)
+			require.NoError(t, err)
+			return string(data)
+		}
 	}
-
-	return jobConfig
+	t.Fatalf("job %q was not rendered", jobName)
+	return ""
 }
 
 func containsEnv(env []corev1.EnvVar, name string) bool {
@@ -315,7 +322,8 @@ func containsEnv(env []corev1.EnvVar, name string) bool {
 func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+	acceleratorMgr.On("GetPlugin", "vendor_accelerator").Return(metricsLegacyPlugin{resource: "vendor_accelerator"}, true).Maybe()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, metricsProfileInput("vendor_accelerator")).Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		MetricsExporter: &v1.AcceleratorExporterProfile{
 			Name:  "vendor-exporter",
@@ -349,10 +357,10 @@ func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) 
 	objects, err := component.GetMetricsResources(context.Background())
 	require.NoError(t, err)
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Contains(t, vmagentConfig, "job_name: 'hami-vgpu-monitor'")
-	assert.Contains(t, vmagentConfig, "names:\n      - vendor-system")
-	assert.Contains(t, vmagentConfig, "label: app.kubernetes.io/component=vendor-device-plugin")
+	assert.True(t, configHasJob(t, vmagentConfig, "hami-vgpu-monitor"))
+	assert.True(t, configHasNamespace(t, vmagentConfig, "vendor-system"))
+	assert.True(t, configHasSelector(t, vmagentConfig, "app.kubernetes.io/component=vendor-device-plugin"))
 	assert.Contains(t, vmagentConfig, "replacement: $1:9395")
-	assert.Contains(t, vmagentConfig, "metrics_path: /monitor-metrics")
+	assert.True(t, configHasMetricsPath(t, vmagentConfig, "/monitor-metrics"))
 	assert.NotContains(t, vmagentConfig, "replacement: $1:9394")
 }

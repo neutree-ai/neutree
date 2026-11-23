@@ -279,6 +279,9 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 			Name:      "chat-model",
 		},
 		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{
+				Engine: v1.EngineNameVLLM,
+			},
 			Model: &v1.ModelSpec{
 				Registry: "test-registry",
 				Name:     "test-model",
@@ -298,6 +301,18 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 		Applications: map[string]dashboard.RayServeApplicationStatus{
 			EndpointToServeApplicationName(endpoint): {
 				Status: dashboard.ApplicationStatusRunning,
+				Deployments: map[string]dashboard.Deployment{
+					"BACKEND": {
+						Name: "BACKEND",
+						Replicas: []dashboard.Replica{
+							{
+								ActorID:   "actor-1",
+								ReplicaID: "replica-a",
+								State:     dashboard.ApplicationStatusRunning,
+							},
+						},
+					},
+				},
 			},
 		},
 		Proxies: map[string]dashboard.ProxyStatus{
@@ -306,6 +321,10 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 			},
 		},
 	}, nil)
+	mockDashboard.On("GetActorLogHead", mock.Anything, "actor-1", "out", mock.Anything).
+		Return("Model loading took 10.5 GiB\n", nil).Once()
+	mockDashboard.On("GetActorLogHead", mock.Anything, "actor-1", "err", mock.Anything).
+		Return("Available KV cache memory: 4.25 GiB\n", nil).Once()
 
 	mockStorage := storagemocks.NewMockStorage(t)
 	mockStorage.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
@@ -321,6 +340,7 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 						Workspace: "production",
 						Endpoint:  "chat-model",
 						ReplicaID: "replica-a",
+						RuntimeID: "actor-1",
 						Devices: []v1.DeviceAllocation{
 							{
 								UUID:          "GPU-abc",
@@ -373,6 +393,11 @@ func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
 	assert.Equal(t, "replica-a", replica.InstanceID)
 	assert.Equal(t, "replica-a", replica.ReplicaID)
 	assert.Equal(t, "10.0.0.1", replica.NodeID)
+	assert.Equal(t, "actor-1", replica.ContainerID)
+	require.NotNil(t, replica.ModelWeightsMiB)
+	assert.InDelta(t, 10752.0, *replica.ModelWeightsMiB, 0.01)
+	require.NotNil(t, replica.KVCacheCapacityMiB)
+	assert.InDelta(t, 4352.0, *replica.KVCacheCapacityMiB, 0.01)
 	require.Len(t, replica.Devices, 1)
 	assert.Equal(t, "GPU-abc", replica.Devices[0].UUID)
 	assert.Equal(t, "NVIDIA-L20", replica.Devices[0].Product)
@@ -820,8 +845,8 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 		},
 		{
 			name:               "new plain version",
-			engineVersion:      "v0.31.0",
-			expectedImportPath: "serve.vllm.v0_31_0.app:app_builder",
+			engineVersion:      "v0.32.0",
+			expectedImportPath: "serve.vllm.v0_32_0.app:app_builder",
 		},
 		{
 			name:               "cuda variant stripped",
@@ -2256,6 +2281,40 @@ func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_NormalizesKVCacheWithoutMutatingEndpoint(t *testing.T) {
+	originalArgs := map[string]interface{}{"kv_cache_memory_bytes": "8G"}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "test", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM, Version: "v0.24.0"},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{},
+			},
+			Replicas:  v1.ReplicaSpec{Num: pointy.Int(1)},
+			Variables: map[string]interface{}{"engine_args": originalArgs},
+			Model:     &v1.ModelSpec{Name: "test-model"},
+		},
+	}
+	modelRegistry := &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{
+		Type: v1.HuggingFaceModelRegistryType,
+	}}
+
+	app, err := EndpointToApplication(
+		endpoint,
+		&v1.Cluster{},
+		modelRegistry,
+		nil,
+		nil,
+		&acceleratormocks.MockManager{},
+	)
+	require.NoError(t, err)
+
+	runtimeArgs := app.Args["engine_args"].(map[string]interface{})
+	assert.Equal(t, int64(8589934592), runtimeArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", originalArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", endpoint.Spec.Variables["engine_args"].(map[string]interface{})["kv_cache_memory_bytes"])
+}
+
 func TestEndpointToApplication_TensorParallelSizeUsesRequestedGPUCount(t *testing.T) {
 	const customAcceleratorType = "custom_accelerator"
 
@@ -2483,25 +2542,6 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 			assert.Equal(t, tt.expectedEnvs, applicationEnvs)
 		})
 	}
-}
-
-func TestFormatServiceURL_WorkspaceInURL(t *testing.T) {
-	cluster := &v1.Cluster{
-		Status: &v1.ClusterStatus{
-			DashboardURL: "http://ray-dashboard.example.com:8265",
-		},
-	}
-
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "production",
-			Name:      "chat-model",
-		},
-	}
-
-	url, err := FormatServiceURL(cluster, endpoint)
-	assert.NoError(t, err)
-	assert.Equal(t, "http://ray-dashboard.example.com:8000/production/chat-model", url)
 }
 
 func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {

@@ -13,17 +13,34 @@
 --                        collection response is filtered with these same rules.
 --                        Disabled keys receive key_disabled from access() or,
 --                        when an EE list was already synthesized, response filters.
+--   * denied_models  -> 403 model_not_permitted when the request model is in
+--                        it. Plain model names (group deny rules); every other
+--                        model, on any endpoint, is left to the rules above.
+--                        Model lists drop the denied models too.
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
---   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
--- The plugin is attached only when the key actually has access limits, so an
--- unconfigured key has no plugin and is unrestricted (by design).
+--   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window;
+--                        shared by all pods when global_counter is on)
+-- Every key gets its own consumer-scoped instance, including an unrestricted
+-- one (all limits off). A global instance with `fallback` set runs for a
+-- consumer whose own instance Kong has not loaded yet: Kong rebuilds its plugin
+-- set periodically, so a new key's credential and ACL groups can take effect
+-- before its rules do. The fallback rejects such a key (403
+-- access_rules_not_ready) instead of serving it unrestricted. Consumers created
+-- before keys carried the RULES_TAG are left alone, so they keep working while
+-- their own instance is first written.
 
 local cjson = require("cjson.safe")
+local global_counter = require("kong.plugins.neutree-ai-access.global_counter")
 
 local AccessHandler = {
     PRIORITY = 895,
     VERSION = "1.0.0",
 }
+
+-- Set by the control plane on every consumer it creates; it promises that an
+-- instance of this plugin is written for the consumer. Must match
+-- internal/gateway/kong.go apiKeyAccessRulesTag.
+local RULES_TAG = "neutree-access-rules"
 
 local WINDOW_SECONDS = { second = 1, minute = 60, hour = 3600, day = 86400 }
 -- TTL on the in-flight concurrency counter so stale per-key entries expire
@@ -130,11 +147,23 @@ local function allow_match(list, model, ep_type, ep_name)
     return false
 end
 
+local function in_list(list, model)
+    if type(list) ~= "table" then
+        return false
+    end
+    for _, m in ipairs(list) do
+        if m == model then
+            return true
+        end
+    end
+    return false
+end
+
 local function json_array()
     return setmetatable({}, cjson.array_mt)
 end
 
-local function filter_model_list_response(body, allowed_models, ep_type, ep_name)
+local function filter_model_list_response(body, allowed_models, denied_models, ep_type, ep_name)
     local response = cjson.decode(body)
     if type(response) ~= "table" or type(response.data) ~= "table" then
         return body
@@ -150,7 +179,8 @@ local function filter_model_list_response(body, allowed_models, ep_type, ep_name
     local visible = json_array()
     for _, model in ipairs(response.data) do
         if type(model) == "table" and type(model.id) == "string"
-            and allow_match(allowed_models, model.id, ep_type, ep_name) then
+            and (type(allowed_models) ~= "table" or allow_match(allowed_models, model.id, ep_type, ep_name))
+            and not in_list(denied_models, model.id) then
             visible[#visible + 1] = model
         end
     end
@@ -173,7 +203,9 @@ local function is_successful_model_list_response()
 end
 
 local function should_filter_model_list_response(conf)
-    return type(conf.allowed_models) == "table" and is_successful_model_list_response()
+    local restricted = type(conf.allowed_models) == "table"
+        or (type(conf.denied_models) == "table" and #conf.denied_models > 0)
+    return restricted and is_successful_model_list_response()
 end
 
 local function counter_dict()
@@ -192,24 +224,152 @@ local function deny403(code, message)
     return kong.response.exit(403, access_error(code, message))
 end
 
+local RULES_NOT_READY_MESSAGE = "Access rules for this API key are not loaded yet; retry shortly"
+
+-- rules_not_ready reports whether the fallback instance is judging a consumer
+-- that should have its own instance, i.e. that consumer's rules are not loaded.
+local function rules_not_ready(conf)
+    if not conf.fallback then
+        return false
+    end
+    local c = kong.client.get_consumer()
+    if not c or type(c.tags) ~= "table" then
+        return false
+    end
+    for _, tag in ipairs(c.tags) do
+        if tag == RULES_TAG then
+            return true
+        end
+    end
+    return false
+end
+
+-- deny_rate_limited releases the concurrency slot this request took and
+-- answers 429, retry_after being the seconds left in the exceeded window.
+local function deny_rate_limited(retry_after)
+    if kong.ctx.plugin.cc_key then
+        local dict = counter_dict()
+        if dict then
+            dict:incr(kong.ctx.plugin.cc_key, -1)
+        end
+        kong.ctx.plugin.cc_key = nil
+    end
+    kong.response.set_header("Retry-After", math.max(1, math.ceil(retry_after)))
+    return kong.response.exit(429, {
+        error = {
+            message = "Request rate limit exceeded for this API key",
+            type = "rate_limited",
+            code = "rate_limit_exceeded",
+        },
+    })
+end
+
+-- local_rate_limit counts in this pod's shared dict. It returns the seconds
+-- until the exceeded window ends, or false when the request is within limits.
+local function local_rate_limit(key, rate_limits)
+    local dict = counter_dict()
+    if not dict then
+        return false
+    end
+    local now = ngx.now()
+    for _, rl in ipairs(rate_limits) do
+        local limit = tonumber(rl.limit)
+        local wsec = WINDOW_SECONDS[rl.window]
+        if limit and wsec then
+            local window_start = math.floor(now / wsec) * wsec
+            local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
+            -- TTL = remaining time in this window so the counter expires
+            -- when the window ends rather than up to a full window later.
+            local rk_ttl = math.max(1, math.ceil(window_start + wsec - now))
+            -- Atomically initialize the window counter so two concurrent
+            -- first-requests don't both reset it to 1 (undercounting):
+            -- add() only succeeds for the first caller, then incr().
+            dict:add(rk, 0, rk_ttl)
+            local newval, err = dict:incr(rk, 1)
+            if not newval then
+                -- Counting unavailable (e.g. dict full) -> fail open.
+                if err then
+                    kong.log.warn("neutree-ai-access: counter incr: ", err)
+                end
+                newval = 0
+            end
+            if newval > limit then
+                return window_start + wsec - now
+            end
+        end
+    end
+    return false
+end
+
+-- global_rate_limit counts in PostgreSQL, shared by all Kong pods. It returns
+-- nil when the database cannot decide (disabled, unavailable, or a window it
+-- does not hold), so the caller counts per pod; otherwise like local_rate_limit.
+local function global_rate_limit(key, rate_limits)
+    if not global_counter.available() then
+        return nil
+    end
+    local windows, seen = {}, {}
+    for _, rl in ipairs(rate_limits) do
+        local limit = tonumber(rl.limit)
+        local wsec = global_counter.WINDOWS[rl.window]
+        if not limit or not wsec or seen[rl.window] then
+            return nil
+        end
+        seen[rl.window] = true
+        windows[#windows + 1] = { name = rl.window, seconds = wsec, limit = limit }
+    end
+    local results = global_counter.hit(key, windows)
+    if not results then
+        return nil
+    end
+    for i, w in ipairs(windows) do
+        local r = results[i]
+        if r and r.hits > w.limit then
+            return r.window_start + w.seconds - r.now
+        end
+    end
+    return false
+end
+
 function AccessHandler:access(conf)
+    -- 0) Fallback instance: fail closed for a key whose rules are not loaded;
+    --    otherwise it carries no limits to apply.
+    if conf.fallback then
+        if rules_not_ready(conf) then
+            return deny403("access_rules_not_ready", RULES_NOT_READY_MESSAGE)
+        end
+        return
+    end
+
     -- 1) Disabled: hard stop.
     if conf.disabled then
         return deny403("key_disabled", "This API key is disabled")
     end
 
-    -- 2) Model allowlist: an absent field (nil / JSON null = cjson.null) means
-    --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
-    --    request model must be present and in it. An explicit empty [] therefore
-    --    denies every model (deny-all). Guard on the value being a table so null
-    --    stays unrestricted while [] enforces. A model list is not one model
-    --    call, so it reaches the endpoint here; body_filter narrows its response
-    --    to the models visible through this key, including an empty [] deny-all.
-    if type(conf.allowed_models) == "table" and not is_model_list_request() then
+    local has_allowlist = type(conf.allowed_models) == "table"
+    local has_denylist = type(conf.denied_models) == "table" and #conf.denied_models > 0
+
+    if (has_allowlist or has_denylist) and not is_model_list_request() then
         local model = request_model()
-        local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
-        local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name
-        if not model or not allow_match(conf.allowed_models, model, ep_type, ep_name) then
+
+        -- 2) Model allowlist: an absent field (nil / JSON null = cjson.null) means
+        --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
+        --    request model must be present and in it. An explicit empty [] therefore
+        --    denies every model (deny-all). Guard on the value being a table so null
+        --    stays unrestricted while [] enforces. A model list is not one model
+        --    call, so it reaches the endpoint here; body_filter narrows its response
+        --    to the models visible through this key, including an empty [] deny-all.
+        if has_allowlist then
+            local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
+            local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name
+            if not model or not allow_match(conf.allowed_models, model, ep_type, ep_name) then
+                return deny403("model_not_permitted", "Model not permitted for this API key")
+            end
+        end
+
+        -- 2b) Model denylist: same answer as the allowlist, so a client cannot tell
+        --     which rule refused it. A request without a model names nothing to deny.
+        if has_denylist and model and in_list(conf.denied_models, model) then
             return deny403("model_not_permitted", "Model not permitted for this API key")
         end
     end
@@ -251,46 +411,12 @@ function AccessHandler:access(conf)
 
     -- 4) Rate limits: fixed window per window.
     if type(conf.rate_limits) == "table" and #conf.rate_limits > 0 then
-        local dict = counter_dict()
-        if dict then
-            local now = ngx.now()
-            for _, rl in ipairs(conf.rate_limits) do
-                local limit = tonumber(rl.limit)
-                local wsec = WINDOW_SECONDS[rl.window]
-                if limit and wsec then
-                    local window_start = math.floor(now / wsec) * wsec
-                    local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
-                    -- TTL = remaining time in this window so the counter expires
-                    -- when the window ends rather than up to a full window later.
-                    local rk_ttl = math.max(1, math.ceil(window_start + wsec - now))
-                    -- Atomically initialize the window counter so two concurrent
-                    -- first-requests don't both reset it to 1 (undercounting):
-                    -- add() only succeeds for the first caller, then incr().
-                    dict:add(rk, 0, rk_ttl)
-                    local newval, err = dict:incr(rk, 1)
-                    if not newval then
-                        -- Counting unavailable (e.g. dict full) -> fail open.
-                        if err then
-                            kong.log.warn("neutree-ai-access: counter incr: ", err)
-                        end
-                        newval = 0
-                    end
-                    if newval > limit then
-                        if kong.ctx.plugin.cc_key then
-                            dict:incr(kong.ctx.plugin.cc_key, -1)
-                            kong.ctx.plugin.cc_key = nil
-                        end
-                        kong.response.set_header("Retry-After", math.max(1, math.ceil(window_start + wsec - now)))
-                        return kong.response.exit(429, {
-                            error = {
-                                message = "Request rate limit exceeded for this API key",
-                                type = "rate_limited",
-                                code = "rate_limit_exceeded",
-                            },
-                        })
-                    end
-                end
-            end
+        local verdict = global_rate_limit(key, conf.rate_limits)
+        if verdict == nil then
+            verdict = local_rate_limit(key, conf.rate_limits)
+        end
+        if verdict then
+            return deny_rate_limited(verdict)
         end
     end
 end
@@ -300,12 +426,19 @@ function AccessHandler:header_filter(conf)
         return
     end
 
+    local denial
     if conf.disabled then
+        denial = access_error("key_disabled", "This API key is disabled")
+    elseif rules_not_ready(conf) then
+        denial = access_error("access_rules_not_ready", RULES_NOT_READY_MESSAGE)
+    end
+
+    if denial then
         -- EE lists are generated by neutree-ai-gateway (priority 900), whose
         -- access-phase exit prevents this consumer plugin (895) from rejecting
         -- there. Header/body filters still run after that exit, so preserve the
-        -- normal disabled-key response without moving the plugin priority.
-        kong.ctx.plugin.disabled_model_list_response = true
+        -- normal denial response without moving the plugin priority.
+        kong.ctx.plugin.model_list_denial = denial
         kong.response.set_status(403)
         kong.response.set_header("Content-Type", "application/json")
         kong.response.clear_header("Content-Length")
@@ -321,16 +454,13 @@ function AccessHandler:header_filter(conf)
 end
 
 function AccessHandler:body_filter(conf)
-    if kong.ctx.plugin.disabled_model_list_response then
+    if kong.ctx.plugin.model_list_denial then
         local body = kong.response.get_raw_body()
         if not body then
             return
         end
 
-        kong.response.set_raw_body(cjson.encode(access_error(
-            "key_disabled",
-            "This API key is disabled"
-        )))
+        kong.response.set_raw_body(cjson.encode(kong.ctx.plugin.model_list_denial))
         return
     end
 
@@ -347,6 +477,7 @@ function AccessHandler:body_filter(conf)
     kong.response.set_raw_body(filter_model_list_response(
         body,
         conf.allowed_models,
+        conf.denied_models,
         shared.neutree_endpoint_type,
         shared.neutree_endpoint_name
     ))

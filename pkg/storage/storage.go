@@ -35,6 +35,14 @@ const (
 	STATIC_NODE_TABLE         = "static_nodes"
 	EXTERNAL_IDENTITY_TABLE   = "external_identities"
 	IDENTITY_SOURCE_TABLE     = "identity_sources"
+	LOG_SINK_TABLE            = "log_sinks"
+	ORG_UNIT_TABLE            = "org_units"
+	ORG_UNIT_MEMBER_TABLE     = "org_unit_members"
+	TEAM_TABLE                = "teams"
+	TEAM_MEMBER_TABLE         = "team_members"
+	GROUP_POLICY_TABLE        = "group_policies"
+	SERVICE_ACCOUNT_TABLE     = "service_accounts"
+	TEAM_APP_PERMISSION_TABLE = "team_application_permissions"
 )
 
 type ImageRegistryStorage interface {
@@ -48,6 +56,19 @@ type ImageRegistryStorage interface {
 	GetImageRegistry(id string) (*v1.ImageRegistry, error)
 	// ListImageRegistry retrieves a list of image registries with optional filters.
 	ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error)
+}
+
+type LogSinkStorage interface {
+	// CreateLogSink creates a new log sink in the database.
+	CreateLogSink(data *v1.LogSink) error
+	// DeleteLogSink deletes a log sink by its ID.
+	DeleteLogSink(id string) error
+	// UpdateLogSink updates an existing log sink in the database.
+	UpdateLogSink(id string, data *v1.LogSink) error
+	// GetLogSink retrieves a log sink by its ID.
+	GetLogSink(id string) (*v1.LogSink, error)
+	// ListLogSink retrieves a list of log sinks with optional filters.
+	ListLogSink(option ListOption) ([]v1.LogSink, error)
 }
 
 type ModelRegistryStorage interface {
@@ -141,6 +162,8 @@ type ApiKeyStorage interface {
 	UpdateApiKey(id string, data *v1.ApiKey) error
 	// GetApiKey retrieves a api_key by its ID.
 	GetApiKey(id string) (*v1.ApiKey, error)
+	// ApiKeyOwnerActive reports whether the owner of an api_key is active.
+	ApiKeyOwnerActive(id string) (bool, error)
 	// ListApiKey retrieves a list of api_keys with optional filters.
 	ListApiKey(option ListOption) ([]v1.ApiKey, error)
 }
@@ -236,6 +259,34 @@ type ExternalIdentity struct {
 	// ExternalID is the directory's stable ID for the account, never a name.
 	ExternalID string `json:"external_id"`
 	UserID     string `json:"user_id"`
+	// Username and Email are the source's values last applied to the user;
+	// empty when unknown.
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	// SyncDeactivated is set when the organization sync deactivated the
+	// user: SyncDeactivatedBanned when it banned the user,
+	// SyncDeactivatedKept when the user was already banned otherwise.
+	SyncDeactivated string `json:"sync_deactivated,omitempty"`
+}
+
+const (
+	SyncDeactivatedBanned = "banned"
+	SyncDeactivatedKept   = "kept"
+)
+
+// IdentitySourceSyncUser is a user linked to an identity source as the
+// organization sync compares it with the directory.
+type IdentitySourceSyncUser struct {
+	ExternalID      string `json:"external_id"`
+	UserID          string `json:"user_id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	DisplayName     string `json:"display_name"`
+	SyncDeactivated string `json:"sync_deactivated"`
+	// OrgUnitExternalID is the department the sync put the user in.
+	OrgUnitExternalID string `json:"org_unit_external_id"`
+	// TeamExternalIDs are the teams of the identity source the user is in.
+	TeamExternalIDs []string `json:"team_external_ids"`
 }
 
 type ExternalIdentityStorage interface {
@@ -245,6 +296,21 @@ type ExternalIdentityStorage interface {
 	// CreateExternalIdentity links an external account to a user. It returns an
 	// error wrapping ErrResourceConflict when the account is already linked.
 	CreateExternalIdentity(data *ExternalIdentity) error
+	// SetExternalIdentityDeactivation writes the sync_deactivated marker of
+	// the link (source, external ID); an empty marker is stored as NULL.
+	SetExternalIdentityDeactivation(source, externalID, marker string) error
+	// UpdateExternalIdentityAccount writes Username and Email of the link
+	// (source, external ID) and leaves SyncDeactivated alone; an empty value
+	// is stored as NULL.
+	UpdateExternalIdentityAccount(data *ExternalIdentity) error
+	// ListIdentitySourceSyncUsers returns every user linked to the LDAP
+	// identity source of the given name, with the department and teams its
+	// sync gave the user.
+	ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error)
+	// RevokeUserSessions ends every GoTrue session of the user and deletes its
+	// refresh tokens. Access tokens already issued stay valid until they
+	// expire.
+	RevokeUserSessions(userID string) error
 }
 
 // IdentitySourceSecrets are the decrypted secrets of an identity source. A
@@ -283,6 +349,61 @@ type IdentitySourceStorage interface {
 	GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error)
 }
 
+// OrgUnitMember puts a user into their one primary OrgUnit.
+type OrgUnitMember struct {
+	UserID    string `json:"user_id"`
+	OrgUnitID int    `json:"org_unit_id"`
+	// IdentitySource is the IdentitySource whose sync wrote the row; empty
+	// when an admin assigned a local account by hand.
+	IdentitySource string `json:"identity_source,omitempty"`
+	// AssignedAt is set by the database when the user is put into an OrgUnit.
+	AssignedAt string `json:"assigned_at,omitempty"`
+}
+
+// TeamMember puts a user into a Team. A user can be in any number of Teams.
+type TeamMember struct {
+	TeamID    int    `json:"team_id"`
+	UserID    string `json:"user_id"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// OrgUnitStorage reads and writes OrgUnits and their members (sync only).
+type OrgUnitStorage interface {
+	// CreateOrgUnit creates an OrgUnit. The database computes its path.
+	CreateOrgUnit(data *v1.OrgUnit) error
+	// UpdateOrgUnit updates an OrgUnit; a new spec.parent re-paths its subtree.
+	UpdateOrgUnit(id string, data *v1.OrgUnit) error
+	// ListOrgUnit retrieves OrgUnits with optional filters.
+	ListOrgUnit(option ListOption) ([]v1.OrgUnit, error)
+
+	// SetOrgUnitMember puts a user into an OrgUnit, replacing the user's
+	// previous one.
+	SetOrgUnitMember(data *OrgUnitMember) error
+	// DeleteOrgUnitMember takes a user out of their OrgUnit.
+	DeleteOrgUnitMember(userID string) error
+	// ListOrgUnitMember retrieves OrgUnit memberships with optional filters.
+	ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error)
+}
+
+// TeamStorage reads and writes Teams and their members; users write manual
+// Teams through the API.
+type TeamStorage interface {
+	// CreateTeam creates a Team.
+	CreateTeam(data *v1.Team) error
+	// UpdateTeam updates a Team.
+	UpdateTeam(id string, data *v1.Team) error
+	// ListTeam retrieves Teams with optional filters.
+	ListTeam(option ListOption) ([]v1.Team, error)
+
+	// AddTeamMember puts a user into a Team; adding an existing member is a
+	// no-op.
+	AddTeamMember(data *TeamMember) error
+	// DeleteTeamMember takes a user out of a Team.
+	DeleteTeamMember(teamID int, userID string) error
+	// ListTeamMember retrieves Team memberships with optional filters.
+	ListTeamMember(option ListOption) ([]TeamMember, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -302,6 +423,9 @@ type Storage interface {
 	ExternalIdentityStorage
 	IdentitySourceStorage
 	SessionStorage
+	LogSinkStorage
+	OrgUnitStorage
+	TeamStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

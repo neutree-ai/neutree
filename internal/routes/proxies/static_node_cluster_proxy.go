@@ -11,6 +11,6 @@ func RegisterStaticNodeClusterRoutes(group *gin.RouterGroup, middlewares []gin.H
 	proxyGroup := group.Group("/static_node_clusters")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.StaticNodeCluster](deps, storage.STATIC_NODE_CLUSTER_TABLE)
+	handler := CreateStructProxyHandler[v1.StaticNodeCluster](proxyGroup, deps, storage.STATIC_NODE_CLUSTER_TABLE)
 	proxyGroup.GET("", handler)
 }

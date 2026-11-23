@@ -52,7 +52,7 @@ func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 		storage.USER_PROFILE_TABLE,
 		validateUserProfileDeletion(deps.Storage),
 	)
-	handler := CreateStructProxyHandler[v1.UserProfile](deps, storage.USER_PROFILE_TABLE)
+	handler := CreateStructProxyHandler[v1.UserProfile](proxyGroup, deps, storage.USER_PROFILE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

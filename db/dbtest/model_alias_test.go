@@ -212,7 +212,7 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 }
 
 // TestModelAliasRLS checks the policies shipped with the table: reads need
-// model:read and writes need model:push. Both actions already exist (042); the
+// model:read and writes need model:push. Both actions already exist; the
 // table adds no new permission action.
 //
 // The workspace the policies pass to api.has_permission is the owning
@@ -221,7 +221,7 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 // column cannot be trusted.
 //
 // Only the action half of the policies is asserted here. This schema caps a
-// deployment at one workspace (021), so api.has_permission does not consume the
+// deployment at one workspace, so api.has_permission does not consume the
 // workspace argument and a trigger rejects workspace-scoped role assignments
 // outright (error 10041) -- there is no second workspace for a caller to be
 // refused from. That the policies nevertheless hand it the registry's real

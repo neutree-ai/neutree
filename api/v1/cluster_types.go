@@ -21,15 +21,6 @@ const (
 	KubernetesClusterType = "kubernetes"
 )
 
-// StaticNodeClusterFlowVersionGate is the highest SSH cluster version that
-// still uses the legacy Ray SSH lifecycle. Greater versions use the static-node
-// backed lifecycle.
-const StaticNodeClusterFlowVersionGate = "v1.0.1"
-
-// MinimumSelectableClusterVersionGate is the highest cluster version hidden
-// from version selection and available-version responses.
-const MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
-
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
@@ -143,8 +134,16 @@ type KubernetesClusterConfig struct {
 	Router     RouterSpec `json:"router,omitempty" yaml:"router,omitempty"`
 }
 
+type RouterProxyConfig struct {
+	MaxConnectionsPerBackend  *int     `json:"max_connections_per_backend,omitempty" yaml:"max_connections_per_backend,omitempty"`
+	ConnectTimeoutSeconds     *float64 `json:"connect_timeout_seconds,omitempty" yaml:"connect_timeout_seconds,omitempty"`
+	SockConnectTimeoutSeconds *float64 `json:"sock_connect_timeout_seconds,omitempty" yaml:"sock_connect_timeout_seconds,omitempty"`
+	SockReadTimeoutSeconds    *float64 `json:"sock_read_timeout_seconds,omitempty" yaml:"sock_read_timeout_seconds,omitempty"`
+}
+
 type RouterSpec struct {
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	RouterProxyConfig `json:",inline" yaml:",inline"`
+	Version           string `json:"version,omitempty" yaml:"version,omitempty"`
 	// access mode for router service, currently support LoadBalancer, NodePort.
 	AccessMode KubernetesAccessMode `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
 	Replicas   int                  `json:"replicas,omitempty" yaml:"replicas,omitempty"`

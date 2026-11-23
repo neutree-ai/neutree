@@ -132,10 +132,13 @@ func buildEndpointResourcesFromEndpointInstances(
 
 	for _, instance := range instances {
 		replica := v1.ReplicaDeviceAllocation{
-			InstanceID: instance.InstanceID,
-			ReplicaID:  instance.ReplicaID,
-			NodeID:     instance.NodeID,
-			Devices:    instance.Devices,
+			InstanceID:         instance.InstanceID,
+			ReplicaID:          instance.ReplicaID,
+			NodeID:             instance.NodeID,
+			ContainerID:        instance.ContainerID,
+			ModelWeightsMiB:    instance.ModelWeightsMiB,
+			KVCacheCapacityMiB: instance.KVCacheCapacityMiB,
+			Devices:            instance.Devices,
 		}
 		result.Replicas = append(result.Replicas, replica)
 

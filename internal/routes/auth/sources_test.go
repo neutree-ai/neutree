@@ -388,6 +388,7 @@ func TestLDAPToken_LinksArePerSource(t *testing.T) {
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: "ldap:lab-ldap", ExternalID: testIdentity().ExternalID, UserID: userID.String(),
+		Username: "alice", Email: "alice@example.org",
 	}).Return(nil).Once()
 	d.expectEmail(userID.String(), "0fb0688a1d0a6b96c6c075e5d00f1610@lab-ldap.ldap.neutree.local")
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, "0fb0688a1d0a6b96c6c075e5d00f1610@lab-ldap.ldap.neutree.local").

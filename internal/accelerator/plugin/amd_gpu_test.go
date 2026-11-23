@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
@@ -270,7 +271,7 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 func TestAMDGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	p := &AMDGPUAcceleratorPlugin{}
 
-	profile, err := p.GetAcceleratorProfile(context.Background())
+	profile, err := p.GetAcceleratorProfile(context.Background(), accelerator.AcceleratorProfileInput{})
 
 	require.NoError(t, err)
 	require.NotNil(t, profile)

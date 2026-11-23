@@ -17,7 +17,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// These tests cover api.external_identities (migration 106), which links a
+// These tests cover api.external_identities, which links a
 // directory account to the GoTrue user an LDAP login created for it, and the
 // GoTrue calls the LDAP login turns that user into a session with.
 

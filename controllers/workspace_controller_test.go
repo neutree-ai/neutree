@@ -10,16 +10,15 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 // newTestWorkspaceController is a helper to create a WorkspaceController with mocked storage for testing.
-func newTestWorkspaceController(storage *storagemocks.MockStorage, engineRegistry engine.Registry) *WorkspaceController {
+func newTestWorkspaceController(storage *storagemocks.MockStorage, engines []*v1.Engine) *WorkspaceController {
 	c, _ := NewWorkspaceController(&WorkspaceControllerOption{
 		Storage:        storage,
-		EngineRegistry: engineRegistry,
+		BuiltinEngines: func() ([]*v1.Engine, error) { return engines, nil },
 	})
 
 	return c
@@ -131,7 +130,7 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStorage := &storagemocks.MockStorage{}
 			tt.mockSetup(mockStorage)
-			c := newTestWorkspaceController(mockStorage, engine.NewTestRegistry())
+			c := newTestWorkspaceController(mockStorage, nil)
 
 			err := c.sync(tt.input) // Test sync directly.
 
@@ -149,27 +148,24 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 	workspaceID := 1
 	workspaceIDStr := strconv.Itoa(workspaceID)
 
-	// Create a test engine registry with a test engine pre-registered
-	testEngineRegistry := engine.NewTestRegistry()
-	err := testEngineRegistry.Register(&v1.Engine{
+	testEngines := []*v1.Engine{{
 		Metadata: &v1.Metadata{
 			Name: "test-engine",
 		},
 		Spec: &v1.EngineSpec{},
-	})
-	assert.NoError(t, err)
+	}}
 
 	tests := []struct {
-		name           string
-		input          *v1.Workspace
-		engineRegistry engine.Registry
-		mockSetup      func(*storagemocks.MockStorage)
-		wantErr        bool
+		name      string
+		input     *v1.Workspace
+		engines   []*v1.Engine
+		mockSetup func(*storagemocks.MockStorage)
+		wantErr   bool
 	}{
 		{
-			name:           "No Status -> Set Phase=CREATED (Update success)",
-			input:          testWorkspace(workspaceID, ""),
-			engineRegistry: engine.NewTestRegistry(),
+			name:    "No Status -> Set Phase=CREATED (Update success)",
+			input:   testWorkspace(workspaceID, ""),
+			engines: nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseCREATED && r.Status.ErrorMessage == ""
@@ -178,9 +174,9 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:           "Phase=PENDING -> Set Phase=CREATED (Update success)",
-			input:          testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
-			engineRegistry: engine.NewTestRegistry(),
+			name:    "Phase=PENDING -> Set Phase=CREATED (Update success)",
+			input:   testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
+			engines: nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseCREATED && r.Status.ErrorMessage == ""
@@ -189,9 +185,9 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:           "Phase=PENDING -> Set Phase=CREATED (Update failed)",
-			input:          testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
-			engineRegistry: engine.NewTestRegistry(),
+			name:    "Phase=PENDING -> Set Phase=CREATED (Update failed)",
+			input:   testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
+			engines: nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseCREATED
@@ -200,9 +196,9 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:           "Phase=CREATED -> No Change",
-			input:          testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
-			engineRegistry: testEngineRegistry,
+			name:    "Phase=CREATED -> No Change",
+			input:   testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
+			engines: testEngines,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("CreateEngine", mock.Anything).Return(nil)
@@ -210,9 +206,9 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:           "Phase=DELETED (no deletionTimestamp) -> No Change",
-			input:          testWorkspace(workspaceID, v1.WorkspacePhaseDELETED),
-			engineRegistry: engine.NewTestRegistry(),
+			name:    "Phase=DELETED (no deletionTimestamp) -> No Change",
+			input:   testWorkspace(workspaceID, v1.WorkspacePhaseDELETED),
+			engines: nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				// Expect no calls to UpdateWorkspace or DeleteWorkspace.
 			},
@@ -224,7 +220,7 @@ func TestWorkspaceController_Sync_CreateOrUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStorage := &storagemocks.MockStorage{}
 			tt.mockSetup(mockStorage)
-			c := newTestWorkspaceController(mockStorage, tt.engineRegistry)
+			c := newTestWorkspaceController(mockStorage, tt.engines)
 
 			err := c.sync(tt.input) // Test sync directly.
 
@@ -254,29 +250,26 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 		return nil
 	}
 
-	// Create a test engine registry with a test engine pre-registered
-	testEngineRegistry := engine.NewTestRegistry()
-	err := testEngineRegistry.Register(&v1.Engine{
+	testEngines := []*v1.Engine{{
 		Metadata: &v1.Metadata{
 			Name: "test-engine",
 		},
 		Spec: &v1.EngineSpec{},
-	})
-	assert.NoError(t, err)
+	}}
 
 	tests := []struct {
-		name           string
-		inputKey       interface{}
-		engineRegistry engine.Registry
-		mockSetup      func(*storagemocks.MockStorage)
-		useMockSync    bool  // Flag to indicate if the mock syncHandler should be used.
-		expectedError  error // Expected contained error string for specific checks.
-		wantErr        bool
+		name          string
+		inputKey      interface{}
+		engines       []*v1.Engine
+		mockSetup     func(*storagemocks.MockStorage)
+		useMockSync   bool  // Flag to indicate if the mock syncHandler should be used.
+		expectedError error // Expected contained error string for specific checks.
+		wantErr       bool
 	}{
 		{
-			name:           "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
-			inputKey:       testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
-			engineRegistry: testEngineRegistry,
+			name:     "Reconcile success (real sync, no status change)", // Test scenario using default sync handler.
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
+			engines:  testEngines,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
 				s.On("CreateEngine", mock.Anything).Return(nil)
@@ -285,9 +278,9 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:           "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
-			inputKey:       testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
-			engineRegistry: engine.NewTestRegistry(),
+			name:     "Reconcile success (real sync, status updated)", // Test scenario using default sync handler.
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhasePENDING),
+			engines:  nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				// The real 'sync' method expects UpdateWorkspace to be called.
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
@@ -298,18 +291,18 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:           "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
-			inputKey:       testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
-			engineRegistry: engine.NewTestRegistry(),
+			name:     "Reconcile success (mock sync)", // Test Reconcile isolation using mock handler.
+			inputKey: testWorkspace(workspaceID, v1.WorkspacePhaseCREATED),
+			engines:  nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 			},
 			useMockSync: true, // Override with mockSyncHandler.
 			wantErr:     false,
 		},
 		{
-			name:           "Invalid key type",
-			inputKey:       "not-an-obj",
-			engineRegistry: engine.NewTestRegistry(),
+			name:     "Invalid key type",
+			inputKey: "not-an-obj",
+			engines:  nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 				// No storage calls expected.
 			},
@@ -318,9 +311,9 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			expectedError: errors.New("failed to assert obj to *v1.Workspace"),
 		},
 		{
-			name:           "Sync handler returns error (mock sync)",
-			inputKey:       testWorkspace(failedWorkspaceID, v1.WorkspacePhaseCREATED),
-			engineRegistry: engine.NewTestRegistry(),
+			name:     "Sync handler returns error (mock sync)",
+			inputKey: testWorkspace(failedWorkspaceID, v1.WorkspacePhaseCREATED),
+			engines:  nil,
 			mockSetup: func(s *storagemocks.MockStorage) {
 			},
 			useMockSync: true, // Use the mock handler.
@@ -336,7 +329,7 @@ func TestWorkspaceController_Reconcile(t *testing.T) {
 			}
 
 			// Create controller using the helper.
-			c := newTestWorkspaceController(mockStorage, tt.engineRegistry)
+			c := newTestWorkspaceController(mockStorage, tt.engines)
 
 			// Override syncHandler if the test case requires the mock.
 			if tt.useMockSync {

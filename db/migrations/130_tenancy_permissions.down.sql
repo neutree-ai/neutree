@@ -1,0 +1,2 @@
+-- No-op. PostgreSQL cannot remove enum values; the later down migrations take
+-- these permissions and preset roles out of every role.

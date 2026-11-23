@@ -17,7 +17,7 @@ func RegisterRoleAssignmentRoutes(group *gin.RouterGroup, middlewares []gin.Hand
 	proxyGroup := group.Group("/role_assignments")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.RoleAssignment](deps, "role_assignments")
+	handler := CreateStructProxyHandler[v1.RoleAssignment](proxyGroup, deps, "role_assignments")
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)

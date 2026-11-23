@@ -236,6 +236,10 @@ func (f *fakeRayDashboardService) GetActorLog(string, string, int) (string, erro
 	return "", nil
 }
 
+func (f *fakeRayDashboardService) GetActorLogHead(context.Context, string, string, int64) (string, error) {
+	return "", nil
+}
+
 func (f *fakeRayDashboardService) ListActors(
 	filters []dashboard.ActorFilter,
 	detail bool,

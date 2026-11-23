@@ -799,7 +799,7 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 	})
 }
 
-// Migration 090: the database no longer requires spec.model.registry. Whether an
+// The database no longer requires spec.model.registry. Whether an
 // endpoint needs one is decided by the API, not here.
 func TestEndpointModelRegistryOptional(t *testing.T) {
 	db := GetTestDB(t)
@@ -856,7 +856,7 @@ func TestEndpointModelRegistryOptional(t *testing.T) {
 	})
 }
 
-// Migration 091: model name and version follow the registry out of the database.
+// Model name and version follow the registry out of the database.
 // The name *format* stays here -- it does not depend on the engine.
 func TestEndpointModelNameAndVersionOptional(t *testing.T) {
 	db := GetTestDB(t)

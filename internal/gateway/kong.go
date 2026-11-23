@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -35,7 +37,7 @@ type Kong struct {
 }
 
 func newKong(opts GatewayOptions) (Gateway, error) {
-	kongClient, err := kong.NewClient(&opts.AdminUrl, nil)
+	kongClient, err := kong.NewClient(&opts.AdminUrl, newKongAdminHTTPClient(kongAdminRequestTimeout, kongAdminResponseHeaderTimeout))
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +57,7 @@ func (k *Kong) Init() error {
 	plugins = append(plugins, k.generateKeyAuthenticationPlugin())
 	plugins = append(plugins, k.generateRewriteApiKeyHeaderPlugin())
 	plugins = append(plugins, k.generateHttpLogPlugin())
+	plugins = append(plugins, generateAccessFallbackPlugin())
 	plugins = append(plugins, &kong.Plugin{
 		Name:         pointy.String("prometheus"),
 		InstanceName: pointy.String("neutree-prometheus"),
@@ -87,6 +90,22 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 		return errors.New("api key status.sk_value is required")
 	}
 
+	active, err := k.storage.ApiKeyOwnerActive(apiKey.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check the owner of api key %s", apiKey.ID)
+	}
+
+	if !active {
+		return k.suspendAPIKey(apiKey)
+	}
+
+	// Before any Kong write: without the group rules, the gateway keeps the
+	// last config rather than fall back to the key's own (looser) allowlist.
+	rules, err := k.effectiveModelRules(apiKey)
+	if err != nil {
+		return err
+	}
+
 	consumer, err := k.kongClient.Consumers.GetByCustomID(context.Background(), &apiKey.ID)
 	if err != nil && !isResourceNotFoundError(err) {
 		return errors.Wrapf(err, "failed to get consumer by custom id %s", apiKey.ID)
@@ -95,6 +114,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 	if isResourceNotFoundError(err) {
 		consumer = &kong.Consumer{
 			CustomID: &apiKey.ID,
+			Tags:     []*string{pointy.String(apiKeyAccessRulesTag)},
 		}
 
 		consumer, err = k.kongClient.Consumers.Create(context.Background(), consumer)
@@ -110,7 +130,7 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 
 	for _, keyAuth := range keyAuthList {
 		if keyAuth.Key != nil && apiKey.Status != nil && *keyAuth.Key == apiKey.Status.SkValue {
-			return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
+			return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey, rules)
 		}
 	}
 
@@ -123,23 +143,59 @@ func (k *Kong) SyncAPIKey(apiKey *v1.ApiKey) error {
 		return errors.Wrapf(err, "failed to create key auth for consumer %s", *consumer.CustomID)
 	}
 
-	return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey)
+	return k.syncAPIKeyGatewayConfig(consumer.ID, apiKey, rules)
 }
 
-func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error {
-	desiredGroups, err := k.desiredAPIKeyACLGroups(apiKey)
+// suspendAPIKey removes the credential and the ACL groups of a key whose owner
+// is deactivated. The consumer and its limit plugins stay, so the next sync
+// after a reactivation only has to put the credential back.
+func (k *Kong) suspendAPIKey(apiKey *v1.ApiKey) error {
+	consumer, err := k.kongClient.Consumers.GetByCustomID(context.Background(), &apiKey.ID)
+	if err != nil {
+		if isResourceNotFoundError(err) {
+			return nil
+		}
+
+		return errors.Wrapf(err, "failed to get consumer by custom id %s", apiKey.ID)
+	}
+
+	keyAuthList, _, err := k.kongClient.KeyAuths.ListForConsumer(context.Background(), consumer.ID, nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to list key auths for api key %s", apiKey.ID)
+	}
+
+	for _, keyAuth := range keyAuthList {
+		if keyAuth.ID == nil {
+			continue
+		}
+
+		if err := k.kongClient.KeyAuths.Delete(context.Background(), consumer.ID, keyAuth.ID); err != nil {
+			return errors.Wrapf(err, "failed to delete key auth of api key %s", apiKey.ID)
+		}
+	}
+
+	_, toDelete, err := k.diffAPIKeyACLGroups(consumer.ID, apiKey, nil)
 	if err != nil {
 		return err
 	}
 
+	return k.deleteAPIKeyACLGroups(consumer.ID, apiKey, toDelete)
+}
+
+func (k *Kong) diffAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey, desiredGroups []string) ([]string, []*kong.ACLGroup, error) {
 	currentGroups, _, err := k.kongClient.ACLs.ListForConsumer(context.Background(), consumerID, nil)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list ACL groups for api key %s", apiKey.ID)
+		return nil, nil, errors.Wrapf(err, "failed to list ACL groups for api key %s", apiKey.ID)
 	}
 
 	toCreate, toDelete := diffNeutreeACLGroups(currentGroups, desiredGroups)
-	for _, group := range toCreate {
-		_, err = k.kongClient.ACLs.Create(context.Background(), consumerID, &kong.ACLGroup{
+
+	return toCreate, toDelete, nil
+}
+
+func (k *Kong) addAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey, groups []string) error {
+	for _, group := range groups {
+		_, err := k.kongClient.ACLs.Create(context.Background(), consumerID, &kong.ACLGroup{
 			Group: pointy.String(group),
 		})
 		if err != nil {
@@ -147,13 +203,16 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 		}
 	}
 
-	for _, group := range toDelete {
+	return nil
+}
+
+func (k *Kong) deleteAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey, groups []*kong.ACLGroup) error {
+	for _, group := range groups {
 		if group.Group == nil {
 			continue
 		}
 
-		err = k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group)
-		if err != nil {
+		if err := k.kongClient.ACLs.Delete(context.Background(), consumerID, group.Group); err != nil {
 			return errors.Wrapf(err, "failed to delete ACL group %s from api key %s", *group.Group, apiKey.ID)
 		}
 	}
@@ -163,12 +222,83 @@ func (k *Kong) syncAPIKeyACLGroups(consumerID *string, apiKey *v1.ApiKey) error 
 
 // syncAPIKeyGatewayConfig reconciles everything we push to the gateway for an
 // API key: its ACL groups (authorization) and its limit plugins (quota/access).
-func (k *Kong) syncAPIKeyGatewayConfig(consumerID *string, apiKey *v1.ApiKey) error {
-	if err := k.syncAPIKeyACLGroups(consumerID, apiKey); err != nil {
+// Order: revoke ACL groups, write the limit plugins, then grant ACL groups, so
+// no step reaches an endpoint before the key's model rules are in place.
+func (k *Kong) syncAPIKeyGatewayConfig(consumerID *string, apiKey *v1.ApiKey, rules modelRules) error {
+	desiredGroups, err := k.desiredAPIKeyACLGroups(apiKey)
+	if err != nil {
 		return err
 	}
 
-	return k.syncAPIKeyLimitPlugins(consumerID, apiKey)
+	toCreate, toDelete, err := k.diffAPIKeyACLGroups(consumerID, apiKey, desiredGroups)
+	if err != nil {
+		return err
+	}
+
+	if err := k.deleteAPIKeyACLGroups(consumerID, apiKey, toDelete); err != nil {
+		return err
+	}
+
+	if err := k.syncAPIKeyLimitPlugins(consumerID, apiKey, rules); err != nil {
+		return err
+	}
+
+	return k.addAPIKeyACLGroups(consumerID, apiKey, toCreate)
+}
+
+// modelRules is what the group policies of the owner add to a key.
+type modelRules struct {
+	// Allowed is the allowlist; nil = unrestricted, [] = deny-all.
+	Allowed []v1.AllowedModel `json:"allowed_models"`
+	// Denied names models refused on any endpoint.
+	Denied []string `json:"denied_models"`
+	// GroupTokenPool is true when a token pool applies to the owner (one of
+	// its groups', or one set on the owner itself), so the key needs the quota
+	// plugin even without a quota of its own.
+	GroupTokenPool bool `json:"group_token_pool"`
+}
+
+// effectiveModelRules is the key's own allowlist narrowed by the group
+// policies of its owner, plus the group deny rules.
+func (k *Kong) effectiveModelRules(apiKey *v1.ApiKey) (modelRules, error) {
+	var own []v1.AllowedModel
+	if apiKey.Spec != nil && apiKey.Spec.Limits != nil {
+		own = apiKey.Spec.Limits.AllowedModels
+	}
+
+	if apiKey.OwnerID() == "" || apiKey.Metadata == nil || apiKey.Metadata.Workspace == "" {
+		return modelRules{Allowed: own}, nil
+	}
+
+	// The RPC client does not check the HTTP status, and an error body is an
+	// object too: require every field so it cannot read as "no rules". A
+	// present allowed_models may be null (unrestricted).
+	var raw struct {
+		Allowed        json.RawMessage `json:"allowed_models"`
+		Denied         *[]string       `json:"denied_models"`
+		GroupTokenPool *bool           `json:"group_token_pool"`
+	}
+
+	// A ServiceAccount's groups are its Team.
+	err := k.storage.CallDatabaseFunction("get_api_key_model_rules", map[string]interface{}{
+		"p_owner_id":       apiKey.OwnerID(),
+		"p_workspace":      apiKey.Metadata.Workspace,
+		"p_allowed_models": own,
+	}, &raw)
+	if err != nil {
+		return modelRules{}, errors.Wrapf(err, "failed to get the group policy for api key %s", apiKey.ID)
+	}
+
+	if len(raw.Allowed) == 0 || raw.Denied == nil || raw.GroupTokenPool == nil {
+		return modelRules{}, errors.Errorf("unexpected model rules for api key %s", apiKey.ID)
+	}
+
+	rules := modelRules{Denied: *raw.Denied, GroupTokenPool: *raw.GroupTokenPool}
+	if err := json.Unmarshal(raw.Allowed, &rules.Allowed); err != nil {
+		return modelRules{}, errors.Wrapf(err, "failed to decode the model rules of api key %s", apiKey.ID)
+	}
+
+	return rules, nil
 }
 
 // isManagedAPIKeyLimitPlugin reports whether a consumer plugin is one this
@@ -182,16 +312,35 @@ func isManagedAPIKeyLimitPlugin(p *kong.Plugin) bool {
 		strings.HasPrefix(*p.InstanceName, "neutree-ai-quota-")
 }
 
+// apiKeyAccessRulesTag marks a consumer that always gets its own
+// neutree-ai-access instance. The global fallback instance rejects a consumer
+// with this tag, because its own instance is not loaded yet. Consumers created
+// before the tag existed lack it, so they are not rejected while their own
+// instance is first written. Must match RULES_TAG in the plugin handler.
+const apiKeyAccessRulesTag = "neutree-access-rules"
+
+// generateAccessFallbackPlugin builds the global neutree-ai-access instance.
+// Kong prefers a consumer-scoped instance, so this one only runs for a consumer
+// whose own instance Kong has not loaded yet.
+func generateAccessFallbackPlugin() *kong.Plugin {
+	return &kong.Plugin{
+		Name:         pointy.String("neutree-ai-access"),
+		InstanceName: pointy.String("neutree-access-fallback"),
+		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
+		Config:       kong.Configuration{"fallback": true},
+	}
+}
+
 // generateAPIKeyAccessPlugin builds the per-consumer neutree-ai-access plugin
-// from the key's static access limits (disabled / allowed models / concurrency /
-// RPS+RPM). Returns nil when the key has no access limits (so the plugin is
-// absent and the key is unrestricted on the access dimension).
-func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
-	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
-		return nil
+// from the key's static access limits (disabled / concurrency / RPS+RPM) and
+// the effective model rules. A key without any of them still gets the plugin,
+// with every limit off, so the global fallback instance never judges it.
+func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey, rules modelRules) *kong.Plugin {
+	l := &v1.ApiKeyLimits{}
+	if apiKey.Spec != nil && apiKey.Spec.Limits != nil {
+		l = apiKey.Spec.Limits
 	}
 
-	l := apiKey.Spec.Limits
 	// Emit a COMPLETE config with explicit empty values for "off" (not null) so an
 	// update always overwrites prior config. syncPlugin reconciles via JSON
 	// merge-patch (RFC 7386), under which an omitted key keeps the stale value;
@@ -206,19 +355,20 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	cfg := map[string]interface{}{
 		"disabled":       l.Disabled,
 		"allowed_models": nil,
+		"denied_models":  []string{},
 		"concurrency":    0,
 		"rate_limits":    []map[string]interface{}{},
 	}
-	needed := l.Disabled
+	if rules.Allowed != nil {
+		cfg["allowed_models"] = accessPluginAllowedModels(rules.Allowed)
+	}
 
-	if l.AllowedModels != nil {
-		cfg["allowed_models"] = accessPluginAllowedModels(l.AllowedModels)
-		needed = true
+	if len(rules.Denied) > 0 {
+		cfg["denied_models"] = rules.Denied
 	}
 
 	if l.Concurrency > 0 {
 		cfg["concurrency"] = l.Concurrency
-		needed = true
 	}
 
 	rateLimits := make([]map[string]interface{}, 0, 2)
@@ -232,13 +382,6 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 
 	if len(rateLimits) > 0 {
 		cfg["rate_limits"] = rateLimits
-		needed = true
-	}
-
-	// No active limit -> no plugin (syncAPIKeyLimitPlugins deletes any stale one),
-	// so an unconfigured key stays unrestricted (by design).
-	if !needed {
-		return nil
 	}
 
 	return &kong.Plugin{
@@ -252,22 +395,23 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 
 // generateAPIKeyQuotaPlugin builds the per-consumer neutree-ai-quota plugin when
 // the key has a token quota of either granularity -- an overall
-// limits.token_quota, or a per-model limit on an allowlist entry. The plugin
+// limits.token_quota, or a per-model limit on an allowlist entry -- or a group
+// of its owner has a token pool. The plugin
 // pulls the dynamic remaining count from neutree-api at request time. Returns nil
 // when there is no quota at all, or when the neutree-api URL / service token are
 // not configured (degrade to "no quota enforcement" rather than mis-enforce).
-func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
-	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
-		return nil
+func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey, rules modelRules) *kong.Plugin {
+	l := &v1.ApiKeyLimits{}
+	if apiKey.Spec != nil && apiKey.Spec.Limits != nil {
+		l = apiKey.Spec.Limits
 	}
 
-	l := apiKey.Spec.Limits
 	// Either granularity needs the plugin: an overall quota, or at least one
 	// allowlist entry with its own limit. When both are present the control plane
 	// enforces the per-model one and ignores the overall quota, but that decision
 	// lives in api.get_api_key_remaining -- here it only matters that the plugin
 	// is attached at all.
-	if !hasPerModelTokenQuota(l) && (l.TokenQuota == nil || l.TokenQuota.Limit <= 0) {
+	if !rules.GroupTokenPool && !hasPerModelTokenQuota(l) && (l.TokenQuota == nil || l.TokenQuota.Limit <= 0) {
 		return nil
 	}
 
@@ -332,13 +476,12 @@ func hasPerModelTokenQuota(l *v1.ApiKeyLimits) bool {
 
 // syncAPIKeyLimitPlugins reconciles the key's per-consumer limit plugins: upsert
 // the desired ones and prune managed plugins that are no longer desired.
-func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey) error {
+func (k *Kong) syncAPIKeyLimitPlugins(consumerID *string, apiKey *v1.ApiKey, rules modelRules) error {
 	desired := make(map[string]*kong.Plugin)
-	if p := k.generateAPIKeyAccessPlugin(consumerID, apiKey); p != nil {
-		desired[*p.InstanceName] = p
-	}
+	access := k.generateAPIKeyAccessPlugin(consumerID, apiKey, rules)
+	desired[*access.InstanceName] = access
 
-	if p := k.generateAPIKeyQuotaPlugin(consumerID, apiKey); p != nil {
+	if p := k.generateAPIKeyQuotaPlugin(consumerID, apiKey, rules); p != nil {
 		desired[*p.InstanceName] = p
 	}
 
@@ -512,7 +655,7 @@ end`,
 //
 // This is a distinct vocabulary from the ACL resource strings ("endpoint" /
 // "external-endpoint") and from the DB `source` labels that get_workspace_models
-// (migration 070) returns to populate the UI dropdown ("endpoint" /
+// returns to populate the UI dropdown ("endpoint" /
 // "external_endpoint"). The UI maps that source to this type when it writes an
 // AllowedModel: source "endpoint" -> internal, "external_endpoint" -> external.
 const (
@@ -745,18 +888,18 @@ func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
 		return nil, errors.New("cluster is never initialized")
 	}
 
-	scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get cluster serve url")
+		return nil, errors.Wrapf(err, "failed to get endpoint serve address")
 	}
 
 	gwServiceName := "neutree-endpoint-" + util.HashString(ep.Key())
 	gwService := &kong.Service{
 		Name:        &gwServiceName,
-		Host:        &host,
-		Port:        &port,
-		Protocol:    &scheme,
-		Path:        pointy.String(fmt.Sprintf("/%s/%s", ep.Metadata.Workspace, ep.Metadata.Name)),
+		Host:        &address.Host,
+		Port:        &address.Port,
+		Protocol:    &address.Scheme,
+		Path:        &address.Path,
 		ReadTimeout: pointy.Int(60000 * 60),
 	}
 
@@ -1009,14 +1152,12 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
 	}
 
-	scheme, host, port, err = util.GetClusterServeAddress(&clusters[0])
+	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
 	if err != nil {
-		return "", "", 0, "", errors.Wrapf(err, "failed to get cluster serve address")
+		return "", "", 0, "", errors.Wrapf(err, "failed to get endpoint serve address")
 	}
 
-	path = fmt.Sprintf("/%s/%s", workspace, endpointName)
-
-	return scheme, host, port, path, nil
+	return address.Scheme, address.Host, address.Port, address.Path, nil
 }
 
 // resolvedUpstream is the outcome of resolving one spec upstream entry into a

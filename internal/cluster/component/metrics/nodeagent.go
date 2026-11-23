@@ -3,18 +3,22 @@ package metrics
 import (
 	"encoding/json"
 	"maps"
+	"slices"
 	"sort"
+
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/promrelabel"
 
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
-// metricsNodeAgent is the single NodeAgent rendered for a cluster. Its runtime
-// and scrape target come from the selected accelerator Profile; exporter
-// runtime metadata is not inherited.
+// metricsNodeAgent projects the selected accelerator Profile; exporter runtime
+// metadata is not inherited.
 type metricsNodeAgent struct {
+	Type                           string
 	Image                          string
 	UseLegacyContract              bool
 	AcceleratorType                string
@@ -22,58 +26,105 @@ type metricsNodeAgent struct {
 	AcceleratorExporterMetricsPath string
 	Env                            []corev1.EnvVar
 	NodeSelector                   map[string]string
+	Affinity                       *corev1.Affinity
 	SecurityContext                *corev1.SecurityContext
+	RuntimeClassName               string
+	InitContainers                 []corev1.Container
 	VolumeMounts                   []corev1.VolumeMount
 	Volumes                        []corev1.Volume
+}
+
+type nodeAgentDeploymentPlan struct {
+	Name      string
+	NodeAgent metricsNodeAgent
+}
+
+func (m *MetricsComponent) planMetricsNodeAgents(plans []metricsAcceleratorPlan) ([]nodeAgentDeploymentPlan, error) {
+	agent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), plans)
+	if err != nil {
+		return nil, err
+	}
+
+	// Legacy profiles retain their existing single agent and profile selector.
+	deployments := []nodeAgentDeploymentPlan{{Name: neutreeNodeAgentMetricsName, NodeAgent: agent}}
+	if len(plans) == 0 || !plans[0].OperatorManaged {
+		return deployments, nil
+	}
+
+	agent.Type = nodeAgentTypeAccelerator
+	cpuAgent := defaultMetricsNodeAgent()
+	cpuAgent.Type = nodeAgentTypeCPU
+	cpuAgent.Image = agent.Image
+	cpuAgent.UseLegacyContract = agent.UseLegacyContract
+	cpuAgent.Affinity = cpuNodeAgentAffinity(agent.NodeSelector)
+
+	return []nodeAgentDeploymentPlan{
+		{Name: cpuNodeAgentMetricsName, NodeAgent: cpuAgent},
+		{Name: neutreeNodeAgentMetricsName, NodeAgent: agent},
+	}, nil
+}
+
+func cpuNodeAgentAffinity(selector map[string]string) *corev1.Affinity {
+	var expressions []corev1.NodeSelectorRequirement
+	for _, key := range slices.Sorted(maps.Keys(selector)) {
+		expressions = append(expressions, corev1.NodeSelectorRequirement{
+			Key: key, Operator: corev1.NodeSelectorOpNotIn, Values: []string{selector[key]},
+		})
+	}
+
+	// Exclude any node matching a profile selector entry, including readiness-only matches.
+	return &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+			MatchExpressions: expressions,
+		}}},
+	}}
 }
 
 func selectedMetricsNodeAgent(
 	clusterVersion string,
 	plans []metricsAcceleratorPlan,
-	targets []metricsScrapeTarget,
 ) (metricsNodeAgent, error) {
 	nodeAgent := defaultMetricsNodeAgent()
 	var selectedPlan *metricsAcceleratorPlan
-	var selectedTarget *metricsScrapeTarget
+	var selectedTarget *v1.MetricsTargetProfile
 
 	if len(plans) > 0 {
 		selectedPlan = &plans[0]
-		for index := range targets {
-			if targets[index].AcceleratorType == selectedPlan.AcceleratorType {
-				selectedTarget = &targets[index]
-
-				break
-			}
-		}
+		selectedTarget = selectedPlan.ExporterTarget
 	}
 
-	selection, err := component.SelectNodeAgent(clusterVersion)
+	selection, err := clusterversion.SelectNodeAgent(clusterVersion)
 
 	if err != nil {
 		return metricsNodeAgent{}, err
 	}
 
 	nodeAgent.Image = selection.Image
-	nodeAgent.UseLegacyContract = selection.Contract == component.NodeAgentContractLegacy
+	nodeAgent.UseLegacyContract = selection.Contract == clusterversion.NodeAgentContractLegacy
 
-	if selectedPlan == nil || selectedTarget == nil {
-		return nodeAgent, nil
-	}
-
-	if !nodeAgent.UseLegacyContract {
-		nodeAgent.AcceleratorType = selectedTarget.AcceleratorType
+	if selectedPlan != nil && selectedTarget != nil && !nodeAgent.UseLegacyContract {
+		nodeAgent.AcceleratorType = selectedPlan.AcceleratorType
 		nodeAgent.AcceleratorExporterPort = selectedTarget.Port
 		nodeAgent.AcceleratorExporterMetricsPath = selectedTarget.MetricsPath
 	}
 
 	var runtimeEnv map[string]string
-	if selectedPlan.NodeAgentRuntime != nil {
+	if selectedPlan != nil && selectedPlan.NodeAgentRuntime != nil {
 		runtimeEnv = selectedPlan.NodeAgentRuntime.Env
 	}
 
-	virtualizationMetricsTarget := selectedPlan.VirtualizationMetricsTarget
-	acceleratorExporterPodSelector := selectedTarget.PodSelector
-	acceleratorExporterNamespace := selectedTarget.Namespace
+	var virtualizationMetricsTarget *v1.MetricsTargetProfile
+	var acceleratorExporterPodSelector map[string]string
+	var acceleratorExporterNamespace string
+
+	if selectedPlan != nil {
+		virtualizationMetricsTarget = selectedPlan.VirtualizationMetricsTarget
+	}
+
+	if selectedTarget != nil {
+		acceleratorExporterPodSelector = selectedTarget.PodSelector
+		acceleratorExporterNamespace = selectedTarget.Namespace
+	}
 
 	if nodeAgent.UseLegacyContract {
 		virtualizationMetricsTarget = nil
@@ -92,6 +143,9 @@ func selectedMetricsNodeAgent(
 	}
 
 	nodeAgent.Env = env
+	if selectedPlan == nil {
+		return nodeAgent, nil
+	}
 
 	runtime := selectedPlan.NodeAgentRuntime
 	if runtime == nil {
@@ -100,6 +154,8 @@ func selectedMetricsNodeAgent(
 
 	nodeAgent.NodeSelector = maps.Clone(runtime.NodeSelector)
 	nodeAgent.SecurityContext = nodeAgentRuntimeSecurityContext(runtime)
+	nodeAgent.RuntimeClassName = runtime.Runtime
+	nodeAgent.InitContainers = append([]corev1.Container(nil), runtime.InitContainers...)
 
 	runtimeMounts, runtimeVolumes := buildComponentVolumes(runtime.Volumes, runtime.VolumeMounts)
 	nodeAgent.VolumeMounts = append(nodeAgent.VolumeMounts, runtimeMounts...)
@@ -180,4 +236,21 @@ func defaultMetricsNodeAgent() metricsNodeAgent {
 			}},
 		}},
 	}
+}
+
+func (m *MetricsComponent) nodeAgentScrapeTargets(name string) []metricsconfig.Target {
+	if name == "" {
+		return nil
+	}
+
+	selector := map[string]string{"neutree.ai/metrics-target": "node-agent"}
+
+	rules := []promrelabel.RelabelConfig{{SourceLabels: []string{"__meta_kubernetes_pod_container_port_name"}, Action: "keep",
+		Regex: &promrelabel.MultiLineRegex{S: "metrics"}}}
+	rules = append(rules, m.podScrapeRelabelConfigs(neutreeNodeAgentMetricsPort, "namespace", "pod")...)
+
+	return []metricsconfig.Target{{
+		JobName: "neutree-node-agent", Namespace: m.namespace, Selectors: metricsconfig.PodSelectors(selector),
+		Port: neutreeNodeAgentMetricsPort, MetricsPath: defaultMetricsPath, RelabelConfigs: rules,
+	}}
 }

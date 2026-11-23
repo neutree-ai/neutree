@@ -4,16 +4,22 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
+
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 var ErrIncompleteStaticNodeDeviceSnapshots = errors.New("incomplete static node device snapshots")
 
 type StaticNodeResourceClient struct {
-	nodeLister storage.StaticNodeLister
-	baseClient ResourceClient
+	nodeLister    storage.StaticNodeLister
+	baseClient    ResourceClient
+	dashboard     dashboard.DashboardService
+	runningActors map[string]struct{}
 }
 
 func NewStaticNodeClusterResourceClient(
@@ -23,6 +29,20 @@ func NewStaticNodeClusterResourceClient(
 	return &StaticNodeResourceClient{
 		nodeLister: nodeLister,
 		baseClient: baseClient,
+	}
+}
+
+func NewStaticNodeClusterResourceClientWithDashboard(
+	nodeLister storage.StaticNodeLister,
+	baseClient ResourceClient,
+	dashboardClient dashboard.DashboardService,
+	runningActors map[string]struct{},
+) *StaticNodeResourceClient {
+	return &StaticNodeResourceClient{
+		nodeLister:    nodeLister,
+		baseClient:    baseClient,
+		dashboard:     dashboardClient,
+		runningActors: runningActors,
 	}
 }
 
@@ -64,7 +84,7 @@ func (c *StaticNodeResourceClient) ListNodes(ctx context.Context, cluster *v1.Cl
 }
 
 func (c *StaticNodeResourceClient) ListEndpointInstances(
-	_ context.Context,
+	ctx context.Context,
 	cluster *v1.Cluster,
 	endpoint *v1.Endpoint,
 ) ([]EndpointInstanceResource, error) {
@@ -82,6 +102,7 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 	}
 
 	instances := make([]EndpointInstanceResource, 0)
+	actorIDs := make([]string, 0)
 	product := endpointAcceleratorProduct(endpoint)
 
 	for _, node := range nodes {
@@ -105,6 +126,8 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 				NodeID:     staticNodeResourceKey(node),
 				Devices:    devices,
 			})
+
+			actorIDs = append(actorIDs, allocation.RuntimeID)
 		}
 	}
 
@@ -112,9 +135,160 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 		return nil, nil
 	}
 
+	c.populateEndpointStartupMemoryStats(ctx, endpoint, instances, actorIDs)
+
 	sortEndpointInstanceResources(instances)
 
 	return instances, nil
+}
+
+func (c *StaticNodeResourceClient) populateEndpointStartupMemoryStats(
+	ctx context.Context,
+	endpoint *v1.Endpoint,
+	instances []EndpointInstanceResource,
+	actorIDs []string,
+) {
+	if c == nil || c.dashboard == nil || !isVLLMEndpoint(endpoint) {
+		return
+	}
+
+	prevByKey := previousReplicasByKey(endpoint)
+	blocksOverride := hasVLLMBlocksOverride(endpoint)
+
+	// Bound the entire collection pass, including reading response bodies.
+	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
+	defer cancel()
+
+	for i := range instances {
+		if i >= len(actorIDs) {
+			break
+		}
+
+		actorID := actorIDs[i]
+		if actorID == "" {
+			continue
+		}
+
+		key := replicaAllocationKey(instances[i].ReplicaID, instances[i].InstanceID)
+		if prev, exists := prevByKey[key]; exists && prev.ContainerID == actorID {
+			applyCachedStartupMemory(&instances[i], prev, blocksOverride)
+
+			continue
+		}
+
+		if !isRunningActor(c.runningActors, actorID) || logCtx.Err() != nil {
+			continue
+		}
+
+		weightsMiB, kvCacheMiB, ok := c.readActorStartupMemoryMiB(logCtx, actorID)
+		if !ok {
+			continue
+		}
+
+		if blocksOverride {
+			kvCacheMiB = nil
+		}
+
+		// A successful read completes collection for this running actor, even without matching logs.
+
+		instances[i].ContainerID = actorID
+		instances[i].ModelWeightsMiB = weightsMiB
+		instances[i].KVCacheCapacityMiB = kvCacheMiB
+	}
+}
+
+func (c *StaticNodeResourceClient) readActorStartupMemoryMiB(
+	ctx context.Context,
+	actorID string,
+) (*float64, *float64, bool) {
+	var logs strings.Builder
+
+	for _, suffix := range []string{"out", "err"} {
+		text, err := c.dashboard.GetActorLogHead(ctx, actorID, suffix, startupLogLimitBytes)
+		if err != nil {
+			klog.V(4).Infof("Skipping startup log parse for actor %s (%s): %v", actorID, suffix, err)
+
+			return nil, nil, false
+		}
+
+		logs.WriteString(text)
+		logs.WriteByte('\n')
+	}
+
+	weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(logs.String())
+
+	return weightsMiB, kvCacheMiB, true
+}
+
+func isRunningActor(runningActors map[string]struct{}, actorID string) bool {
+	_, ok := runningActors[actorID]
+	return ok
+}
+
+func isVLLMEndpoint(endpoint *v1.Endpoint) bool {
+	return endpoint != nil &&
+		endpoint.Spec != nil &&
+		endpoint.Spec.Engine != nil &&
+		endpoint.Spec.Engine.Engine == v1.EngineNameVLLM
+}
+
+func hasVLLMBlocksOverride(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Variables == nil {
+		return false
+	}
+
+	engineArgs, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	_, overrideUnderscore := engineArgs["num_gpu_blocks_override"]
+	_, overrideDash := engineArgs["num-gpu-blocks-override"]
+
+	return overrideUnderscore || overrideDash
+}
+
+func replicaAllocationKey(replicaID, instanceID string) string {
+	if replicaID != "" {
+		return replicaID
+	}
+
+	return instanceID
+}
+
+func previousReplicasByKey(endpoint *v1.Endpoint) map[string]v1.ReplicaDeviceAllocation {
+	prevByKey := make(map[string]v1.ReplicaDeviceAllocation)
+
+	if endpoint == nil || endpoint.Status == nil || endpoint.Status.Resources == nil {
+		return prevByKey
+	}
+
+	for _, prev := range endpoint.Status.Resources.Replicas {
+		key := replicaAllocationKey(prev.ReplicaID, prev.InstanceID)
+		if key != "" {
+			prevByKey[key] = prev
+		}
+	}
+
+	return prevByKey
+}
+
+func applyCachedStartupMemory(
+	instance *EndpointInstanceResource,
+	prev v1.ReplicaDeviceAllocation,
+	blocksOverride bool,
+) {
+	if instance == nil {
+		return
+	}
+
+	instance.ContainerID = prev.ContainerID
+	instance.ModelWeightsMiB = prev.ModelWeightsMiB
+	instance.KVCacheCapacityMiB = prev.KVCacheCapacityMiB
+
+	if blocksOverride {
+		instance.KVCacheCapacityMiB = nil
+	}
 }
 
 func (c *StaticNodeResourceClient) staticNodes(cluster *v1.Cluster) ([]*v1.StaticNode, error) {
@@ -220,6 +394,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
+	// The control-plane parser owns model specifications; old agent snapshots need not repeat them.
+	mergeAcceleratorMetadata(metadata, base.AcceleratorMetadata)
+
 	for _, device := range node.Status.Accelerator.Devices {
 		if device.UUID == "" {
 			continue
@@ -228,11 +405,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		allocation := allocationsByUUID[device.UUID]
 		allocatablePool := staticNodeDeviceAllocatablePool(device)
 		availablePool := staticNodeDeviceAvailablePool(device, allocation)
-
-		if !device.Healthy {
-			allocatablePool = &v1.DeviceResourcePool{}
-			availablePool = &v1.DeviceResourcePool{}
-		}
 
 		nodeStatus.Devices = append(nodeStatus.Devices, &v1.DeviceResource{
 			UUID:        device.UUID,
@@ -246,11 +418,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
-		if device.Healthy {
-			addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
-		}
+		addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 
-		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
+		if hasDeviceAvailableCapacity(availablePool) {
 			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
 		}
 	}

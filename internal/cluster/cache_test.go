@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
@@ -75,3 +77,37 @@ func TestProviderFailurePreservesClusterHealthAndBlocksCleanup(t *testing.T) {
 }
 
 func (p *failingCacheProvider) Validate(old, next *v1.Cluster) error { return nil }
+
+type scrapeCacheProvider struct{ failingCacheProvider }
+
+func (*scrapeCacheProvider) MetricsScrapeConfig(_ *v1.Cluster, _ string) string {
+	return "- job_name: example-cache\n  static_configs:\n  - targets: ['cache:9000']\n"
+}
+
+func TestAdditionalComponentsInjectCacheMetrics(t *testing.T) {
+	providers := &clustercache.Providers{}
+	require.NoError(t, providers.Register("example", &scrapeCacheProvider{}))
+	reconciler := &NativeKubernetesClusterReconciler{cacheProviders: providers, metricsRemoteWriteURL: "http://metrics/write"}
+	rc := &ReconcileContext{
+		Cluster:                 &v1.Cluster{Metadata: &v1.Metadata{Name: "cluster", Workspace: "tenant"}, Spec: &v1.ClusterSpec{Version: "v1.1.2"}},
+		clusterNamespace:        "cluster-ns",
+		kubernetesClusterConfig: &v1.KubernetesClusterConfig{},
+	}
+	components, _ := reconciler.ComputeAdditionalComponents(rc, "")
+	for _, component := range components {
+		if m, ok := component.(*metrics.MetricsComponent); ok {
+			objects, err := m.GetMetricsResources(context.Background())
+			require.NoError(t, err)
+			for _, obj := range objects.Items {
+				if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+					config, found, err := unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+					require.NoError(t, err)
+					require.True(t, found)
+					require.Contains(t, config, "job_name: example-cache")
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("vmagent config not rendered")
+}

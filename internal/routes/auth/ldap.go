@@ -14,12 +14,6 @@ import (
 )
 
 const (
-	// ldapEmailDomain is the parent domain of LDAP users' placeholder emails;
-	// each identity source gets the subdomain <source name>.ldap.neutree.local.
-	// GoTrue needs an email to issue a session, and the directory email cannot
-	// be used: it may be missing, change, or already belong to a local user.
-	ldapEmailDomain = "ldap.neutree.local"
-
 	msgInvalidCredentials = "invalid username or password"
 	msgDirectoryDown      = "directory service unavailable"
 	msgInternalError      = "internal error"
@@ -74,15 +68,19 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		account := ldapAccount(source.name, identity)
+		account := auth.LDAPAccount(source.name, identity.ExternalID, auth.ExternalProfile{
+			Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email,
+		})
 
-		userID, created, err := ensureExternalUser(ctx, deps, account)
+		link, created, err := ensureExternalUser(ctx, deps, account)
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s (id %s): link user: %v", identity.Username, source.name, identity.ExternalID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
 
 			return
 		}
+
+		userID := link.UserID
 
 		user, err := loginUser(deps, userID)
 		if errors.Is(err, errUserDisabled) {
@@ -100,7 +98,7 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		if !created {
-			refreshExternalUser(deps, account, user, account.Profile)
+			refreshExternalUser(deps, account, link, user)
 		}
 
 		session, err := issueSession(ctx, deps, user)
@@ -150,23 +148,5 @@ func ldapErrorResponse(source, username string, err error) (int, string) {
 	default:
 		klog.Errorf("LDAP login of %q via %s failed: %v", username, source, err)
 		return http.StatusInternalServerError, msgInternalError
-	}
-}
-
-func ldapPlaceholderEmail(sourceName, externalID string) string {
-	return placeholderEmail(sourceName, ldapEmailDomain, externalID)
-}
-
-// ldapAccount describes the directory account of identity in the LDAP
-// identity source sourceName.
-func ldapAccount(sourceName string, identity *ldap.Identity) externalAccount {
-	return externalAccount{
-		Source:             auth.LinkSource(auth.LDAPSource, sourceName),
-		ExternalID:         identity.ExternalID,
-		IdentitySource:     auth.LDAPSource,
-		IdentitySourceName: sourceName,
-		Email:              ldapPlaceholderEmail(sourceName, identity.ExternalID),
-		Profile:            auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
-		LogName:            identity.Username,
 	}
 }

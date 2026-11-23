@@ -7,6 +7,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -21,6 +22,7 @@ var (
 	_                      = admissionregistrationv1.AddToScheme(controllerClientScheme)
 	_                      = appsv1.AddToScheme(controllerClientScheme)
 	_                      = corev1.AddToScheme(controllerClientScheme)
+	_                      = nodev1.AddToScheme(controllerClientScheme)
 	_                      = rbacv1.AddToScheme(controllerClientScheme)
 )
 

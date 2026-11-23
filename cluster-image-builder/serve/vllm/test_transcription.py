@@ -23,7 +23,7 @@ class RequestModel(BaseModel):
     response_format: str = "json"
 
 
-VERSIONS = ("v0_24_0", "v0_31_0")
+VERSIONS = ("v0_24_0", "v0_32_0")
 
 
 def load_methods(version):

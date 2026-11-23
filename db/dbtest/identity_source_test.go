@@ -18,7 +18,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// These tests cover api.identity_sources (migrations 104/105): RLS by the
+// These tests cover api.identity_sources: RLS by the
 // identity_source:* permissions, validation and defaults in the write trigger,
 // write-only secrets encrypted into api.identity_source_secrets, and the two
 // SECURITY DEFINER functions (the public login list and the service-role
@@ -421,7 +421,7 @@ func TestIdentitySource_SecretsEncryptedAtRest(t *testing.T) {
 	t.Run("a write without the encryption key is refused", func(t *testing.T) {
 		_, err := db.Exec(`INSERT INTO api.identity_sources (api_version, kind, metadata, spec) VALUES ('v1', 'IdentitySource',
 			ROW($1, NULL, NULL, NULL, NULL, NULL, '{}', '{}')::api.metadata,
-			ROW('ldap', true, ROW('ldap://h', NULL, NULL, NULL, NULL, 'cn=svc', 'pw', 'ou=p', '(uid={username})', NULL)::api.identity_source_ldap_spec, NULL)::api.identity_source_spec)`,
+			ROW('ldap', true, ROW('ldap://h', NULL, NULL, NULL, NULL, 'cn=svc', 'pw', 'ou=p', '(uid={username})', NULL, NULL)::api.identity_source_ldap_spec, NULL, NULL)::api.identity_source_spec)`,
 			newIdentitySourceName("enc-nokey"))
 		if err == nil || !strings.Contains(err.Error(), "10259") {
 			t.Errorf("insert without app.settings.jwt_secret = %v, want code 10259", err)

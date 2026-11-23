@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -113,26 +112,21 @@ func TestRegisterImageRegistryRoutesRejectsInvalidURLHostOnPatch(t *testing.T) {
 func TestRegisterImageRegistryRoutesForwardsValidURLOnPatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	storageMock := storageMocks.NewMockStorage(t)
-	storageMock.EXPECT().
-		GenericQuery(storage.IMAGE_REGISTRY_TABLE, "spec", mock.Anything, mock.Anything).
-		Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
-			resources := result.(*[]map[string]interface{})
-			*resources = []map[string]interface{}{
-				{
-					"spec": map[string]interface{}{
-						"authconfig": map[string]interface{}{
-							"username": "existing-user",
-							"password": "existing-password",
-						},
-					},
-				},
-			}
-		}).
-		Return(nil)
+	storedRow := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"authconfig": map[string]interface{}{
+				"username": "existing-user",
+				"password": "existing-password",
+			},
+		},
+	}
 
 	var upstreamCalled atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveBackfillLookup(w, r, storedRow) {
+			return
+		}
+
 		upstreamCalled.Store(true)
 		assert.Equal(t, "/image_registries", r.URL.Path)
 		assert.Equal(t, "id=eq.118", r.URL.RawQuery)
@@ -149,7 +143,6 @@ func TestRegisterImageRegistryRoutesForwardsValidURLOnPatch(t *testing.T) {
 	router := gin.New()
 	RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
 		StorageAccessURL: upstream.URL,
-		Storage:          storageMock,
 	})
 
 	body := strings.NewReader(`{"spec":{"url":"https://registry.example.com:5000"}}`)

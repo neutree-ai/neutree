@@ -238,7 +238,7 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		logName = identity.Subject
 	}
 
-	account := externalAccount{
+	account := auth.ExternalAccount{
 		Source:             auth.LinkSource(auth.OIDCSource, o.name),
 		ExternalID:         oidcExternalID(identity.Issuer, identity.Subject),
 		IdentitySource:     auth.OIDCSource,
@@ -248,11 +248,13 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		LogName:            logName,
 	}
 
-	userID, created, err := ensureExternalUser(ctx, deps, account)
+	stored, created, err := ensureExternalUser(ctx, deps, account)
 	if err != nil {
 		klog.Errorf("OIDC login of %q via %s: link user: %v", logName, o.name, err)
 		return "", oidcErrServerError
 	}
+
+	userID := stored.UserID
 
 	user, err := loginUser(deps, userID)
 	if errors.Is(err, errUserDisabled) {
@@ -266,7 +268,7 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 	}
 
 	if !created {
-		refreshExternalUser(deps, account, user, account.Profile)
+		refreshExternalUser(deps, account, stored, user)
 	}
 
 	link, err := magicLinkFor(ctx, deps, user)
@@ -286,7 +288,7 @@ func oidcExternalID(issuer, subject string) string {
 }
 
 func oidcPlaceholderEmail(sourceName, issuer, subject string) string {
-	return placeholderEmail(sourceName, oidcEmailDomain, oidcExternalID(issuer, subject))
+	return auth.PlaceholderEmail(sourceName, oidcEmailDomain, oidcExternalID(issuer, subject))
 }
 
 func newLoginState(redirectTo string, now time.Time) (*oidcLoginState, error) {

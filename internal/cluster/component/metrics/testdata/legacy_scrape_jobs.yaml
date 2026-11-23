@@ -1,0 +1,264 @@
+global:
+  scrape_interval: 30s
+  scrape_timeout: 30s
+jobs:
+  external_custom:
+    job_name: accelerator-exporter-nvidia-gpu
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - operator-system
+        role: pod
+        selectors:
+          - label: app=nvidia-dcgm-exporter
+            role: pod
+    metrics_path: /custom-metrics
+    relabel_configs:
+      - &rule1
+        action: replace
+        regex: (.+)
+        replacement: $1:9400
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - &rule2
+        action: replace
+        source_labels:
+          - __meta_kubernetes_pod_node_name
+        target_label: node
+      - &rule3
+        action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: namespace
+      - &rule4
+        action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: pod
+      - &rule5
+        replacement: cluster-a
+        target_label: neutree_cluster
+      - &rule6
+        replacement: workspace-a
+        target_label: workspace
+      - &rule7
+        replacement: nvidia_gpu
+        target_label: accelerator_type
+  external_global:
+    job_name: accelerator-exporter-nvidia-gpu
+    kubernetes_sd_configs:
+      - role: pod
+        selectors:
+          - label: app=nvidia-dcgm-exporter
+            role: pod
+    relabel_configs:
+      - *rule1
+      - *rule2
+      - *rule3
+      - *rule4
+      - *rule5
+      - *rule6
+      - *rule7
+  managed_exporter:
+    job_name: accelerator-exporter-nvidia-gpu
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: neutree.ai/accelerator-type=nvidia_gpu,neutree.ai/metrics-target=accelerator-exporter
+            role: pod
+    relabel_configs:
+      - &rule8
+        action: replace
+        regex: (.+)
+        replacement: $1:19400
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - *rule2
+      - *rule3
+      - *rule4
+      - *rule5
+      - *rule6
+      - *rule7
+  monitor:
+    job_name: hami-vgpu-monitor
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: app.kubernetes.io/component=hami-device-plugin
+            role: pod
+    relabel_configs:
+      - &rule9
+        action: replace
+        regex: (.+)
+        replacement: $1:9394
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - *rule2
+      - &rule10
+        action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: monitor_namespace
+      - &rule11
+        action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: monitor_pod
+      - *rule5
+      - *rule6
+  node_agent:
+    job_name: neutree-node-agent
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: neutree.ai/metrics-target=node-agent
+            role: pod
+    relabel_configs:
+      - &rule12
+        action: keep
+        regex: metrics
+        source_labels:
+          - __meta_kubernetes_pod_container_port_name
+      - &rule13
+        action: replace
+        regex: (.+)
+        replacement: $1:19101
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - *rule2
+      - *rule3
+      - *rule4
+      - *rule5
+      - *rule6
+  neutree-kube-state-metrics:
+    job_name: neutree-kube-state-metrics
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: app=neutree-kube-state-metrics
+            role: pod
+    relabel_configs:
+      - action: keep
+        regex: http-metrics
+        source_labels:
+          - __meta_kubernetes_pod_container_port_name
+      - action: replace
+        regex: (.+)
+        replacement: $1:8080
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: monitor_namespace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: monitor_pod
+      - replacement: cluster-a
+        target_label: neutree_cluster
+      - replacement: workspace-a
+        target_label: workspace
+  neutree-router:
+    job_name: neutree-router
+    kubernetes_sd_configs:
+      - namespaces:
+          names:
+            - neutree-system
+        role: pod
+        selectors:
+          - label: app=router
+            role: pod
+    relabel_configs:
+      - action: keep
+        regex: cluster-a
+        source_labels:
+          - __meta_kubernetes_pod_label_cluster
+      - action: keep
+        regex: workspace-a
+        source_labels:
+          - __meta_kubernetes_pod_label_workspace
+      - action: replace
+        regex: (.+)
+        replacement: $1:8000
+        source_labels:
+          - __meta_kubernetes_pod_ip
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_namespace
+        target_label: namespace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_cluster
+        target_label: neutree_cluster
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_workspace
+        target_label: workspace
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_label_app
+        target_label: app
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_pod_name
+        target_label: pod
+      - replacement: Router
+        target_label: deployment
+  node-exporter-http:
+    job_name: node-exporter-http
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - action: replace
+        regex: ([^:]+)(?::\d+)?
+        replacement: $1:19100
+        source_labels:
+          - __address__
+        target_label: __address__
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_node_name
+        target_label: instance
+      - action: replace
+        source_labels:
+          - __meta_kubernetes_node_name
+        target_label: node
+      - replacement: cluster-a
+        target_label: neutree_cluster
+      - replacement: workspace-a
+        target_label: workspace
+    scheme: http
+monitor_order:
+  - neutree-router
+  - neutree-inference
+  - node-exporter-http
+  - neutree-node-agent
+  - accelerator-exporter-nvidia-gpu
+  - hami-vgpu-monitor
+  - neutree-kube-state-metrics
+order:
+  - neutree-router
+  - neutree-inference
+  - node-exporter-http
+  - neutree-node-agent
+  - accelerator-exporter-nvidia-gpu
+  - neutree-kube-state-metrics

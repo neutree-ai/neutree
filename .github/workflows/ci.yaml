@@ -84,3 +84,14 @@ jobs:
         env:
           PYTHONPATH: cluster-image-builder
         run: python -m pytest -q cluster-image-builder/serve/_utils cluster-image-builder/serve/vllm
+
+  offline-images-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: v4.1.3
+      - name: Check the offline image list is up to date
+        run: make check-images-list

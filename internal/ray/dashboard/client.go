@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ type DashboardService interface {
 	GetServeApplications() (*RayServeApplicationsResponse, error)
 	UpdateServeApplications(appsReq RayServeApplicationsRequest) error
 	GetActorLog(actorID, suffix string, lines int) (string, error)
+	GetActorLogHead(ctx context.Context, actorID, suffix string, maxBytes int64) (string, error)
 
 	// State API: actor listing with filters
 	ListActors(filters []ActorFilter, detail bool, limit int) (*ActorsResponse, error)

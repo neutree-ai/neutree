@@ -10,8 +10,8 @@ import (
 // seedDetailedUsage writes the single api_daily_usage row a key gets for one day
 // (api_daily_usage_key_date_idx is unique on key+date), carrying every
 // "<endpoint_type>|<endpoint_name>|<model>" dimension in its
-// detailed_dimensional_usage -- the shape sync_api_key_usage accumulates
-// (054_usage_statistics_enhance.up.sql:131). total_usage is their sum, as the
+// detailed_dimensional_usage -- the shape sync_api_key_usage accumulates.
+// total_usage is their sum, as the
 // real aggregation keeps the two in step.
 //
 // endpoint_type here MUST be the ledger's own spelling -- "endpoint" /
@@ -461,7 +461,8 @@ func TestApiKeyPerModelQuotaValidation(t *testing.T) {
 	})
 
 	t.Run("leaves overlapping entries alone when no entry is limited", func(t *testing.T) {
-		// 078 migrated legacy name-only entries into this shape, so overlap must
+		// The allowed_models endpoint-scope migration moved legacy name-only
+		// entries into this shape, so overlap must
 		// stay legal for keys that carry no per-model quota; otherwise existing keys
 		// would start failing on their next edit.
 		const legacy = `{"allowed_models":[{"model":"m"},{"model":"m","type":"external"},{"model":"m","type":"external","endpoint_name":"ep"}]}`

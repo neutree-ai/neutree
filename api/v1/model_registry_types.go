@@ -37,7 +37,7 @@ const (
 // whose contents are on someone else's hub.
 //
 // This is one half of a pair. The other is api.visibility(), last redefined in
-// db/migrations/088_model_registry_visibility_model_scope.up.sql, which answers
+// the model_registry_visibility_model_scope migration, which answers
 // the same question for clients reading the resource through PostgREST.
 // A public kind added to one and not the other is not a build failure and not a
 // visible error: the registry simply reports itself private, and the UI then

@@ -76,6 +76,8 @@ const (
 )
 
 type EndpointStatus struct {
+	// ServedModels preserves the order reported by the inference instance's /v1/models API.
+	ServedModels       []string               `json:"served_models,omitempty"`
 	KVCache            *EndpointKVCacheStatus `json:"kv_cache,omitempty"`
 	Phase              EndpointPhase          `json:"phase,omitempty"`
 	ServiceURL         string                 `json:"service_url,omitempty"`
@@ -94,10 +96,13 @@ type EndpointResourceStatus struct {
 }
 
 type ReplicaDeviceAllocation struct {
-	InstanceID string             `json:"instance_id"`
-	ReplicaID  string             `json:"replica_id,omitempty"`
-	NodeID     string             `json:"node_id,omitempty"`
-	Devices    []DeviceAllocation `json:"devices,omitempty"`
+	InstanceID         string             `json:"instance_id"`
+	ReplicaID          string             `json:"replica_id,omitempty"`
+	NodeID             string             `json:"node_id,omitempty"`
+	ContainerID        string             `json:"container_id,omitempty"`
+	ModelWeightsMiB    *float64           `json:"model_weights_mib,omitempty"`
+	KVCacheCapacityMiB *float64           `json:"kv_cache_capacity_mib,omitempty"`
+	Devices            []DeviceAllocation `json:"devices,omitempty"`
 }
 
 type DeviceAllocation struct {

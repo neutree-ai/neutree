@@ -18,6 +18,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -38,6 +39,16 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 
 // CreateProxyHandlerWithTransport creates a reverse proxy handler with custom transport
 func CreateProxyHandlerWithTransport(targetURL string, path string, modifyRequest func(*http.Request), transport http.RoundTripper) gin.HandlerFunc {
+	return createProxyHandler(targetURL, path, modifyRequest, transport, nil)
+}
+
+// CreatePostgrestProxyHandler creates a reverse proxy handler for PostgREST.
+func CreatePostgrestProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
+	return createProxyHandler(targetURL, path, modifyRequest, nil, postgrestConnectionErrorAs503)
+}
+
+func createProxyHandler(targetURL string, path string, modifyRequest func(*http.Request), transport http.RoundTripper,
+	modifyResponse func(*http.Response) error) gin.HandlerFunc {
 	target, err := url.Parse(fmt.Sprintf("%s/%s", targetURL, path))
 	if err != nil {
 		klog.Errorf("Failed to parse target URL: %v", err)
@@ -50,6 +61,7 @@ func CreateProxyHandlerWithTransport(targetURL string, path string, modifyReques
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ModifyResponse = modifyResponse
 
 	// Set custom transport if provided
 	if transport != nil {
@@ -188,7 +200,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+		serviceURL, err := utils.FormatServiceURL(&clusters[0], &endpoints[0])
 		if err != nil {
 			errS := fmt.Sprintf("Failed to get cluster serve address: %v", err)
 			klog.Errorf(errS)
@@ -198,8 +210,6 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-
-		serviceURL := fmt.Sprintf("%s://%s:%d/%s/%s", scheme, host, port, workspace, endpoints[0].Metadata.Name)
 
 		path := c.Param("path")
 		if path != "" && path[0] == '/' {
@@ -310,10 +320,22 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
+// CreatePostgrestAuthModifier sets the Authorization PostgREST sees for the
+// caller: the token minted for an API key, otherwise the caller's own bearer
+// token as received. Requests built from scratch need it as much as proxied ones.
 func CreatePostgrestAuthModifier(c *gin.Context) func(*http.Request) {
 	return func(req *http.Request) {
 		if postgrestToken, exists := middleware.GetPostgrestToken(c); exists && postgrestToken != "" {
 			req.Header.Set("Authorization", "Bearer "+postgrestToken)
+			return
+		}
+
+		if c.Request == nil {
+			return
+		}
+
+		if auth := c.Request.Header.Get("Authorization"); auth != "" {
+			req.Header.Set("Authorization", auth)
 		}
 	}
 }
@@ -327,7 +349,7 @@ func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 
 		path = "rpc/" + path
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, CreatePostgrestAuthModifier(c))
+		proxyHandler := CreatePostgrestProxyHandler(deps.StorageAccessURL, path, CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
 }

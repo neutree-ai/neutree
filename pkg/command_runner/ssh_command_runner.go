@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/command"
 )
 
 var (
@@ -59,6 +60,7 @@ type ProcessExecute func(ctx context.Context, name string, args []string) ([]byt
 type SSHCommandRunner struct {
 	nodeID         string
 	processExecute ProcessExecute
+
 	sshPrivateKey  string
 	sshUser        string
 	sshControlPath string
@@ -74,10 +76,17 @@ type CommonArgs struct {
 }
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
-func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string, processExecute ProcessExecute) *SSHCommandRunner {
+func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string,
+	processExecute ProcessExecute) *SSHCommandRunner {
+	if processExecute == nil {
+		executor := &command.OSExecutor{}
+		processExecute = executor.Execute
+	}
+
 	return &SSHCommandRunner{
 		nodeID:         nodeID,
 		processExecute: processExecute,
+
 		sshPrivateKey:  authConfig.SSHPrivateKey,
 		sshUser:        authConfig.SSHUser,
 		sshControlPath: sshControlPath,
@@ -88,7 +97,9 @@ func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshCon
 // Run runs a command over SSH.
 func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
 	environmentVariables map[string]interface{}, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
-	sshCommand := []string{"ssh"}
+	// Override RequestTTY from SSH config: a remote PTY merges stdout and stderr
+	// before the local executor can capture them separately.
+	sshCommand := []string{"ssh", "-T"}
 
 	if portForward != nil {
 		for _, pf := range portForward {
@@ -129,17 +140,12 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 
 	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:])
 	if err != nil {
+		message := "SSH command failed"
 		if exitOnFail {
-			return "", fmt.Errorf("command failed:\n\n  %s\n", strings.Join(sshCommand, " "))
+			message = "command failed"
 		}
 
-		failMsg := "SSH command failed."
-		if len(output) > 0 {
-			failMsg += "\n" + string(output)
-			failMsg += "\nSee above for the output from the failure."
-		}
-
-		return "", errors.New(failMsg)
+		return "", fmt.Errorf("%s: %w", message, err)
 	}
 
 	if withOutput {
@@ -162,16 +168,9 @@ func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []str
 	connectCommand = append(connectCommand, sshCommand[last])
 	connectCommand = append(connectCommand, "uptime")
 
-	output, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
-	if err != nil {
-		if outputText := strings.TrimSpace(string(output)); outputText != "" {
-			return fmt.Errorf("%w: %s", err, outputText)
-		}
+	_, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
 
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []string {

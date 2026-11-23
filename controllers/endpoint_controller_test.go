@@ -1,6 +1,9 @@
 package controllers
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) *EndpointController {
@@ -637,6 +641,174 @@ func Test_PrepareStatusForUpdate_UsesExplicitModelDownloadHash(t *testing.T) {
 				Phase:                      v1.EndpointPhaseDEPLOYING,
 				ModelDownloadCompletedHash: tt.newHash,
 			}))
+		})
+	}
+}
+
+func TestFetchServedModels(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		want    []string
+		wantErr bool
+	}{
+		{name: "ordered unique models", body: `{"data":[{"id":"alias-b"},{"id":"alias-a"},{"id":"alias-b"}]}`, want: []string{"alias-b", "alias-a"}},
+		{name: "empty list", body: `{"data":[]}`, want: []string{}},
+		{name: "keeps exact model identity", body: `{"data":[{"id":" model "}]}`, want: []string{" model "}},
+		{name: "blank ids are skipped", body: `{"data":[{"id":""},{"id":"alias-a"},{"id":" "}]}`, want: []string{"alias-a"}},
+		{name: "only blank ids", body: `{"data":[{"id":""}]}`, want: []string{}},
+		{name: "server failure", status: http.StatusServiceUnavailable, body: `{"data":[]}`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/team%2Fa/model%3Fname/v1/models", r.URL.EscapedPath())
+				assert.Equal(t, http.MethodGet, r.Method)
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				_, _ = fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{DashboardURL: server.URL}}
+			endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Workspace: "team/a", Name: "model?name"}}
+			got, err := fetchServedModels(cluster, endpoint)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestServedModelsProbeBypassesEnvironmentProxy(t *testing.T) {
+	transport, ok := servedModelsClient.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Nil(t, transport.Proxy)
+}
+
+func TestEndpointServedModelsStatus(t *testing.T) {
+	c := &EndpointController{}
+	endpoint := ep(1, v1.EndpointPhaseRUNNING)
+	endpoint.Status.ServedModels = []string{"first", "second"}
+	cases := []struct {
+		name    string
+		models  []string
+		want    []string
+		changed bool
+	}{
+		{name: "preserve observation when not refreshed", models: nil, want: []string{"first", "second"}},
+		{name: "same models", models: []string{"first", "second"}, want: []string{"first", "second"}},
+		{name: "first model changed", models: []string{"second", "first"}, want: []string{"second", "first"}, changed: true},
+		{name: "successful empty collection", models: []string{}, want: []string{}, changed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: tc.models}
+			assert.Equal(t, tc.changed, c.shouldUpdateStatus(endpoint, status))
+			c.prepareStatusForUpdate(endpoint, status)
+			assert.Equal(t, tc.want, status.ServedModels)
+		})
+	}
+	assert.False(t, c.shouldUpdateStatus(ep(1, v1.EndpointPhaseRUNNING), &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{}}))
+}
+
+func TestEndpointServedModelsRetainedWithoutObservation(t *testing.T) {
+	c := &EndpointController{}
+	endpoint := ep(1, v1.EndpointPhaseRUNNING)
+	endpoint.Status.ServedModels = []string{"first"}
+
+	// A status that carries no names keeps what discovery already found.
+	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+	c.prepareStatusForUpdate(endpoint, status)
+	assert.Equal(t, []string{"first"}, status.ServedModels)
+
+	// A status written without discovery keeps the names it did not observe.
+	failed := c.formatStatus(v1.EndpointPhaseFAILED, assert.AnError)
+	c.prepareStatusForUpdate(endpoint, failed)
+	assert.Equal(t, []string{"first"}, failed.ServedModels)
+}
+
+func TestEndpointControllerCollectsModelsWhenServeURLLookupFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"runtime-alias"}]}`)
+	}))
+	defer server.Close()
+
+	original := orchestrator.NewOrchestrator
+	t.Cleanup(func() { orchestrator.NewOrchestrator = original })
+	orchestrator.NewOrchestrator = func(opts orchestrator.Options) (orchestrator.Orchestrator, error) {
+		o := &orchestratormocks.MockOrchestrator{}
+		o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}, nil)
+
+		return o, nil
+	}
+
+	store := &storagemocks.MockStorage{}
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Spec:   &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+		Status: &v1.ClusterStatus{DashboardURL: server.URL},
+	}}, nil)
+	// The two readings are independent: a failed serve-URL lookup leaves the
+	// previous URL to be retained, while the model read still runs.
+	gw := &gatewaymocks.MockGateway{}
+	gw.On("GetEndpointServeUrl", mock.Anything).Return("", assert.AnError)
+
+	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Gw: gw})
+
+	status, err := c.getActualStatus(ep(1, v1.EndpointPhaseRUNNING))
+	require.NoError(t, err)
+	assert.Empty(t, status.ServiceURL)
+	assert.Equal(t, []string{"runtime-alias"}, status.ServedModels)
+}
+
+func TestEndpointControllerObservesServedModels(t *testing.T) {
+	original := orchestrator.NewOrchestrator
+	t.Cleanup(func() { orchestrator.NewOrchestrator = original })
+	cases := []struct {
+		name  string
+		phase v1.EndpointPhase
+		body  string
+		want  []string
+		// requests counts the reads of /v1/models.
+		requests int
+	}{
+		{name: "refresh running", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
+		// Every Running reconcile reads the instance again, even when the
+		// recorded names did not change.
+		{name: "unchanged observation is read again", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"previous"}]}`, want: []string{"previous"}, requests: 1},
+		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
+		{name: "successful empty clears observation", phase: v1.EndpointPhaseRUNNING, body: `{"data":[]}`, want: []string{}, requests: 1},
+		{name: "paused does not probe", phase: v1.EndpointPhasePAUSED, want: []string{"previous"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				assert.Equal(t, "/default/test-endpoint-1/v1/models", r.URL.Path)
+				_, _ = fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			store := &storagemocks.MockStorage{}
+			store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{DashboardURL: server.URL}}}, nil)
+			o := &orchestratormocks.MockOrchestrator{}
+			o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{Phase: tc.phase}, nil)
+			c := newTestEndpointController(store, o)
+			endpoint := ep(1, v1.EndpointPhaseRUNNING)
+			endpoint.Status.ServedModels = []string{"previous"}
+
+			status, err := c.getActualStatus(endpoint)
+			require.NoError(t, err)
+			c.prepareStatusForUpdate(endpoint, status)
+			assert.Equal(t, tc.phase, status.Phase)
+			assert.Equal(t, tc.want, status.ServedModels)
+			assert.Equal(t, tc.requests, requests)
+			store.AssertExpectations(t)
+			o.AssertExpectations(t)
 		})
 	}
 }

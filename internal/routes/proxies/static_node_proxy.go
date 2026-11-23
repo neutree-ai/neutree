@@ -11,6 +11,6 @@ func RegisterStaticNodeRoutes(group *gin.RouterGroup, middlewares []gin.HandlerF
 	proxyGroup := group.Group("/static_nodes")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.StaticNode](deps, storage.STATIC_NODE_TABLE)
+	handler := CreateStructProxyHandler[v1.StaticNode](proxyGroup, deps, storage.STATIC_NODE_TABLE)
 	proxyGroup.GET("", handler)
 }

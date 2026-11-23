@@ -48,7 +48,7 @@ cluster:
 # defaults inside profile.go.
 engines:
   vllm:
-    version: v0.31.0
+    version: v0.32.0
     old_version: v0.24.0-p2           # multi-version isolation and upgrade tests (vLLM only)
     engine_args: "dtype=half,gpu_memory_utilization=0.85"
   sglang:

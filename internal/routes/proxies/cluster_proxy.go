@@ -13,13 +13,13 @@ import (
 	"strconv"
 	"strings"
 
-	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -64,7 +64,8 @@ type ValidationInput[T any] struct {
 	Operation   clusterValidationOperation
 }
 
-func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Providers) gin.HandlerFunc {
+// storageURL is where a PATCH target is resolved, with the caller's own token.
+func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Providers, storageURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -92,7 +93,7 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 			return
 		}
 
-		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+		if validationErr := prepareClusterValidationInput(c, storageURL, input); validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
@@ -100,7 +101,7 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 		}
 
 		if err := cacheProviders.Validate(input.Current, input.New); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{Code: "10208", Message: err.Error()})
+			c.AbortWithStatusJSON(http.StatusBadRequest, providerValidationError(err, "10208"))
 			return
 		}
 
@@ -125,6 +126,13 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 
 				return
 			}
+		}
+
+		if validationErr := validateClusterRouterProxyInput(input); validationErr != nil {
+			c.JSON(validationErrStatus(validationErr), validationErr)
+			c.Abort()
+
+			return
 		}
 
 		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
@@ -195,9 +203,7 @@ func readClusterValidationInput(c *gin.Context) (*ValidationInput[v1.Cluster], *
 	return input, nil
 }
 
-func prepareClusterValidationInput(
-	s storage.Storage, input *ValidationInput[v1.Cluster],
-) *validationError {
+func prepareClusterValidationInput(c *gin.Context, storageURL string, input *ValidationInput[v1.Cluster]) *validationError {
 	if input.Operation == clusterValidationSoftDelete {
 		return nil
 	}
@@ -214,10 +220,12 @@ func prepareClusterValidationInput(
 			errors.New("cluster identity is required when patching a cluster"))
 	}
 
-	current, err := resolveClusterForPatchUpdate(s, filters)
+	current, err := resolveClusterForPatchUpdate(c, storageURL, filters)
 	if err != nil {
-		if errors.Is(err, errClusterStorageUnavailable) {
-			return internalServerValidationError()
+		var lookupErr *targetLookupError
+		if errors.As(err, &lookupErr) {
+			klog.Warningf("Failed to read the cluster a PATCH targets: %v", err)
+			return lookupErr.validationError()
 		}
 
 		return clusterPatchValidationResolutionError(err)
@@ -551,7 +559,7 @@ func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validation
 		}
 	}
 
-	if err := validateDesiredClusterVersion(input.New.GetVersion()); err != nil {
+	if err := clusterversion.ValidateDesiredClusterVersion(input.New.GetVersion()); err != nil {
 		return clusterVersionValidationError(err)
 	}
 
@@ -595,27 +603,24 @@ func validateClusterConfigurationUpdateInput(input *ValidationInput[v1.Cluster])
 	return nil
 }
 
-func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) []storage.Filter {
-	filters := queryParamsToFilters(queryParams)
+func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) url.Values {
+	filters := rowFilters(queryParams)
 	if len(filters) == 0 && patch.Metadata != nil && patch.Metadata.Workspace != "" && patch.Metadata.Name != "" {
-		filters = []storage.Filter{
-			{Column: "metadata->>workspace", Operator: "eq", Value: patch.Metadata.Workspace},
-			{Column: "metadata->>name", Operator: "eq", Value: patch.Metadata.Name},
+		filters = url.Values{
+			"metadata->>workspace": {"eq." + patch.Metadata.Workspace},
+			"metadata->>name":      {"eq." + patch.Metadata.Name},
 		}
 	}
 
 	return filters
 }
 
-// errClusterStorageUnavailable marks storage-layer failures (e.g. a database
-// outage) so they surface as internal server error responses instead of
-// client validation errors.
-var errClusterStorageUnavailable = errors.New("cluster storage unavailable")
-
-func resolveClusterForPatchUpdate(s storage.Storage, filters []storage.Filter) (*v1.Cluster, error) {
-	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
+// resolveClusterForPatchUpdate reads the PATCH target as the caller, so a row
+// the caller cannot see is neither validated against nor counted.
+func resolveClusterForPatchUpdate(c *gin.Context, storageURL string, filters url.Values) (*v1.Cluster, error) {
+	clusters, err := lookupAsCaller[v1.Cluster](c, storageURL, storage.CLUSTERS_TABLE, "*", filters)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errClusterStorageUnavailable, err)
+		return nil, err
 	}
 
 	if len(clusters) != 1 {
@@ -655,58 +660,11 @@ func clusterPatchValidationResolutionError(err error) *validationError {
 }
 
 func validateClusterVersionNotDowngrade(current *v1.Cluster, desiredVersion string) error {
-	baseline, err := currentClusterSpecVersionBaseline(current)
-	if err != nil {
-		return err
-	}
-
-	if baseline == "" {
-		if err := validateDesiredClusterVersion(desiredVersion); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	desiredIsOlder, err := semver.LessThan(desiredVersion, baseline)
-	if err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	if desiredIsOlder {
-		return fmt.Errorf(
-			"cluster version downgrade is not supported: current version is %s, desired version is %s",
-			baseline,
-			desiredVersion,
-		)
-	}
-
-	return nil
-}
-
-func validateDesiredClusterVersion(desiredVersion string) error {
-	if _, err := mastermindssemver.NewVersion(desiredVersion); err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	return nil
-}
-
-func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
 	if current == nil || current.Spec == nil {
-		return "", fmt.Errorf("current cluster spec is required")
+		return fmt.Errorf("current cluster spec is required")
 	}
 
-	baseline := current.GetVersion()
-	if baseline == "" {
-		return "", nil
-	}
-
-	if _, err := mastermindssemver.NewVersion(baseline); err != nil {
-		return "", nil
-	}
-
-	return baseline, nil
+	return clusterversion.ValidateClusterVersionUpgrade(current.GetVersion(), desiredVersion)
 }
 
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
@@ -1053,8 +1011,8 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup := group.Group("/clusters")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheProviders)
+	handler := CreateStructProxyHandler[v1.Cluster](proxyGroup, deps, storage.CLUSTERS_TABLE)
+	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheProviders, deps.StorageAccessURL)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validation, handler)

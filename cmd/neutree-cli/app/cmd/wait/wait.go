@@ -53,7 +53,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (ignored for Workspace kind)")
+	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (ignored for global kinds such as Workspace)")
 	cmd.Flags().StringVar(&opts.forCond, "for", "", "Condition to wait for: \"delete\" or \"jsonpath=.path=value\" (required)")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 5*time.Minute, "Maximum time to wait")
 	cmd.Flags().DurationVar(&opts.interval, "interval", 5*time.Second, "Poll interval")

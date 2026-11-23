@@ -10,7 +10,7 @@ type ControllerOptions struct {
 
 func NewControllerOptions() *ControllerOptions {
 	return &ControllerOptions{
-		Workers: 5,
+		Workers: 10,
 	}
 }
 

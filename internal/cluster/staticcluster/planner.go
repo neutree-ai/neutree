@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type Planner struct {
@@ -16,7 +17,7 @@ type Planner struct {
 }
 
 type AcceleratorProfileProvider interface {
-	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
+	GetAcceleratorProfile(ctx context.Context, input accelerator.AcceleratorProfileInput) (*v1.AcceleratorProfile, error)
 }
 
 type staticNodeRuntimeConfigProvider interface {

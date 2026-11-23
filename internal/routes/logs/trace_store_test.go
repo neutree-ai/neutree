@@ -86,7 +86,7 @@ func TestBaseQuery_ExcludesChunkRecords(t *testing.T) {
 	require.Len(t, fake.queries, 7)
 
 	for i, q := range fake.queries {
-		assert.Containsf(t, q, `NOT record_type:="chunk"`, "query %d: %s", i, q)
+		assert.Containsf(t, q, `NOT record_type:*`, "query %d: %s", i, q)
 	}
 }
 

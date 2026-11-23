@@ -10,6 +10,9 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	acceleratoroperator "github.com/neutree-ai/neutree/internal/accelerator/operator"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/metricsconfig"
 )
 
 type MetricsComponent struct {
@@ -25,6 +28,9 @@ type MetricsComponent struct {
 	logger     klog.Logger
 
 	inferenceScrapeRules InferenceScrapeRules
+	cacheProviders       *clustercache.Providers
+	metricsTargets       metricsconfig.Registry
+	acceleratorOperators map[string]acceleratoroperator.AcceleratorOperator
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -33,6 +39,28 @@ type MetricsComponent struct {
 // capabilities, which is also what the delete path wants.
 func (m *MetricsComponent) WithInferenceScrapeRules(rules InferenceScrapeRules) *MetricsComponent {
 	m.inferenceScrapeRules = rules
+
+	return m
+}
+
+// WithCacheProviders supplies distribution-owned cache metrics discovery.
+func (m *MetricsComponent) WithCacheProviders(providers *clustercache.Providers) *MetricsComponent {
+	m.cacheProviders = providers
+	return m
+}
+
+// WithMetricsTargets attaches the Kubernetes scrape target registry. Static
+// cluster metrics continue to use their existing configuration path.
+func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *MetricsComponent {
+	m.metricsTargets = registry
+
+	return m
+}
+
+// WithAcceleratorOperators supplies the operators selected for this cluster
+// reconcile so Metrics does not repeat cluster matching and node discovery.
+func (m *MetricsComponent) WithAcceleratorOperators(operators map[string]acceleratoroperator.AcceleratorOperator) *MetricsComponent {
+	m.acceleratorOperators = operators
 
 	return m
 }

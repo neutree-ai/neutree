@@ -1,0 +1,3 @@
+-- No-op. PostgreSQL cannot remove enum values; 'department-admin' stays in
+-- api.role_preset. The org_scoped_role_assignments down migration removes the
+-- role itself.

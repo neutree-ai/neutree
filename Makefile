@@ -1,7 +1,8 @@
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 VERSION ?= $(shell git describe --tags --always --dirty)
 UI_VERSION ?= main
-CLUSTER_VERSION ?= v1.1.0
+# Default UI version used by the Quick Start flow.
+CLUSTER_VERSION ?= v1.4.0
 LATEST ?= false
 
 IMAGE_REPO ?= docker.io

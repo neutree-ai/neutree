@@ -1,0 +1,143 @@
+{{- include "neutree.db.requireOperator" . -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "neutree.db.superuserSecretName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+type: kubernetes.io/basic-auth
+stringData:
+  username: postgres
+  password: {{ .Values.db.password | quote }}
+---
+# Owns the Cluster (the migration Job sets the ownerReference). helm keeps the
+# Cluster (resource-policy keep), so a rollback to a revision that lacks it
+# never deletes the database; it goes when this ConfigMap goes on a rollback to
+# a chart without it. helm uninstall detaches it first and keeps it (see
+# postgresql-uninstall-hook.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "neutree.db.resourcesConfigMapName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+data:
+  cluster.yaml: |
+    {{- include "neutree.db.cluster" . | nindent 4 }}
+{{- if not (include "neutree.db.deferred" .) }}
+---
+{{ include "neutree.db.cluster" . }}
+{{- end }}
+
+{{- define "neutree.db.cluster" -}}
+{{- $instances := int (include "neutree.db.instances" .) -}}
+{{- $live := include "neutree.db.liveCluster" . | fromYaml -}}
+{{- /* The Cluster is growing to HA: from one instance, or created next to the
+PostgreSQL Deployment of an earlier release. */ -}}
+{{- $growing := false -}}
+{{- if $live -}}
+{{- $sync := dig "spec" "postgresql" "synchronous" dict $live -}}
+{{- $growing = or (not $sync) (eq (dig "dataDurability" "" $sync) "preferred") -}}
+{{- else -}}
+{{- $growing = not (empty (lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" (include "neutree.fullname" .)))) -}}
+{{- end -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "neutree.db.clusterName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+  {{- include "neutree.db.resourceAnnotations" . | nindent 2 }}
+spec:
+  instances: {{ $instances }}
+  imageName: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
+  imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  # The PDB of a lone instance forbids every eviction, so a node drain would
+  # hang forever; the Deployment it replaces could always be evicted.
+  enablePDB: {{ gt $instances 1 }}
+  # A smart shutdown waits for every client to leave (180s by default), and
+  # the pooled clients never do; meanwhile no new connection is accepted.
+  smartShutdownTimeout: {{ int .Values.db.smartShutdownTimeoutSeconds }}
+  {{- if gt $instances 1 }}
+  # Restart or update the primary by switching over to a standby first
+  # (seconds of unavailability) instead of restarting it in place.
+  primaryUpdateMethod: switchover
+  {{- end }}
+  # Neutree components connect as the superuser.
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: {{ include "neutree.db.superuserSecretName" . }}
+  {{- if or .Values.db.parameters (gt $instances 1) }}
+  postgresql:
+    {{- with .Values.db.parameters }}
+    parameters:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if gt $instances 1 }}
+    # A commit returns once one standby has it, so a failover loses nothing.
+    synchronous:
+      method: any
+      number: 1
+      {{- if $growing }}
+      # "required" would stall every commit until the first standby has copied
+      # the whole database. The migration Job raises it to required once every
+      # instance is ready.
+      dataDurability: preferred
+      {{- else }}
+      dataDurability: required
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.grafanaDatabase.enabled }}
+  managed:
+    roles:
+      - name: {{ .Values.grafanaDatabase.user }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ include "neutree.grafanaDatabase.secretName" . }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.db.name }}
+      owner: {{ .Values.db.user }}
+      # Without this, CNPG generates an owner secret whose random password
+      # replaces the superuser password when the owner is postgres.
+      secret:
+        name: {{ include "neutree.db.superuserSecretName" . }}
+      localeCollate: en_US.utf8
+      localeCType: en_US.utf8
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: {{ include "neutree.fullname" . }}-postgresql-initdb
+            key: 000_init.sql
+  storage:
+    size: {{ .Values.db.persistence.size | quote }}
+    {{- with .Values.db.persistence.storageClassName }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- with .Values.db.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: {{ if include "neutree.ha.enabled" . }}required{{ else }}preferred{{ end }}
+    {{- with .Values.db.nodeSelector }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.db.tolerations }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with (dig "nodeAffinity" nil .Values.db.affinity) }}
+    nodeAffinity:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- end -}}

@@ -2376,10 +2376,26 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := newDeploymentManifestVariables()
-			k.setEngineArgs(&data, tt.endpoint, tt.engine)
+			require.NoError(t, k.setEngineArgs(&data, tt.endpoint, tt.engine))
 			assert.Equal(t, tt.expectedArgs, data.EngineArgs)
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_NormalizesKVCacheWithoutMutatingEndpoint(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+	originalArgs := map[string]interface{}{"kv_cache_memory_bytes": "8G"}
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Variables: map[string]interface{}{"engine_args": originalArgs},
+	}}
+	engine := &v1.Engine{Metadata: &v1.Metadata{Name: v1.EngineNameVLLM}}
+	data := newDeploymentManifestVariables()
+
+	require.NoError(t, k.setEngineArgs(&data, endpoint, engine))
+
+	assert.Equal(t, int64(8589934592), data.EngineArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", originalArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", endpoint.Spec.Variables["engine_args"].(map[string]interface{})["kv_cache_memory_bytes"])
 }
 
 func TestEscapeEngineArgsForTemplate(t *testing.T) {
@@ -2474,6 +2490,7 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 		"allowed_media_domains":      []string{"a.example.com", "b.example.com"},
 		"override_generation_config": map[string]interface{}{"temperature": 0.8},
 		"gpu_memory_utilization":     "0.85",
+		"kv_cache_memory_bytes":      float64(8589934592),
 		"enable_prefix_caching":      "false",
 	}
 
@@ -2484,17 +2501,67 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	assert.Equal(t, []interface{}{"a.example.com", "b.example.com"}, args["allowed_media_domains"])
 	assert.Equal(t, `{\"temperature\":0.8}`, args["override_generation_config"])
 	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
+	assert.Equal(t, "8589934592", args["kv_cache_memory_bytes"])
 	assert.Equal(t, "false", args["enable_prefix_caching"])
+}
+
+func TestBuildDeployment_VLLMLargeIntegerUsesDecimalNotation(t *testing.T) {
+	cases := []string{"vllm-v0.24.0-p2", "vllm-v0.32.0"}
+
+	for _, templateKey := range cases {
+		t.Run(templateKey, func(t *testing.T) {
+			data := DeploymentManifestVariables{
+				NeutreeVersion:  "v0.1.0",
+				ClusterName:     "test-cluster",
+				Workspace:       "test-workspace",
+				Namespace:       "default",
+				ImagePrefix:     "registry.example.com",
+				ImageRepo:       "myrepo",
+				ImageTag:        "v1.0.0",
+				ImagePullSecret: "my-secret",
+				EngineName:      v1.EngineNameVLLM,
+				EngineVersion:   "v1.0.0",
+				EndpointName:    "test-endpoint",
+				ModelArgs: map[string]interface{}{
+					"name":          "gpt-4",
+					"task":          "text-generation",
+					"path":          "/mnt/models/gpt-4",
+					"registry_type": "bentoml",
+					"registry_path": "/mnt/registry/gpt-4-model",
+					"serve_name":    "gpt-4-serve",
+				},
+				EngineArgs: map[string]interface{}{
+					"kv_cache_memory_bytes": float64(8589934592),
+				},
+				Resources: map[string]string{
+					"cpu":    "500m",
+					"memory": "1Gi",
+				},
+				RoutingLogic: "roundrobin",
+				Replicas:     1,
+			}
+
+			prepareEngineArgsForTemplate(data.EngineArgs, v1.EngineNameVLLM)
+			objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, templateKey), data)
+			require.NoError(t, err)
+
+			tokens := extractEngineCLITokens(t, objs)
+			assertFlagWithValue(t, tokens, "--kv_cache_memory_bytes", "8589934592")
+			assert.NotContains(t, tokens, "8.589934592e+09")
+		})
+	}
 }
 
 func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
 	args := map[string]interface{}{
-		"cuda_graph_bs": []interface{}{1, 2},
+		"cuda_graph_bs":  []interface{}{1, 2},
+		"context_length": float64(1048576),
 	}
 
 	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
 
 	assert.Equal(t, `[1,2]`, args["cuda_graph_bs"])
+	assert.Equal(t, "1048576", args["context_length"])
 }
 
 func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
@@ -4040,10 +4107,6 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 		templateKey string
 	}{
 		{
-			name:        "vllm-v0.31.0",
-			templateKey: "vllm-v0.31.0",
-		},
-		{
 			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",
 		},
@@ -4142,10 +4205,6 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 		name        string
 		templateKey string
 	}{
-		{
-			name:        "vllm-v0.31.0",
-			templateKey: "vllm-v0.31.0",
-		},
 		{
 			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",
@@ -4297,6 +4356,22 @@ func createTestDeployment(t *testing.T, fakeClient *FakeK8sClient, ctx *Orchestr
 		},
 	}
 	require.NoError(t, fakeClient.Create(context.Background(), dep))
+}
+
+func TestPausedEndpointRemainsPausedWhileClusterUpdates(t *testing.T) {
+	fakeClient := NewFakeK8sClient(t)
+	ctx := makePauseTestCtx(fakeClient, "chat-model")
+	ctx.Cluster.Status.Phase = v1.ClusterPhaseUpdating
+	createTestDeployment(t, fakeClient, ctx, ctx.Endpoint.Metadata.Name, 0)
+
+	o := &kubernetesOrchestrator{}
+	require.NoError(t, o.validateClusterForPauseDelete(ctx))
+	require.NoError(t, o.pauseEndpoint(ctx))
+
+	status, err := o.getEndpointStats(fakeClient, util.ClusterNamespace(ctx.Cluster), ctx.Cluster, ctx.Endpoint)
+	require.NoError(t, err)
+	assert.Equal(t, v1.EndpointPhasePAUSED, status.Phase)
+	assert.Empty(t, status.ErrorMessage)
 }
 
 func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
@@ -4691,4 +4766,19 @@ func TestKubernetesOrchestratorValidateDependenciesClassifiesNotReady(t *testing
 			assert.Equal(t, tt.notReady, isDependencyNotReady(err))
 		})
 	}
+}
+
+func TestEndpointStatusDoesNotReportOldSpecAsRunning(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	ep := &v1.Endpoint{Metadata: &v1.Metadata{Name: "ep"}, Spec: &v1.EndpointSpec{}}
+	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ep", Namespace: "ns", Annotations: map[string]string{annEndpointSpecHash: "previous"}}}
+	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"endpoint": "ep"}}
+	require.NoError(t, corev1.AddToScheme(scheme))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).Build()
+	o := &kubernetesOrchestrator{}
+	status, err := o.getEndpointStats(c, "ns", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep)
+	require.NoError(t, err)
+	require.Equal(t, v1.EndpointPhaseDEPLOYING, status.Phase)
+	require.Contains(t, status.ErrorMessage, "current endpoint configuration")
 }

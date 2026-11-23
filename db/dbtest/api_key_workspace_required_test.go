@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestCreateApiKeyRequiresWorkspace covers 079_api_key_workspace_required.
+// TestCreateApiKeyRequiresWorkspace covers the api_key_workspace_required migration.
 //
 // An API key is always scoped to one workspace, but p_workspace used to accept
 // null: nothing rejected it and the resulting key had a null metadata.workspace.

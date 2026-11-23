@@ -685,7 +685,7 @@ func staticRayDashboardNodesForTest() []v1.NodeSummary {
 	}
 }
 
-func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkipsUnhealthyAllocatable(t *testing.T) {
+func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsIncludesUnhealthyCapacity(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
@@ -757,11 +757,14 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkips
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, allocatableProduct.Virtualization)
 	assert.Equal(t, float64(2), allocatableProduct.Quantity)
-	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
-	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
+	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
+	assert.Equal(t, resources.Allocatable.AcceleratorGroups, resources.Available.AcceleratorGroups)
 	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
 	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[0].Allocatable.MemoryMiB)
-	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[1].Allocatable.MemoryMiB)
+	assert.False(t, resources.NodeResources["192.168.19.218"].Devices[1].Health)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, resources.NodeResources["192.168.19.218"].Devices[1].Allocatable)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, resources.NodeResources["192.168.19.218"].Devices[1].Available)
 	mockDashboard.AssertExpectations(t)
 	store.AssertExpectations(t)
 }

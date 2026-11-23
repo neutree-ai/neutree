@@ -1,0 +1,65 @@
+{{- /*
+The PostgreSQL Deployment of earlier releases stays as the source of the
+migration Job and as the rollback target. Everything that would restart it or
+re-route its Service is taken from the live objects, so an upgrade leaves it
+exactly as it is. Delete these objects by hand once the upgrade is confirmed.
+*/ -}}
+{{- $fullname := include "neutree.fullname" . -}}
+{{- $deploy := lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" $fullname) -}}
+{{- if $deploy }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-postgresql
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $deploy.spec.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    {{- toYaml $deploy.spec.selector | nindent 4 }}
+  template:
+    {{- toYaml $deploy.spec.template | nindent 4 }}
+{{- with (lookup "v1" "Service" .Release.Namespace (printf "%s-postgresql-service" $fullname)) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-postgresql-service
+  labels:
+    {{- include "neutree.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: neutree-postgresql
+spec:
+  type: {{ .spec.type }}
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: http
+  selector:
+    {{- toYaml .spec.selector | nindent 4 }}
+{{- end }}
+{{- with (lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-postgresql-pvc" $fullname)) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-postgresql-pvc
+  labels:
+    {{- include "neutree.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+# Same fields as the earlier template rendered: a rollback patches this
+# manifest back into that one, and a bound claim's spec is immutable.
+spec:
+  {{- with $.Values.db.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  accessModes:
+    {{- toYaml .spec.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .spec.resources.requests.storage | quote }}
+{{- end }}
+{{- end }}

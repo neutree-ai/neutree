@@ -67,7 +67,7 @@ func TestSelectClusterAcceleratorPlanExternalUsesExporterNodeSelector(t *testing
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				Namespace:   "monitoring",
 				PodSelector: map[string]string{"app": "external-exporter"},
 				Port:        9400,
@@ -101,7 +101,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsUnmatchedExporterSelector(t *t
 		Exporter: &metricsAcceleratorExporter{
 			NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 		},
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},
@@ -139,7 +139,7 @@ func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *t
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/gpu": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				PodSelector: map[string]string{"app": "nvidia-exporter"},
 				Port:        9400,
 			},
@@ -149,7 +149,7 @@ func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *t
 			Exporter: &metricsAcceleratorExporter{
 				NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
 			},
-			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			ExporterTarget: &v1.MetricsTargetProfile{
 				PodSelector: map[string]string{"app": "vendor-exporter"},
 				Port:        9401,
 			},
@@ -178,7 +178,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporter(t *testi
 
 	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},
@@ -207,7 +207,7 @@ func TestSelectClusterAcceleratorPlanExternalSkipsEmptyExporterSelector(t *testi
 	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
 		AcceleratorType: "vendor_accelerator",
 		Exporter:        &metricsAcceleratorExporter{},
-		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+		ExporterTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "external-exporter"},
 			Port:        9400,
 		},
@@ -253,4 +253,33 @@ func TestSelectClusterAcceleratorPlanSkipsWhenNoMatch(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Nil(t, matches)
+}
+
+func TestSelectClusterAcceleratorPlanUsesOperatorMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		operatorManaged bool
+		clientLabel     string
+		wantSelected    bool
+	}{
+		{name: "Operator keeps plan while client is not ready", operatorManaged: true, clientLabel: "pending", wantSelected: true},
+		{name: "Operator keeps plan before client label exists", operatorManaged: true, wantSelected: true},
+		{name: "Legacy retains full selector matching", clientLabel: "pending"},
+		{name: "Legacy matches ready nodes", clientLabel: "ready", wantSelected: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeLabels := map[string]string{"vendor.example/device": "present"}
+			if tc.clientLabel != "" {
+				nodeLabels["vendor.example/client"] = tc.clientLabel
+			}
+			component := &MetricsComponent{ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("device-node", nodeLabels)).Build()}
+			selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
+				AcceleratorType: "vendor_accelerator", OperatorManaged: tc.operatorManaged,
+				Exporter:       &metricsAcceleratorExporter{NodeSelector: map[string]string{"vendor.example/device": "present", "vendor.example/client": "ready"}},
+				ExporterTarget: &v1.MetricsTargetProfile{Port: 19400, MetricsPath: "/metrics"},
+			}})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSelected, len(selected) == 1)
+		})
+	}
 }

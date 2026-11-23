@@ -4,6 +4,7 @@
 #   2. pair rule        — every new migration ships matching *.up.sql and *.down.sql files
 #   3. version uniqueness — every NNN_ prefix is claimed by exactly one migration
 #   4. new migrations must not duplicate seed-owned PostgREST reload NOTIFY
+#   5. LATEST records the complete name of the highest-numbered migration
 #
 # Gate 3 exists because git cannot see the collision: 085_a.up.sql and
 # 085_b.up.sql are two unrelated new files, so two PRs adding the same number
@@ -11,6 +12,7 @@
 # deploy runs the migrations — so the breakage lands far from the change.
 #
 # Modes:
+#   --update-latest   — generate and stage LATEST from the index, then exit
 #   no arg            — pre-commit mode: inspects staged additions (git diff --cached)
 #   <ref>             — CI mode: inspects additions on HEAD since merge-base with <ref>
 #                       (e.g. 'origin/main' for PR-against-main)
@@ -26,6 +28,11 @@ set -euo pipefail
 
 FAIL=0
 BASE="${1:-}"
+UPDATE_LATEST=0
+if [ "$BASE" = "--update-latest" ]; then
+  UPDATE_LATEST=1
+  BASE=""
+fi
 if [ -n "$BASE" ]; then
   if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null 2>&1; then
     echo "❌ Migration guard cannot resolve base ref: $BASE" >&2
@@ -75,6 +82,44 @@ show_migration() {
   fi
 }
 
+# LATEST describes the checked commit/index, not the union with the base tree.
+# The full name makes concurrent additions (e.g. 116_a / 116_b) conflict in Git.
+if [ -n "$BASE" ]; then
+  LATEST_TREE=$(git ls-tree -r --name-only HEAD -- db/migrations/)
+else
+  LATEST_TREE="$TREE"
+fi
+LATEST=$(echo "$LATEST_TREE" | migration_names | LC_ALL=C sort -t _ -k1,1n | tail -1)
+if [ "$UPDATE_LATEST" = 1 ]; then
+  printf '%s\n' "$LATEST" > db/migrations/LATEST
+  git add -- db/migrations/LATEST
+  exit 0
+fi
+if ! diff -q <(printf '%s\n' "$LATEST") <(show_migration db/migrations/LATEST 2>/dev/null) >/dev/null; then
+  echo "❌ db/migrations/LATEST must contain: $LATEST"
+  echo "   ✅ FIX: stage your migrations, then run bash scripts/check-migrations.sh --update-latest"
+  FAIL=1
+fi
+
+if [ -n "$BASE" ]; then
+  BASE_TREE=$(git ls-tree -r --name-only "$BASE" -- db/migrations/)
+else
+  BASE_TREE=$(git ls-tree -r --name-only HEAD -- db/migrations/)
+fi
+
+# True when the migration at $1 shares its version with another migration on
+# the base branch.
+is_base_duplicate() {
+  [[ "$1" =~ $MIGRATION_FILE_RE ]] || return 1
+  local name version count
+  name=$(echo "$1" | migration_names)
+  version=$((10#${name%%_*}))
+  count=$(echo "$BASE_TREE" | migration_names | while read -r n; do
+    [ "$((10#${n%%_*}))" = "$version" ] && echo "$n"
+  done | wc -l)
+  [ "$count" -gt 1 ]
+}
+
 # ── Gate 1: historical migrations are immutable ──
 while IFS=$'\t' read -r status source target; do
   [ -z "$status" ] && continue
@@ -99,6 +144,11 @@ while IFS=$'\t' read -r status source target; do
       fi
       ;;
     R*)
+      # Renaming one of two migrations that share a version on the base branch
+      # is the only way to repair the collision, so allow an exact rename.
+      if [ "$status" = "R100" ] && is_base_duplicate "$source"; then
+        continue
+      fi
       if [[ "$source" =~ $MIGRATION_FILE_RE ]] || [[ "$target" =~ $MIGRATION_FILE_RE ]]; then
         echo "❌ Historical migration file cannot be renamed: $source -> $target"
         echo "   ✅ FIX: keep released migration files unchanged and add a new migration instead"

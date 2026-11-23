@@ -170,6 +170,78 @@ describe("make_message_start()", function()
     end)
 end)
 
+describe("anthropic stream translation termination (NEU-875)", function()
+    local previous_kong, previous_ngx
+
+    before_each(function()
+        previous_kong, previous_ngx = _G.kong, _G.ngx
+    end)
+    after_each(function()
+        _G.kong, _G.ngx = previous_kong, previous_ngx
+    end)
+
+    -- Mirror the per-request state access() seeds before streaming, plus the
+    -- bits only finish_stream consumes (request_model / usage estimate).
+    local function new_ctx()
+        return {
+            message_started = false,
+            open_block_type = nil,
+            current_tool_index = nil,
+            next_block_index = 0,
+            anthropic_block_index = 0,
+            pending_signature = nil,
+            sse_buffer = "",
+            input_tokens = 0,
+            output_tokens = 0,
+            output_chars = 0,
+            usage_seen = false,
+            saw_event = false,
+            finish_events_sent = false,
+            request_model = "m",
+            input_tokens_estimate = 0,
+        }
+    end
+
+    -- Feed upstream chunks through handle_anthropic_stream_body (one call per
+    -- chunk, last one with the end-of-stream flag) and return the translated
+    -- SSE the client would receive.
+    local function translate(chunks)
+        local ctx = new_ctx()
+        _G.kong = { ctx = { plugin = ctx } }
+        local out = {}
+        for i, chunk in ipairs(chunks) do
+            _G.ngx = { arg = { chunk, i == #chunks }, now = function() return 0 end }
+            T.handle_anthropic_stream_body()
+            out[#out + 1] = _G.ngx.arg[1]
+        end
+        return table.concat(out)
+    end
+
+    local content_chunk = 'data: {"id":"1","model":"m","choices":'
+        .. '[{"delta":{"content":"hi"},"index":0}]}\n\n'
+    local stop_chunk = 'data: {"id":"1","choices":[{"delta":{},"finish_reason":"stop","index":0}],'
+        .. '"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\n'
+
+    local function assert_anthropic_terminated(out)
+        assert.is_false(has(out, "[DONE]"), "anthropic stream must not contain [DONE]")
+        assert.is_true(has(out, "event: message_stop"))
+        -- message_stop is the final frame and appears exactly once.
+        local _, count = out:gsub("event: message_stop", "")
+        assert.are.equal(1, count)
+        assert.is_truthy(out:find("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n$"))
+    end
+
+    it("ends at message_stop without [DONE] when the upstream sends [DONE]", function()
+        local out = translate({ content_chunk, stop_chunk, "data: [DONE]\n\n", "" })
+        assert_anthropic_terminated(out)
+    end)
+
+    it("ends at message_stop without [DONE] when only is_last terminates the stream", function()
+        local out = translate({ content_chunk, stop_chunk })
+        assert_anthropic_terminated(out)
+    end)
+end)
+
 describe("routing counter errors at protocol boundaries", function()
     for _, path in ipairs({ "/v1/chat/completions", "/anthropic/v1/messages" }) do
         it("returns 500 and logs the underlying failure for " .. path, function()
@@ -240,5 +312,75 @@ describe("routing trace metadata", function()
         assert.are.equal("mapped-model", values["ai.trace.upstream_model"])
         assert.is_nil(values["ai.trace.api_key"])
         assert.is_nil(values["ai.trace.routing"])
+    end)
+end)
+
+describe("set_upstream_target()", function()
+    local previous_kong, previous_ngx, socket_loaded
+    local calls
+
+    before_each(function()
+        previous_kong, previous_ngx = _G.kong, _G.ngx
+        socket_loaded = package.loaded["socket"]
+        -- Any use of LuaSocket's blocking resolver fails the test.
+        package.loaded["socket"] = setmetatable({}, {
+            __index = function() error("blocking socket resolver used") end,
+        })
+        calls = { dns = {}, headers = {}, cleared = {} }
+        _G.ngx = { var = {} }
+        _G.kong = {
+            dns = {
+                toip = function(host)
+                    calls.dns[#calls.dns + 1] = host
+                    if host == "missing.example" then
+                        return nil, "name error"
+                    end
+                    return "10.0.0.7", 0
+                end,
+            },
+            service = {
+                set_target = function(host, port) calls.target = { host, port } end,
+                request = {
+                    set_scheme = function(scheme) calls.scheme = scheme end,
+                    set_header = function(k, v) calls.headers[k] = v end,
+                    clear_header = function(k) calls.cleared[k] = true end,
+                },
+            },
+            response = { exit = function(status, body) return { status = status, body = body } end },
+        }
+    end)
+
+    after_each(function()
+        _G.kong, _G.ngx = previous_kong, previous_ngx
+        package.loaded["socket"] = socket_loaded
+    end)
+
+    it("resolves a hostname with Kong's resolver and keeps the Host header", function()
+        local ip = T.set_upstream_target({ host = "svc.ns.svc.cluster.local", port = 8000, scheme = "http" })
+        assert.are.equal("10.0.0.7", ip)
+        assert.are.same({ "svc.ns.svc.cluster.local" }, calls.dns)
+        assert.are.same({ "10.0.0.7", 8000 }, calls.target)
+        assert.are.equal("http", calls.scheme)
+        assert.are.equal("svc.ns.svc.cluster.local", calls.headers["Host"])
+        assert.are.equal("svc.ns.svc.cluster.local", ngx.var.upstream_host)
+    end)
+
+    it("connects to an IP literal directly without a lookup or Host override", function()
+        local ip = T.set_upstream_target({ host = "192.0.2.10", port = 443, scheme = "https", auth_header = "Bearer k" })
+        assert.are.equal("192.0.2.10", ip)
+        assert.are.same({}, calls.dns)
+        assert.are.same({ "192.0.2.10", 443 }, calls.target)
+        assert.is_nil(calls.headers["Host"])
+        assert.is_nil(ngx.var.upstream_host)
+        assert.are.equal("Bearer k", calls.headers["Authorization"])
+        assert.is_true(calls.cleared["Accept-Encoding"])
+    end)
+
+    it("returns 502 when the hostname does not resolve", function()
+        local ip, response = T.set_upstream_target({ host = "missing.example", port = 80, scheme = "http" })
+        assert.is_nil(ip)
+        assert.are.equal(502, response.status)
+        assert.are.equal("DNS resolution failed for upstream: missing.example (name error)", response.body.error.message)
+        assert.is_nil(calls.target)
     end)
 end)

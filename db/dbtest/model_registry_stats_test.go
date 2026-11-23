@@ -62,7 +62,7 @@ func TestModelRegistryStatusPatchReplacesWholeComposite(t *testing.T) {
 	// Populate every attribute of the composite, including ones the Go struct
 	// used for the PATCH below does not send. The attribute order is the order
 	// they were added in: phase, last_transition_time, error_message, then stats
-	// (081) and last_checked_at (084).
+	// and last_checked_at.
 	_, err := db.Exec(`UPDATE api.model_registries
 		SET status = ROW('Connected', '2026-01-01T00:00:00Z', 'previous failure',
 		                 '{"model_count": 3, "storage_bytes": 4096}'::jsonb,
@@ -159,7 +159,7 @@ func TestModelRegistryStatsSurviveConnectivityReconcile(t *testing.T) {
 
 	// The other half of the same write: the reconcile did check the registry, so
 	// the check time moves rather than being carried over. This is the only place
-	// last_checked_at (084) is exercised against a real PostgREST.
+	// last_checked_at is exercised against a real PostgREST.
 	require.NotEmpty(t, after.Status.LastCheckedAt, "a reconcile records when it checked")
 	assert.NotEqual(t, "2026-01-01T00:00:00Z", after.Status.LastCheckedAt,
 		"the seeded check time is stale, so this reconcile must have replaced it")
