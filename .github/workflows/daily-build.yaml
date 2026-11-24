@@ -5,9 +5,6 @@ on:
     - cron: "0 1 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   create_daily_tag:
     runs-on: ubuntu-latest
