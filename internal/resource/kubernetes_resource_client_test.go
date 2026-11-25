@@ -479,6 +479,94 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 	}
 }
 
+func TestK8sResourceClientListNodesReportsNodeFacts(t *testing.T) {
+	cases := []struct {
+		name        string
+		conditions  []corev1.NodeCondition
+		labels      map[string]string
+		wantReady   bool
+		wantControl bool
+	}{
+		{
+			name:       "ready control plane",
+			conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+			labels:     map[string]string{"node-role.kubernetes.io/control-plane": ""},
+			wantReady:  true, wantControl: true,
+		},
+		{
+			name:       "ready master",
+			conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+			labels:     map[string]string{"node-role.kubernetes.io/master": ""},
+			wantReady:  true, wantControl: true,
+		},
+		{
+			name:       "worker",
+			conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+			wantReady:  true,
+		},
+		{
+			name:       "not ready",
+			conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse}},
+		},
+		{
+			name:       "unknown ready condition",
+			conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionUnknown}},
+		},
+		{name: "missing ready condition"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node", Labels: testCase.labels},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{corev1.ResourceCPU: k8sresource.MustParse("2")},
+					Conditions:  testCase.conditions,
+				},
+			}
+			client := NewK8sResourceClient(fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build(), nil)
+
+			nodes, err := client.ListNodes(context.Background(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			require.NotNil(t, nodes[0].Status)
+			require.NotNil(t, nodes[0].Status.Ready)
+			require.NotNil(t, nodes[0].Status.ControlPlane)
+			assert.Equal(t, testCase.wantReady, *nodes[0].Status.Ready)
+			assert.Equal(t, testCase.wantControl, *nodes[0].Status.ControlPlane)
+		})
+	}
+}
+
+func TestK8sResourceClientListNodesExcludesUnschedulableNodesFromResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	nodes := []*corev1.Node{
+		{ObjectMeta: metav1.ObjectMeta{Name: "schedulable"}, Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: k8sresource.MustParse("2")}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "unschedulable"}, Spec: corev1.NodeSpec{Unschedulable: true}, Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: k8sresource.MustParse("8")}}},
+	}
+	objects := make([]client.Object, 0, len(nodes))
+	for _, node := range nodes {
+		objects = append(objects, node)
+	}
+	resourceClient := NewK8sResourceClient(fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build(), nil)
+
+	listed, err := resourceClient.ListNodes(context.Background(), nil)
+
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, "schedulable", listed[0].ID)
+	resources, err := NewResourceViewBuilder(resourceClient).BuildClusterResources(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(resources.NodeResources))
+	assert.Contains(t, resources.NodeResources, "schedulable")
+	assert.NotContains(t, resources.NodeResources, "unschedulable")
+	assert.Equal(t, float64(2), resources.Allocatable.CPU)
+}
+
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQuantity(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))

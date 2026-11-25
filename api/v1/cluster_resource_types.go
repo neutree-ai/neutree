@@ -55,6 +55,9 @@ type ResourceStatus struct {
 type NodeResourceStatus struct {
 	ResourceStatus `json:",inline"`
 
+	Ready        *bool `json:"ready,omitempty"`
+	ControlPlane *bool `json:"control_plane,omitempty"`
+
 	// Devices contains per-device resource details when the accelerator
 	// plugin can expose a card-level view.
 	Devices []*DeviceResource `json:"devices,omitempty"`
