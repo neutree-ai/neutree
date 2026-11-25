@@ -3330,3 +3330,45 @@ func noClusterLookup(t *testing.T) string {
 
 	return server.URL
 }
+
+func TestValidateClusterKubeconfigOnCreate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+		wantStatus int
+		wantHint   string
+	}{
+		{name: "valid kubeconfig", kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "token"), wantStatus: http.StatusNoContent},
+		{name: "spaces only", kubeconfig: "ICAg", wantStatus: http.StatusBadRequest, wantHint: "kubeconfig is empty"},
+		{name: "newline only", kubeconfig: "Cg==", wantStatus: http.StatusBadRequest, wantHint: "kubeconfig is empty"},
+		{name: "invalid base64", kubeconfig: "not-base64!", wantStatus: http.StatusBadRequest, wantHint: "failed to decode kubeconfig"},
+		{name: "decodes to non-kubeconfig text", kubeconfig: base64.StdEncoding.EncodeToString([]byte("hello")), wantStatus: http.StatusBadRequest, wantHint: "failed to create REST config"},
+		{name: "empty string is left to the database check", kubeconfig: "", wantStatus: http.StatusNoContent},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storageMocks.NewMockStorage(t)
+			proxyCalled := false
+			router := gin.New()
+			router.POST("/clusters", withCallerToken, validateClusterRequest(mockStorage, nil, noClusterLookup(t)), func(c *gin.Context) {
+				proxyCalled = true
+				c.Status(http.StatusNoContent)
+			})
+
+			body := fmt.Sprintf(`{"spec":{"type":"kubernetes","version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":%q}}}}`, tt.kubeconfig)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(body)))
+
+			assert.Equal(t, tt.wantStatus, recorder.Code)
+			assert.Equal(t, tt.wantStatus == http.StatusNoContent, proxyCalled)
+
+			if tt.wantHint != "" {
+				assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+				assert.Contains(t, recorder.Body.String(), tt.wantHint)
+			}
+		})
+	}
+}

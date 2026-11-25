@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/kubernetes"
@@ -58,6 +59,10 @@ func GetKubeConfigFromCluster(cluster *v1.Cluster) (string, error) {
 	kubeconfigContent, err := base64.StdEncoding.DecodeString(config.Kubeconfig)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to decode kubeconfig")
+	}
+
+	if strings.TrimSpace(string(kubeconfigContent)) == "" {
+		return "", errors.New("kubeconfig is empty")
 	}
 
 	return string(kubeconfigContent), nil
