@@ -43,6 +43,59 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 		t.Logf("validation correctly blocked insert with error code 10021: %v", err)
 	})
 
+	insertWithKubeconfig := func(t *testing.T, kubeconfig string) error {
+		t.Helper()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', jsonb_build_object('kubernetes_config', jsonb_build_object('kubeconfig', $1::text, 'router', '{"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}'::jsonb)), 'test-imageregistry', '', NULL::json, NULL::json)::api.cluster_spec,
+				ROW('test-cluster', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`, kubeconfig)
+
+		return err
+	}
+
+	t.Run("cluster kubeconfig decodes to whitespace only - error code 10021", func(t *testing.T) {
+		for name, kc := range map[string]string{
+			"three spaces": "ICAg",
+			"newline":      "Cg==",
+			"tab and lf":   "CQo=",
+		} {
+			err := insertWithKubeconfig(t, kc)
+			if err == nil {
+				t.Fatalf("%s: expected validation error for blank kubeconfig", name)
+			}
+
+			if !strings.Contains(err.Error(), `"code": "10021"`) {
+				t.Fatalf("%s: expected error code 10021, got: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("cluster kubeconfig valid base64 content or non-base64 is not rejected as blank", func(t *testing.T) {
+		for name, kc := range map[string]string{
+			"base64 kubeconfig": "YXBpVmVyc2lvbjogdjE=",
+			"xxxx":              "xxxx",
+			"not base64":        "apiVersion: v1",
+		} {
+			if err := insertWithKubeconfig(t, kc); err != nil {
+				t.Fatalf("%s: unexpected error: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("cluster router.replicas less than 1 - error code 10027", func(t *testing.T) {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
