@@ -11,6 +11,7 @@
   - **Pre-body unmanaged fallback**: Routes not owned by `--managed-routes` stream zero-buffered directly to `--legacy-kong-url` with original headers, credentials, and `multipart` bodies intact.
   - **Zero-buffer passthrough track**: Multimodal `multipart`, binary/audio, and custom SSE streams bypass JSON buffering while still applying auth, prefix-hash salting, and neutral usage stripping.
   - **Translated failover track**: Selects healthy upstreams by saturation, `prefix-cache` affinity (`X-Neutree-Prefix-Hash` or canonical prompt prefix), priority, and `(QueueDepth + InFlight)`, recompiling protocol and credentials across heterogeneous providers before the first response byte is sent.
+  - **Three-plane plugin lifecycle (`RequestHook` / `AttemptHook` / `SemanticHook`)**: Decouples per-request session plugins (`TelemetryPlugin`, `AccessPlugin` with dynamic `/v1/models` & `/anthropic/v1/models` filtering and per-key concurrency/rate limits, `GuardrailPlugin` via `--guardrail-block` / `--guardrail-redact`, and `QuotaPlugin`) with forward `0..k` entry and guaranteed LIFO `k..0` completion.
 
 ## Option A: Instant Trial from Source on a Linux Host (No Image Registry Needed)
 
@@ -59,6 +60,7 @@ Kong remains untouched on port `80`, while `neutree-gateway` listens on `:8080` 
    curl -fsS http://127.0.0.1:8080/healthz
    docker exec neutree-gateway wget -qO- http://127.0.0.1:8081/admin/v1/snapshot
    docker exec neutree-gateway wget -qO- http://127.0.0.1:8081/admin/v1/usage
+   docker exec neutree-gateway wget -qO- http://127.0.0.1:8081/admin/v1/telemetry
    ```
 
 2. **Cut over a single route dynamically in milliseconds** (other routes continue streaming to Kong):

@@ -29,7 +29,7 @@ func chooseCandidates(runtime *state.RuntimeTable, route state.Route, model, pre
 			targets = append(targets, mr.Targets...)
 		} else if mrWild, okWild := route.ModelRoutes["*"]; okWild {
 			targets = append(targets, mrWild.Targets...)
-		} else if len(route.ModelRoutes) > 0 && route.Kind == "external" {
+		} else if len(route.ModelRoutes) > 0 && route.Kind == routeKindExternal {
 			return nil, false
 		}
 	}

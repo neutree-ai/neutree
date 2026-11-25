@@ -36,9 +36,24 @@ func (a *gatewayApp) buildAdminMux() http.Handler {
 	mux.HandleFunc("/admin/v1/events", a.withAdminAuth(a.handleEvent))
 	mux.HandleFunc("/admin/v1/snapshot", a.withAdminAuth(a.handleSnapshot))
 	mux.HandleFunc("/admin/v1/usage", a.withAdminAuth(a.handleUsageView))
+	mux.HandleFunc("/admin/v1/telemetry", a.withAdminAuth(a.handleTelemetry))
 	mux.HandleFunc("/internal/v1/usage", a.handleUsage)
 
 	return mux
+}
+
+func (a *gatewayApp) handleTelemetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	if a.proxy.Telemetry() == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, a.proxy.Telemetry().Snapshot())
 }
 
 func (a *gatewayApp) withAdminAuth(next http.HandlerFunc) http.HandlerFunc {

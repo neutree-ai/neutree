@@ -20,6 +20,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/neutree-ai/neutree/internal/icp/protocol"
+	"github.com/neutree-ai/neutree/internal/icp/proxy"
 	"github.com/neutree-ai/neutree/internal/icp/quota"
 	"github.com/neutree-ai/neutree/internal/icp/state"
 )
@@ -171,6 +172,26 @@ func TestEndToEndGatewayAcceptance(t *testing.T) {
 
 	// Stage 5: Live Runtime & Quota events switch prefix-cache affinity and quota state in milliseconds.
 	verifyStage5LiveEventsAndPrefixAffinity(t, dataSrv.URL, adminSrv.URL, adminTok)
+
+	// Stage 6: Read-only /admin/v1/telemetry exposes aggregated request, retry, TTFT, and settled usage traces.
+	telReq, _ := http.NewRequest(http.MethodGet, adminSrv.URL+"/admin/v1/telemetry", nil)
+	telReq.Header.Set(headerAdminToken, adminTok)
+
+	telResp, err := http.DefaultClient.Do(telReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var tel proxy.TelemetrySnapshot
+	if err = json.NewDecoder(telResp.Body).Decode(&tel); err != nil {
+		_ = telResp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = telResp.Body.Close()
+
+	if telResp.StatusCode != http.StatusOK || tel.Completed < 5 || tel.Retries < 1 || len(tel.RecentRequests) == 0 {
+		t.Fatalf("unexpected /admin/v1/telemetry snapshot: %+v", tel)
+	}
 }
 
 func verifyStage1LegacyZeroBuffer(t *testing.T, dataURL string, uploadGate <-chan struct{}, sawFirstChunk *atomic.Bool) {

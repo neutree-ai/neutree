@@ -29,6 +29,7 @@ type gatewayConfig struct {
 	syncInterval, tokenTTL, leaseTTL           time.Duration
 	leaseStep                                  int64
 	dialTimeout, firstByteTimeout, idleTimeout time.Duration
+	guardrailBlock, guardrailRedact            string
 }
 
 type gatewayApp struct {
@@ -114,6 +115,8 @@ func parseFlags() gatewayConfig {
 	flag.DurationVar(&cfg.dialTimeout, "dial-timeout", 10*time.Second, "upstream dial timeout")
 	flag.DurationVar(&cfg.firstByteTimeout, "first-byte-timeout", 30*time.Second, "upstream response header timeout")
 	flag.DurationVar(&cfg.idleTimeout, "idle-timeout", 2*time.Minute, "upstream stream idle timeout")
+	flag.StringVar(&cfg.guardrailBlock, "guardrail-block", "", "comma-separated guardrail block terms")
+	flag.StringVar(&cfg.guardrailRedact, "guardrail-redact", "", "comma-separated guardrail redact terms")
 	flag.Parse()
 
 	return cfg
@@ -132,6 +135,21 @@ func newGatewayApp(cfg gatewayConfig) (*gatewayApp, error) {
 
 	engine.Drain()
 
+	secret := []byte(cfg.callbackSecret)
+	plugins := []proxy.Plugin{
+		proxy.NewTelemetryPlugin(),
+		proxy.NewAccessPlugin(proxy.AccessConfig{}),
+	}
+
+	if cfg.guardrailBlock != "" || cfg.guardrailRedact != "" {
+		plugins = append(plugins, proxy.NewGuardrailPlugin(
+			strings.Split(cfg.guardrailBlock, ","),
+			strings.Split(cfg.guardrailRedact, ","),
+		))
+	}
+
+	plugins = append(plugins, proxy.NewQuotaPlugin(leases, secret, cfg.tokenTTL))
+
 	p, err := proxy.NewServer(proxy.Config{
 		State:            engine,
 		Quota:            leases,
@@ -139,8 +157,9 @@ func newGatewayApp(cfg gatewayConfig) (*gatewayApp, error) {
 		DialTimeout:      cfg.dialTimeout,
 		FirstByteTimeout: cfg.firstByteTimeout,
 		IdleTimeout:      cfg.idleTimeout,
-		CallbackSecret:   []byte(cfg.callbackSecret),
+		CallbackSecret:   secret,
 		TokenTTL:         cfg.tokenTTL,
+		Plugins:          plugins,
 	})
 	if err != nil {
 		return nil, err
@@ -150,7 +169,7 @@ func newGatewayApp(cfg gatewayConfig) (*gatewayApp, error) {
 		engine:         engine,
 		leases:         leases,
 		proxy:          p,
-		callbackSecret: []byte(cfg.callbackSecret),
+		callbackSecret: secret,
 		adminToken:     cfg.adminToken,
 	}, nil
 }

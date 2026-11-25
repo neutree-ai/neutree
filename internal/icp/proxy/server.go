@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	headerRequestID  = "X-Neutree-Request-Id"
-	headerPrefixHash = "X-Neutree-Prefix-Hash"
-	headerUsageToken = "X-Neutree-Usage-Token" //nolint:gosec // HTTP header name, not a credential
-	defaultMaxJSON   = 32 << 20                // 32 MiB cap for JSON-decoded translated requests
+	headerRequestID   = "X-Neutree-Request-Id"
+	headerPrefixHash  = "X-Neutree-Prefix-Hash"
+	headerUsageToken  = "X-Neutree-Usage-Token" //nolint:gosec // HTTP header name, not a credential
+	defaultMaxJSON    = 32 << 20                // 32 MiB cap for JSON-decoded requests
+	contentTypeJSON   = "application/json"
+	routeKindExternal = "external"
 )
 
 type Config struct {
@@ -33,18 +35,18 @@ type Config struct {
 	MaxJSONBodyBytes int64
 	CallbackSecret   []byte
 	TokenTTL         time.Duration
+	Plugins          []Plugin
 }
 
 type Server struct {
 	State            *state.Engine
-	Quota            *quota.LeasePool
 	Client           *http.Client
 	LegacyURL        *url.URL
 	IdleTimeout      time.Duration
 	MaxJSONBodyBytes int64
-	CallbackSecret   []byte
-	TokenTTL         time.Duration
 	legacy           *httputil.ReverseProxy
+	plugins          []Plugin
+	telemetry        *TelemetryPlugin
 }
 
 func NewServer(cfg Config) (*Server, error) {
@@ -80,13 +82,26 @@ func NewServer(cfg Config) (*Server, error) {
 
 	s := &Server{
 		State:            cfg.State,
-		Quota:            cfg.Quota,
 		Client:           client,
 		LegacyURL:        parsedLegacy,
 		IdleTimeout:      idle,
 		MaxJSONBodyBytes: maxJSON,
-		CallbackSecret:   append([]byte(nil), cfg.CallbackSecret...),
-		TokenTTL:         tokenTTL,
+	}
+
+	if cfg.Plugins == nil {
+		s.telemetry = NewTelemetryPlugin()
+		s.plugins = []Plugin{
+			s.telemetry,
+			NewAccessPlugin(AccessConfig{}),
+			NewQuotaPlugin(cfg.Quota, cfg.CallbackSecret, tokenTTL),
+		}
+	} else {
+		s.plugins = append([]Plugin(nil), cfg.Plugins...)
+		for _, p := range s.plugins {
+			if t, ok := p.(*TelemetryPlugin); ok {
+				s.telemetry = t
+			}
+		}
 	}
 
 	if parsedLegacy != nil {
@@ -97,6 +112,10 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Server) Telemetry() *TelemetryPlugin {
+	return s.telemetry
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -110,20 +129,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		writeJSONError(w, http.StatusNotFound, "route_not_found", "no managed route matched request path")
+		writePluginResponse(w, &RequestContext{}, errorResponse(http.StatusNotFound, "route_not_found", "", "no managed route matched request path"))
 
-		return
-	}
-
-	// 2. Authenticate client API key & check workspace boundary.
-	key, ok := state.ExtractAPIKey(r, snap)
-	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid API key")
-		return
-	}
-
-	if key.Workspace != "" && key.Workspace != route.Workspace {
-		writeJSONError(w, http.StatusForbidden, "forbidden", "API key cannot access target workspace")
 		return
 	}
 
@@ -134,20 +141,59 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set(headerRequestID, reqID)
 
-	// 3. Dual-track dispatch: JSON POST on a known text inference subpath enters translated+retry track;
-	// multipart, binary, audio, embeddings, OCR, and custom endpoints enter zero-buffer passthrough track.
+	isModelList := isModelListRequest(r.Method, route.SubPath)
 	srcProto, isTextProto := protocol.DetectProtocol(route.SubPath)
+
+	if isModelList && strings.HasPrefix(strings.TrimRight(route.SubPath, "/"), "/anthropic/") {
+		srcProto = protocol.ProtocolAnthropicMessages
+	}
+
+	track := TrackPassthrough
 	if isTextProto && r.Method == http.MethodPost && isJSONContentType(r.Header.Get("Content-Type")) {
-		s.forwardTranslated(w, r, snap, route, key, reqID, srcProto)
+		track = TrackTranslated
+	}
+
+	ctx, cancel := context.WithCancelCause(r.Context())
+	defer cancel(nil)
+
+	rc := &RequestContext{
+		Context:           ctx,
+		Cancel:            cancel,
+		Writer:            w,
+		Request:           r,
+		Snapshot:          snap,
+		Route:             route,
+		RequestID:         reqID,
+		Track:             track,
+		SourceProtocol:    srcProto,
+		IsModelList:       isModelList,
+		RequestBody:       r.Body,
+		RequestBodyLength: r.ContentLength,
+	}
+
+	stack, shortResp := s.beginHooks(rc)
+	defer stack.complete(rc)
+
+	if shortResp != nil {
+		writePluginResponse(w, rc, shortResp)
 		return
 	}
 
-	s.forwardPassthrough(w, r, snap, route, key, reqID)
+	if track == TrackTranslated {
+		s.executeTranslated(w, r, rc, stack)
+		return
+	}
+
+	s.executePassthrough(w, r, rc, stack)
 }
 
 func isJSONContentType(ct string) bool {
 	media := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
-	return media == "application/json"
+	return media == contentTypeJSON
+}
+
+func hasJSONRequestBody(r *http.Request) bool {
+	return r.Method != http.MethodGet && r.Method != http.MethodHead && isJSONContentType(r.Header.Get("Content-Type"))
 }
 
 func stripUntrustedClientHeaders(h http.Header) {
@@ -156,17 +202,5 @@ func stripUntrustedClientHeaders(h http.Header) {
 	h.Del("kong_apikey")
 	h.Del("X-Neutree-Usage")
 	h.Del(headerUsageToken)
-}
-
-func writeJSONError(w http.ResponseWriter, status int, errType, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	b, _ := json.Marshal(map[string]any{
-		"error": map[string]string{
-			"type":    errType,
-			"message": message,
-		},
-	})
-	_, _ = w.Write(b)
+	h.Del("Accept-Encoding")
 }
