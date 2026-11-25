@@ -75,7 +75,11 @@ BEGIN
         -- The UI submits kubeconfig base64-encoded, so also reject values that decode to
         -- whitespace only. Values that are not valid base64/UTF-8 are left to the Core.
         v_kubeconfig := (NEW.spec).config->'kubernetes_config'->>'kubeconfig';
-        IF v_kubeconfig IS NOT NULL AND trim(v_kubeconfig) <> '' THEN
+        -- Only on insert or when kubeconfig changes, so existing rows stay deletable and updatable.
+        IF v_kubeconfig IS NOT NULL AND trim(v_kubeconfig) <> '' AND (
+            TG_OP = 'INSERT'
+            OR v_kubeconfig IS DISTINCT FROM (OLD.spec).config->'kubernetes_config'->>'kubeconfig'
+        ) THEN
             BEGIN
                 IF convert_from(decode(v_kubeconfig, 'base64'), 'UTF8') ~ '^\s*$' THEN
                     v_kubeconfig := '';

@@ -96,6 +96,55 @@ func TestKubernetesClusterConfigValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("existing blank kubeconfig cluster can still be deleted and updated", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		// Simulate a row created before the blank check existed.
+		if _, err = tx.ExecContext(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+			t.Fatalf("failed to disable triggers: %v", err)
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO api.clusters (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Cluster',
+				ROW('kubernetes', '{"kubernetes_config": {"kubeconfig":"ICAg", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}}'::jsonb, 'test-imageregistry', '', NULL::json, NULL::json)::api.cluster_spec,
+				ROW('legacy-blank-cluster', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`)
+		if err != nil {
+			t.Fatalf("failed to insert legacy cluster: %v", err)
+		}
+
+		if _, err = tx.ExecContext(ctx, `SET LOCAL session_replication_role = origin`); err != nil {
+			t.Fatalf("failed to enable triggers: %v", err)
+		}
+
+		if _, err = tx.ExecContext(ctx, `UPDATE api.clusters SET status.phase = 'Failed', status.error_message = 'bad kubeconfig' WHERE (metadata).name = 'legacy-blank-cluster'`); err != nil {
+			t.Fatalf("status update must succeed: %v", err)
+		}
+
+		if _, err = tx.ExecContext(ctx, `UPDATE api.clusters SET metadata.deletion_timestamp = CURRENT_TIMESTAMP WHERE (metadata).name = 'legacy-blank-cluster'`); err != nil {
+			t.Fatalf("deletion_timestamp update must succeed: %v", err)
+		}
+
+		// Changing kubeconfig to another blank value is still rejected.
+		_, err = tx.ExecContext(ctx, `
+			UPDATE api.clusters
+			SET spec.config = '{"kubernetes_config": {"kubeconfig":"Cg==", "router": {"replicas": 2, "resources": {"cpu":"1","memory":"1Gi"},"access_mode":"LoadBalancer"}}}'::jsonb
+			WHERE (metadata).name = 'legacy-blank-cluster'`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10021"`) {
+			t.Fatalf("expected error code 10021 when changing to another blank kubeconfig, got: %v", err)
+		}
+	})
+
 	t.Run("cluster router.replicas less than 1 - error code 10027", func(t *testing.T) {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
