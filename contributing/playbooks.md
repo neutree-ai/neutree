@@ -86,6 +86,7 @@ Every step is required — a missed wiring step usually produces a resource that
    - Table schema with workspace column.
    - Workspace-isolation RLS policies — see [`database.md#rls`](database.md).
    - Validation triggers if the resource has invariants.
+   - **If the table has a `metadata` column:** add `update_<table>_update_timestamp` (`update_metadata_update_timestamp_column`, BEFORE UPDATE) and `set_<table>_default_timestamp` (`set_default_metadata_timestamp_column`, BEFORE INSERT) triggers; `db/dbtest` fails if either is missing.
    - **If the resource needs reconciliation:** consider the `observed_spec_hash` pattern (see the `cluster_status_observed_spec_hash` migration).
    - **If listings need stable ordering:** consider the `status_sort_priority` pattern (see the `endpoint_status_sort_priority` migration).
 
