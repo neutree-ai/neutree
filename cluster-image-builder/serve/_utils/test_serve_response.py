@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -292,7 +293,9 @@ def test_to_wire_stream_serialization_failure_ends_the_stream():
     async def chunks():
         yield {"value": object()}
 
-    frames = run(collect(responses.to_wire_stream(chunks())))
+    mapper = Mock()
+    frames = run(collect(responses.to_wire_stream(chunks(), mapper)))
+    mapper.assert_not_called()
     assert json.loads(frames[0].removeprefix("data:"))["error"]["type"] == "TypeError"
     assert frames.count("data: [DONE]\n\n") == 1
 

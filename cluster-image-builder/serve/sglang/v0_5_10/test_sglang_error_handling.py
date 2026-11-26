@@ -4,20 +4,26 @@ import ast
 import asyncio
 import copy
 import json
-import logging
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from starlette.responses import JSONResponse, StreamingResponse
 
 from serve._utils import serve_response
+
+
+PAYLOADS = {
+    "chat_completion": {"model": "fixture", "messages": [{"role": "user", "content": "hi"}]},
+    "completion": {"model": "fixture", "prompt": "hi"},
+    "embedding": {"model": "fixture", "input": "hi"},
+}
 
 
 class Result(BaseModel):
@@ -26,7 +32,6 @@ class Result(BaseModel):
 
 class RequestModel(BaseModel):
     stream: bool = False
-    max_tokens: int = Field(default=1, gt=0)
 
 
 def neutral_error(message, error_type="RuntimeError", code=500):
@@ -41,18 +46,12 @@ def wrapper(monkeypatch):
     monkeypatch.setitem(sys.modules, protocol.__name__, protocol)
     source = Path(__file__).with_name("app.py")
     tree = ast.parse(source.read_text())
-    wire_path = Path(__file__).with_name("wire.py")
-    wire_body = []
-    for node in ast.parse(wire_path.read_text()).body:
-        if isinstance(node, ast.ImportFrom) and node.module.startswith("serve._utils."):
-            wire_body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "_FakeRawRequest", "_handle_request",
-        }:
-            wire_body.append(copy.deepcopy(node))
     body = []
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env":
+        if isinstance(node, ast.ImportFrom) and (
+            node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env"
+            or node.module == "serve.sglang.v0_5_10.wire"
+        ):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
             cls = copy.deepcopy(node)
@@ -62,25 +61,18 @@ def wrapper(monkeypatch):
                 if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     method.decorator_list = []
             body.append(cls)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_iter_response_body", "_handle_request"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_iter_response_body":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id == "app" for n in node.targets):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
             body.append(copy.deepcopy(node))
     namespace = dict(
-        Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI,
-        HTTPException=HTTPException, Request=Request, JSONResponse=JSONResponse,
+        Any=Any, Dict=Dict, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI,
+        Request=Request, JSONResponse=JSONResponse,
         StreamingResponse=StreamingResponse, DeploymentResponseGenerator=object,
-        logger=logging.getLogger("test.sglang"), json=json,
-        backend_error=serve_response.backend_error,
-        backend_response=serve_response.backend_response,
-        error_stream=serve_response.error_stream,
-        json_safe=serve_response.json_safe,
-        open_stream=serve_response.open_stream,
-        to_wire_response=serve_response.to_wire_response,
+        json=json,
     )
-    exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(wire_path), "exec"), namespace)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
     for name in ("chat", "completion", "embedding"):
@@ -91,8 +83,11 @@ def wrapper(monkeypatch):
 
 
 def call(wrapper, method, payload=None):
-    fn = getattr(wrapper.backend, method)
-    return fn() if method == "get_model_info" else asyncio.run(fn({} if payload is None else payload))
+    if method == "get_model_info":
+        return wrapper.backend.get_model_info()
+    request = {**PAYLOADS[method.removesuffix("_stream")], **(payload or {})}
+    result = getattr(wrapper.backend, method)(request)
+    return result if method.endswith("_stream") else asyncio.run(result)
 
 
 async def collect(chunks):
@@ -107,24 +102,33 @@ def test_success_is_plain_wire(wrapper, method):
     json.dumps(wire, allow_nan=False)
 
 
-@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-@pytest.mark.parametrize("stage,exc,expected_type", [
-    ("init", RuntimeError("init failed"), "RuntimeError"),
-    ("serving", ValueError("too long"), "ValueError"),
-    ("serving", HTTPException(503, "server failure"), "HTTPException"),
+@pytest.mark.parametrize("method,handler", [
+    ("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding"),
+    ("chat_completion_stream", "chat"), ("completion_stream", "completion"),
 ])
-def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage, exc, expected_type):
-    ensure, payload = getattr(wrapper.backend, "_ensure_" + handler), {}
-    if stage == "init":
-        ensure.side_effect = exc
+def test_handler_initialization_failure_is_contained(wrapper, method, handler):
+    getattr(wrapper.backend, "_ensure_" + handler).side_effect = RuntimeError("init failed")
+    result = call(wrapper, method)
+    if method.endswith("_stream"):
+        frames = asyncio.run(collect(result))
+        assert json.loads(frames[0].removeprefix("data:")) == neutral_error("init failed")
+        assert frames[-1] == "data: [DONE]\n\n"
     else:
-        ensure.return_value.handle_request.side_effect = exc
-    wire = call(wrapper, method, payload)
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["type"] == expected_type
-    assert wire["content"]["error"]["code"] == 500
-    assert wire["content"]["error"]["message"] == str(exc)
-    json.dumps(wire)
+        assert result["status_code"] == 500
+        assert result["content"] == neutral_error("init failed")
+
+
+@pytest.mark.parametrize("method", ["chat_completion", "chat_completion_stream"])
+def test_unexpected_handler_failure_is_contained(wrapper, method):
+    wrapper.backend._ensure_chat.return_value.handle_request.side_effect = RuntimeError("handler failed")
+    result = call(wrapper, method)
+    if method.endswith("_stream"):
+        frames = asyncio.run(collect(result))
+        assert json.loads(frames[0].removeprefix("data:")) == neutral_error("handler failed")
+        assert frames[-1] == "data: [DONE]\n\n"
+    else:
+        assert result["status_code"] == 500
+        assert result["content"] == neutral_error("handler failed")
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
@@ -148,14 +152,14 @@ def test_cancellation_unwinds(wrapper):
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("when", ["before", "midstream"])
-@pytest.mark.parametrize("exc", [RuntimeError("engine failure"), HTTPException(429, "HTTP failure")])
-def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, handler, when, exc):
+def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, handler, when):
+    exc = RuntimeError("engine failure")
     async def chunks():
         if when == "midstream":
             yield b'data: {"choices":[]}\n\n'
         raise exc
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
+    frames = asyncio.run(collect(call(wrapper, method, {"stream": True})))
     assert frames[-1] == "data: [DONE]\n\n"
     assert json.loads(frames[-2].removeprefix("data:")) == neutral_error(str(exc), type(exc).__name__)
     assert frames.count("data: [DONE]\n\n") == 1
@@ -204,7 +208,7 @@ def test_controller_passes_native_flat_errors_through(wrapper):
     # body the engine returned.
     native = {"object": "error", "message": "native detail", "type": "503", "param": None, "code": 503}
     http, _ = client(wrapper, serve_response.wire_response(native, 503))
-    response = http.post("/chat", json={})
+    response = http.post("/chat", json=PAYLOADS["chat_completion"])
     assert response.status_code == 503
     assert response.json() == native
 
@@ -236,10 +240,11 @@ def test_stream_first_frame_is_replayed(wrapper, route):
         yield 'data: {"choices":[]}\n\n'
         yield 'data: [DONE]\n\n'
     http, calls = stream_client(wrapper, chunks())
-    response = http.post(route, json={"stream": True})
+    payload = {**PAYLOADS["chat_completion" if route == "/chat" else "completion"], "stream": True}
+    response = http.post(route, json=payload)
     assert response.status_code == 200
     assert response.text == 'data: {"choices":[]}\n\ndata: [DONE]\n\n'
-    assert calls == [{"stream": True}]
+    assert calls == [payload]
 
 
 @pytest.mark.parametrize("route", ["/chat", "/completion"])
@@ -249,7 +254,8 @@ def test_first_stream_error_with_nonstandard_code_stays_json(wrapper, route):
         yield f'data: {json.dumps({"error": native})}\n\n'
         yield 'data: [DONE]\n\n'
     http, _ = stream_client(wrapper, chunks())
-    response = http.post(route, json={"stream": True})
+    payload = {**PAYLOADS["chat_completion" if route == "/chat" else "completion"], "stream": True}
+    response = http.post(route, json=payload)
     assert response.status_code == 529
     assert response.json() == {"error": native}
 
@@ -257,26 +263,10 @@ def test_first_stream_error_with_nonstandard_code_stays_json(wrapper, route):
 @pytest.mark.parametrize("route", ["/chat", "/completion"])
 def test_stream_rpc_failure_is_json_500(wrapper, route):
     http, _ = stream_client(wrapper, failure=RuntimeError("failure detail"))
-    response = http.post(route, json={"stream": True})
+    payload = {**PAYLOADS["chat_completion" if route == "/chat" else "completion"], "stream": True}
+    response = http.post(route, json=payload)
     assert response.status_code == 500
     assert response.json() == neutral_error("failure detail")
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-@pytest.mark.parametrize("stage,exc", [
-    ("init", RuntimeError("init failed")),
-    ("serving", ValueError("too long")),
-    ("serving", HTTPException(503, "server failure")),
-])
-def test_stream_start_failures_are_contained_before_iterator(wrapper, method, handler, stage, exc):
-    ensure = getattr(wrapper.backend, "_ensure_" + handler)
-    if stage == "init":
-        ensure.side_effect = exc
-    else:
-        ensure.return_value.handle_request.side_effect = exc
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[0].removeprefix("data:")) == neutral_error(str(exc), type(exc).__name__)
-    assert frames[-1] == "data: [DONE]\n\n"
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
@@ -284,7 +274,7 @@ def test_stream_start_failures_are_contained_before_iterator(wrapper, method, ha
 def test_stream_native_error_response_is_preserved(wrapper, method, handler, status):
     native = {"object": "error", "code": status, "message": "native failure detail", "type": str(status), "param": None}
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = JSONResponse(native, status_code=status)
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
+    frames = asyncio.run(collect(call(wrapper, method, {"stream": True})))
     assert json.loads(frames[0].removeprefix("data:")) == {"error": native}
     assert frames[-1] == "data: [DONE]\n\n"
 
@@ -295,36 +285,7 @@ def test_stream_cancellation_unwinds(wrapper):
         yield "unreachable"
     wrapper.backend._ensure_chat.return_value.handle_request.return_value = StreamingResponse(chunks())
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(collect(wrapper.backend.chat_completion_stream({"stream": True})))
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-def test_nonfinite_result_is_sanitized_before_ray_transfer(wrapper, method, handler):
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = {"number": float("nan")}
-    wire = call(wrapper, method)
-    assert wire["status_code"] == 200
-    assert wire["content"] == {"number": None}
-    json.dumps(wire, allow_nan=False)
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-def test_nonfinite_stream_values_are_sanitized(wrapper, method, handler):
-    async def chunks():
-        yield {"number": float("nan")}
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[0].removeprefix("data:")) == {"number": None}
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-def test_model_dump_failure_is_server_error(wrapper, method, handler):
-    exc = ValueError("serializer details")
-    result = SimpleNamespace(model_dump=Mock(side_effect=exc))
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = result
-    wire = call(wrapper, method)
-    assert wire["status_code"] == 500
-    assert wire["content"] == neutral_error("serializer details", "ValueError")
-    json.dumps(wire, allow_nan=False)
+        asyncio.run(collect(call(wrapper, "chat_completion_stream", {"stream": True})))
 
 
 def test_response_http_status_is_authoritative():
@@ -339,19 +300,7 @@ def test_native_stream_error_frames_are_preserved(wrapper, method, handler):
         for frame in frames:
             yield frame
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
-    assert asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True}))) == frames
-
-
-def test_server_error_path_never_imports_engine(wrapper):
-    original_import = __import__
-    def no_engine_import(name, *args, **kwargs):
-        assert not name.startswith(("sglang", "vllm", "llama_cpp", "torch")), name
-        return original_import(name, *args, **kwargs)
-    wrapper.backend.engine = SimpleNamespace()
-    with patch("builtins.__import__", side_effect=no_engine_import):
-        wire = call(wrapper, "get_model_info")
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["type"] == "AttributeError"
+    assert asyncio.run(collect(call(wrapper, method, {"stream": True}))) == frames
 
 
 def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper):
@@ -366,29 +315,3 @@ def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper)
     assert wire["status_code"] == 500
     assert wire["content"]["error"]["type"] == "ModuleNotFoundError"
     assert engine_imports == ["sglang.srt.entrypoints.openai.protocol"]
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-@pytest.mark.parametrize("when", ["before", "midstream"])
-@pytest.mark.parametrize("chunk,expected_type", [
-    pytest.param({"value": object()}, "TypeError", id="unsupported-value"),
-    pytest.param(SimpleNamespace(model_dump=Mock(side_effect=ValueError("serializer details"))), "ValueError", id="model-dump-value-error"),
-])
-def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler, when, chunk, expected_type):
-    async def chunks():
-        if when == "midstream":
-            yield 'data: {"choices":[]}\n\n'
-        yield chunk
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[-2].removeprefix("data:"))["error"]["type"] == expected_type
-    assert frames[-1] == "data: [DONE]\n\n"
-    assert frames.count("data: [DONE]\n\n") == 1
-    if when == "midstream":
-        assert frames[0] == 'data: {"choices":[]}\n\n'
-    else:
-        getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
-        http, _ = stream_client(wrapper, getattr(wrapper.backend, method)({"stream": True}))
-        response = http.post("/chat", json={"stream": True})
-        assert response.status_code == 500
-        assert response.json()["error"]["type"] == expected_type

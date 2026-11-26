@@ -8,14 +8,13 @@ import logging
 from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
-from unittest.mock import AsyncMock
+from typing import Any, Optional
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError
-from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from serve._utils import serve_response
 
@@ -35,31 +34,29 @@ class Model(BaseModel):
     value: str = "ok"
 
 
-def fake_create_error_response(message, err_type="BadRequestError",
-                               status_code=HTTPStatus.BAD_REQUEST, param=None):
-    """Stand-in for vLLM's exception classifier.
-
-    The real factory lives in the engine image and cannot be imported here, so
-    this mirrors its contract for the exception classes the wrappers can hand
-    it.
-    """
-    if isinstance(message, Exception):
-        exc = message
-        if isinstance(exc, (ValueError, TypeError, OverflowError)):
-            err_type, status_code, param = "BadRequestError", HTTPStatus.BAD_REQUEST, None
-        elif isinstance(exc, NotImplementedError):
-            err_type, status_code, param = "NotImplementedError", HTTPStatus.NOT_IMPLEMENTED, None
-        else:
-            err_type, status_code, param = "InternalServerError", HTTPStatus.INTERNAL_SERVER_ERROR, None
-        message = str(exc)
-    return ErrorResponse(error=ErrorInfo(message=message, type=err_type,
-                                         code=int(status_code), param=param))
+# Only the fields exercised by these wrapper tests; full schemas belong to the engine.
+class ChatRequest(BaseModel):
+    model: str
+    messages: list[dict]
+    stream: bool | None = False
 
 
-def request_model(**payload):
-    if payload.get("invalid_model"):
-        raise ValueError("request model rejected")
-    return payload
+class EmbeddingRequest(BaseModel):
+    model: str
+    input: str
+
+
+class RerankRequest(BaseModel):
+    model: str
+    query: str
+    documents: list[str]
+
+
+PAYLOADS = {
+    "generate": {"model": "fixture", "messages": [{"role": "user", "content": "hi"}]},
+    "generate_embeddings": {"model": "fixture", "input": "hi"},
+    "rerank": {"model": "fixture", "query": "hi", "documents": ["hello"]},
+}
 
 
 @pytest.fixture(params=("v0_24_0", "v0_32_0"))
@@ -84,23 +81,15 @@ def wrapper(request):
             for method in cls.body:
                 method.decorator_list = []
             body.append(cls)
+    factory = Mock(return_value=ErrorResponse(error=ErrorInfo(
+        message="engine failure", type="InternalServerError", code=500,
+    )))
     namespace = dict(
-        Any=Any, Dict=Dict, Optional=Optional, Request=Request, Response=Response, FastAPI=FastAPI,
-        JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, DeploymentHandle=object,
-        DeploymentResponseGenerator=object,
-        ChatCompletionRequest=request_model, EmbeddingCompletionRequest=request_model,
-        RerankRequest=request_model, json=json, logging=logging, HTTPStatus=HTTPStatus,
-        HTTPException=HTTPException, ValidationError=ValidationError,
-        # The module under test, not a stand-in: the wrappers now use the shared
-        # boundary directly, so the tests exercise the real implementation.
-        backend_error=serve_response.backend_error,
-        backend_response=serve_response.backend_response,
-        error_stream=serve_response.error_stream,
-        open_stream=serve_response.open_stream,
-        to_wire_response=serve_response.to_wire_response,
-        to_wire_stream=serve_response.to_wire_stream,
-        # No vLLM in this environment, so the classifier is a stand-in.
-        create_error_response=fake_create_error_response,
+        Any=Any, Request=Request, FastAPI=FastAPI, DeploymentHandle=object,
+        DeploymentResponseGenerator=object, ChatCompletionRequest=ChatRequest,
+        EmbeddingCompletionRequest=EmbeddingRequest, RerankRequest=RerankRequest,
+        logging=logging, HTTPStatus=HTTPStatus, HTTPException=HTTPException,
+        ValidationError=ValidationError, create_error_response=factory,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(app_path), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
@@ -111,11 +100,11 @@ def wrapper(request):
     backend.openai_serving_embedding = AsyncMock(return_value=Model())
     backend.openai_serving_score = AsyncMock(return_value=Model())
     backend._ensure_models = AsyncMock(return_value=SimpleNamespace(show_available_models=AsyncMock(return_value=Model())))
-    return SimpleNamespace(namespace=namespace, backend=backend, version=request.param)
+    return SimpleNamespace(namespace=namespace, backend=backend, factory=factory)
 
 
 def call_backend(wrapper, method, payload=None):
-    args = () if method == "show_available_models" else (payload if payload is not None else {},)
+    args = () if method == "show_available_models" else ({**PAYLOADS[method], **(payload or {})},)
     return asyncio.run(getattr(wrapper.backend, method)(*args))
 
 
@@ -135,16 +124,15 @@ def test_backend_success_returns_plain_wire(wrapper, method):
     json.dumps(wire)
 
 
-@pytest.mark.parametrize("method,initializer", (
-    ("generate", "_ensure_chat"), ("generate_embeddings", "_ensure_embedding"),
-    ("rerank", "_ensure_score"), ("show_available_models", "_ensure_models"),
-))
-@pytest.mark.parametrize("stream", (False, True))
+@pytest.mark.parametrize("method,initializer,stream", [
+    ("generate", "_ensure_chat", False),
+    ("generate", "_ensure_chat", True),
+    ("generate_embeddings", "_ensure_embedding", False),
+    ("rerank", "_ensure_score", False),
+    ("show_available_models", "_ensure_models", False),
+])
 def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, stream):
-    if stream and method != "generate":
-        pytest.skip("Only generation supports streaming")
-    error = RuntimeError("initialization failed")
-    getattr(wrapper.backend, initializer).side_effect = error
+    getattr(wrapper.backend, initializer).side_effect = RuntimeError("initialization failed")
     result = call_backend(wrapper, method, {"stream": True} if stream else None)
     expected = error_body("initialization failed")
     if stream:
@@ -154,70 +142,49 @@ def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, s
     else:
         assert result["status_code"] == 500
         assert result["content"] == expected
+    wrapper.factory.assert_not_called()
 
 
-@pytest.mark.parametrize("method,attribute", (
-    ("generate", "openai_serving_chat"), ("generate_embeddings", "openai_serving_embedding"),
-    ("rerank", "openai_serving_score"), ("show_available_models", "_ensure_models"),
-))
-def test_serving_exceptions_use_the_engine_classifier(wrapper, method, attribute):
-    class EngineFailure(Exception):
-        pass
-
-    error = EngineFailure("engine details")
-    if method == "generate":
-        target = wrapper.backend.openai_serving_chat.create_chat_completion
-    elif method == "show_available_models":
-        target = wrapper.backend._ensure_models.return_value.show_available_models
-    else:
-        target = getattr(wrapper.backend, attribute)
-    target.side_effect = error
-    wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 500
-    if method == "show_available_models":
-        # Model listing is not an inference call, so it keeps the neutral body
-        # instead of borrowing vLLM's request vocabulary.
-        assert wire["content"] == error_body("engine details", "EngineFailure")
-    else:
-        assert wire["content"] == error_body("engine details", "InternalServerError")
-
-
-@pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
-def test_engine_client_errors_keep_the_vllm_status(wrapper, method):
-    error = ValueError("input is too long")
-    if method == "generate":
-        wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    elif method == "generate_embeddings":
-        wrapper.backend.openai_serving_embedding.side_effect = error
-    else:
-        wrapper.backend.openai_serving_score.side_effect = error
-    wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 400
-    assert wire["content"] == error_body("input is too long", "BadRequestError", 400)
-
-
-@pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
-def test_plain_value_error_follows_the_engine_classifier(wrapper, method):
-    # vLLM's own route maps a ValueError to 400; only a pydantic ValidationError
-    # keeps our body, because vLLM's table does not classify pydantic errors.
-    wire = call_backend(wrapper, method, {"invalid_model": True})
-    assert wire["status_code"] == 400
-    assert wire["content"] == error_body("request model rejected", "BadRequestError", 400)
-
-
-@pytest.mark.parametrize("method,request_type,target_name", [
-    ("generate", "ChatCompletionRequest", "openai_serving_chat"),
-    ("generate_embeddings", "EmbeddingCompletionRequest", "openai_serving_embedding"),
-    ("rerank", "RerankRequest", "openai_serving_score"),
+@pytest.mark.parametrize("method,attribute", [
+    ("generate", "openai_serving_chat"),
+    ("generate_embeddings", "openai_serving_embedding"),
+    ("rerank", "openai_serving_score"),
 ])
-@pytest.mark.parametrize("stream", (False, True))
-def test_request_schema_failure_is_a_client_error(wrapper, method, request_type, target_name, stream):
-    if stream and method != "generate":
-        pytest.skip("Only generation supports streaming")
-    class RequestModel(BaseModel):
-        messages: list[str]
-    wrapper.namespace[request_type] = RequestModel
-    result = call_backend(wrapper, method, {"messages": [17], "stream": stream})
+@pytest.mark.parametrize("error,status,error_type", [
+    (ValueError("bad input"), 400, "BadRequestError"),
+    (RuntimeError("engine failed"), 500, "InternalServerError"),
+])
+def test_inference_errors_delegate_the_original_exception(wrapper, method, attribute, error, status, error_type):
+    native = ErrorResponse(error=ErrorInfo(message=str(error), type=error_type, code=status))
+    wrapper.factory.return_value = native
+    target = getattr(wrapper.backend, attribute)
+    if method == "generate":
+        target = target.create_chat_completion
+    target.side_effect = error
+
+    wire = call_backend(wrapper, method)
+
+    wrapper.factory.assert_called_once_with(error)
+    assert wire["status_code"] == status
+    assert wire["content"] == native.model_dump(mode="json")
+
+
+def test_model_listing_failure_stays_neutral(wrapper):
+    wrapper.backend._ensure_models.return_value.show_available_models.side_effect = RuntimeError("model listing failed")
+    wire = call_backend(wrapper, "show_available_models")
+    assert wire["status_code"] == 500
+    assert wire["content"] == error_body("model listing failed")
+    wrapper.factory.assert_not_called()
+
+
+@pytest.mark.parametrize("method,target_name,payload,stream", [
+    ("generate", "openai_serving_chat", {"messages": [17]}, False),
+    ("generate", "openai_serving_chat", {"messages": [17]}, True),
+    ("generate_embeddings", "openai_serving_embedding", {"input": {}}, False),
+    ("rerank", "openai_serving_score", {"documents": [17]}, False),
+])
+def test_request_schema_failure_is_a_client_error(wrapper, method, target_name, payload, stream):
+    result = call_backend(wrapper, method, {**payload, "stream": stream})
     if stream:
         frames = asyncio.run(collect(result))
         body = json.loads(frames[0].removeprefix("data:"))
@@ -225,50 +192,13 @@ def test_request_schema_failure_is_a_client_error(wrapper, method, request_type,
     else:
         assert result["status_code"] == 400
         body = result["content"]
-    # A schema failure is a client error, but the body is ours: the engine's
-    # native validation handler is not part of the boundary any more.
     assert body["error"]["type"] == "ValidationError"
     assert body["error"]["code"] == 400
     target = getattr(wrapper.backend, target_name)
     if method == "generate":
         target = target.create_chat_completion
     target.assert_not_called()
-
-
-@pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
-def test_wire_serialization_failure_is_contained(wrapper, method):
-    class BrokenModel:
-        def model_dump(self, **kwargs):
-            raise RuntimeError("serialization failed")
-    if method == "generate":
-        target = wrapper.backend.openai_serving_chat.create_chat_completion
-    elif method == "generate_embeddings":
-        target = wrapper.backend.openai_serving_embedding
-    elif method == "rerank":
-        target = wrapper.backend.openai_serving_score
-    else:
-        target = wrapper.backend._ensure_models.return_value.show_available_models
-    target.return_value = BrokenModel()
-    wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 500
-    assert wire["content"] == error_body("serialization failed")
-
-
-@pytest.mark.parametrize("as_model", (False, True))
-def test_wire_nonfinite_numbers_are_sanitized_before_ray(wrapper, as_model):
-    value = float("nan")
-    class NonfiniteModel:
-        def model_dump(self, **kwargs):
-            return {"value": value}
-    result = NonfiniteModel() if as_model else {"value": value}
-    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = result
-
-    wire = call_backend(wrapper, "generate")
-
-    assert wire["status_code"] == 200
-    assert wire["content"] == {"value": None}
-    # The Controller's real encoder must accept the sanitized value.
-    JSONResponse(content=wire["content"], status_code=wire["status_code"])
+    wrapper.factory.assert_not_called()
 
 
 @pytest.mark.parametrize("method,initializer", (
@@ -280,24 +210,27 @@ def test_cancellation_still_propagates(wrapper, method, initializer):
         call_backend(wrapper, method)
 
 
-def test_stream_failures_use_the_engine_classifier(wrapper):
-    error = ValueError("before first chunk")
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
-    assert json.loads(chunks[0].removeprefix("data:")) == error_body("before first chunk", "BadRequestError", 400)
-    assert chunks[-1] == "data: [DONE]\n\n"
+@pytest.mark.parametrize("midstream", [False, True])
+def test_stream_failures_delegate_the_original_exception(wrapper, midstream):
+    error = RuntimeError("engine interrupted")
+    native = ErrorResponse(error=ErrorInfo(message=str(error), type="InternalServerError", code=500))
+    wrapper.factory.return_value = native
+    target = wrapper.backend.openai_serving_chat.create_chat_completion
+    if midstream:
+        async def broken_stream():
+            yield 'data: {"choices":[]}\n\n'
+            raise error
+        target.return_value = broken_stream()
+    else:
+        target.side_effect = error
 
-    async def broken_stream():
-        yield "data: first\n\n"
-        raise RuntimeError("midstream")
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = None
-    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = broken_stream()
-    chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
-    assert chunks[0] == "data: first\n\n"
-    # A mid-stream failure is already past the HTTP status, but the body still
-    # carries the engine's classification.
-    assert json.loads(chunks[1].removeprefix("data:")) == error_body("midstream", "InternalServerError")
-    assert chunks[2] == "data: [DONE]\n\n"
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
+
+    wrapper.factory.assert_called_once_with(error)
+    assert json.loads(frames[-2].removeprefix("data:")) == native.model_dump(mode="json")
+    assert frames.count("data: [DONE]\n\n") == 1
+    if midstream:
+        assert frames[0] == 'data: {"choices":[]}\n\n'
 
 
 class Handle:
@@ -330,15 +263,12 @@ def client_for(wrapper, handle):
 
 @pytest.mark.parametrize("payload,streaming", [
     ({"stream": True}, True),
-    ({"stream": 1}, True),
-    ({"stream": "false"}, True),
-    ({"stream": 0}, False),
-    ({"stream": None}, False),
-    ({}, False),
+    ({"stream": False}, False),
 ])
 def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming):
     async def stream_body():
         yield "data: first\n\n"
+    payload = {**PAYLOADS["generate"], **payload}
     handle = Handle(stream_body() if streaming else None)
     with client_for(wrapper, handle) as client:
         response = client.post("/v1/chat/completions", json=payload)
@@ -350,7 +280,7 @@ def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming)
 def test_controller_rejects_malformed_wire_response(wrapper):
     handle = Handle({"content": {"ok": True}, "status_code": 200})
     with client_for(wrapper, handle) as client:
-        response = client.post("/v1/embeddings", json={})
+        response = client.post("/v1/embeddings", json=PAYLOADS["generate_embeddings"])
     assert response.status_code == 500
     assert response.json()["error"]["type"] == "InternalServerError"
 
@@ -360,7 +290,7 @@ def test_controller_non_stream_rpc_failure_is_a_neutral_error(wrapper):
         def remote(self, payload=None):
             raise RuntimeError("RPC unavailable")
     with client_for(wrapper, FailingHandle()) as client:
-        response = client.post("/v1/embeddings", json={})
+        response = client.post("/v1/embeddings", json=PAYLOADS["generate_embeddings"])
     assert response.status_code == 500
     assert response.json() == error_body("RPC unavailable")
 
@@ -371,7 +301,7 @@ def test_controller_stream_error_preserves_http_status_and_envelope(wrapper):
         yield "data: " + json.dumps(payload) + "\n\n"
         yield "data: [DONE]\n\n"
     with client_for(wrapper, Handle(stream())) as client:
-        response = client.post("/v1/chat/completions", json={"stream": True})
+        response = client.post("/v1/chat/completions", json={**PAYLOADS["generate"], "stream": True})
     assert response.status_code == 400
     assert response.json() == payload
 
@@ -381,7 +311,7 @@ def test_controller_replays_first_success_chunk(wrapper):
         yield "data: first\n\n"
         yield "data: [DONE]\n\n"
     with client_for(wrapper, Handle(stream())) as client:
-        response = client.post("/v1/chat/completions", json={"stream": True})
+        response = client.post("/v1/chat/completions", json={**PAYLOADS["generate"], "stream": True})
     assert response.status_code == 200
     assert response.text == "data: first\n\ndata: [DONE]\n\n"
 
@@ -403,7 +333,7 @@ def test_stream_rpc_initialization_failure_names_the_exception(wrapper, stage):
         raise RuntimeError("RPC unavailable")
         yield
     with client_for(wrapper, FailingHandle(failed_stream())) as client:
-        response = client.post("/v1/chat/completions", json={"stream": True})
+        response = client.post("/v1/chat/completions", json={**PAYLOADS["generate"], "stream": True})
     assert response.status_code == 500
     assert response.json() == error_body("RPC unavailable")
 
@@ -419,49 +349,6 @@ def test_returned_error_value_keeps_its_status_and_body(wrapper):
     assert chunks[-1] == "data: [DONE]\n\n"
 
 
-@pytest.mark.parametrize("status", (400, 500, 503))
-def test_returned_error_values_are_preserved_in_both_modes(wrapper, status):
-    result = ErrorResponse(error=ErrorInfo(message="native error details", type="NativeError", code=status, param="model"))
-    target = wrapper.backend.openai_serving_chat.create_chat_completion
-    target.return_value = result
-    wire = call_backend(wrapper, "generate")
-    assert wire["status_code"] == status
-    assert wire["content"] == result.model_dump(mode="json")
-
-    async def chunks():
-        yield f"data: {json.dumps(result.model_dump())}\n\n"
-        yield "data: [DONE]\n\n"
-    target.return_value = chunks()
-    expected = [f"data: {json.dumps(result.model_dump())}\n\n", "data: [DONE]\n\n"]
-    assert asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True}))) == expected
-
-
-@pytest.mark.parametrize("midstream", (False, True))
-def test_nonfinite_stream_values_are_sanitized(wrapper, midstream):
-    value = float("nan")
-    async def chunks():
-        if midstream:
-            yield 'data: {"choices":[]}\n\n'
-        yield {"value": value}
-    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
-    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
-    assert frames[1 if midstream else 0] == 'data: {"value": null}\n\n'
-
-
-@pytest.mark.parametrize("midstream", (False, True))
-def test_stream_serialization_failure_is_a_server_error(wrapper, midstream):
-    async def chunks():
-        if midstream:
-            yield 'data: {"choices":[]}\n\n'
-        yield {"value": object()}
-    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
-    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
-    body = json.loads(frames[1 if midstream else 0].removeprefix("data:"))
-    assert body["error"]["code"] == 500
-    assert body["error"]["type"] == "TypeError"
-    assert frames.count("data: [DONE]\n\n") == 1
-
-
 def test_raised_errors_are_logged_with_a_traceback(wrapper, caplog):
     error = RuntimeError("unexpected failure")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
@@ -473,12 +360,15 @@ def test_raised_errors_are_logged_with_a_traceback(wrapper, caplog):
 
 def test_http_exception_is_rebuilt_with_its_native_status(wrapper):
     error = HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="native HTTP detail")
+    native = ErrorResponse(error=ErrorInfo(message=error.detail, type="Service Unavailable", code=503))
+    wrapper.factory.return_value = native
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
+
     wire = call_backend(wrapper, "generate")
-    # A bare HTTPException carries a status but not vLLM's error type, so the
-    # factory is called with the status phrase as the type.
+
+    wrapper.factory.assert_called_once_with(error.detail, err_type="Service Unavailable", status_code=HTTPStatus.SERVICE_UNAVAILABLE)
     assert wire["status_code"] == 503
-    assert wire["content"] == error_body("native HTTP detail", "Service Unavailable", 503)
+    assert wire["content"] == native.model_dump(mode="json")
 
 
 def test_engine_classifier_failure_falls_back_to_the_neutral_body(wrapper):

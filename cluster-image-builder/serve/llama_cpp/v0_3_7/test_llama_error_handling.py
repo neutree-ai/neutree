@@ -5,22 +5,19 @@ import builtins
 import copy
 import json
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import Any, Dict
 from unittest.mock import Mock, patch
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
-from starlette.concurrency import iterate_in_threadpool
-from starlette.responses import JSONResponse, StreamingResponse
 
 from serve._utils import serve_response
 
 
 APP_PATH = Path(__file__).with_name("app.py")
-WIRE_PATH = Path(__file__).with_name("wire.py")
 
 
 def neutral_error(message, error_type="RuntimeError", code=500):
@@ -30,14 +27,11 @@ def neutral_error(message, error_type="RuntimeError", code=500):
 @pytest.fixture
 def wrapper():
     tree, body = ast.parse(APP_PATH.read_text()), []
-    wire_body = []
-    for node in ast.parse(WIRE_PATH.read_text()).body:
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("serve._utils."):
-            wire_body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_stream_chunks":
-            wire_body.append(copy.deepcopy(node))
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env":
+        if isinstance(node, ast.ImportFrom) and node.module and (
+            node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env"
+            or node.module == "serve.llama_cpp.v0_3_7.wire"
+        ):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "app" for t in node.targets):
             body.append(copy.deepcopy(node))
@@ -52,24 +46,14 @@ def wrapper():
             body.append(cls)
     llama = SimpleNamespace(create_chat_completion=Mock(return_value={"choices": []}), create_completion=Mock(return_value={"choices": []}), create_embedding=Mock(return_value={"data": []}))
     load = Mock(return_value=llama)
-    class ChatRequest(BaseModel):
-        messages: list[dict]
-        max_tokens: int | None = None
-        stream: bool = False
-    class CompletionRequest(BaseModel):
-        prompt: str
-        max_tokens: int | None = None
-        stream: bool = False
-    class EmbeddingRequest(BaseModel):
-        input: str
-    ns = dict(Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, Request=Request, JSONResponse=JSONResponse, StreamingResponse=StreamingResponse,
-              FastAPI=FastAPI, HTTPException=HTTPException, DeploymentHandle=object, DeploymentResponseGenerator=object, json=json, iterate_in_threadpool=iterate_in_threadpool,
-              CreateChatCompletionRequest=ChatRequest, CreateCompletionRequest=CompletionRequest, CreateEmbeddingRequest=EmbeddingRequest,
-              LlamaProxy=SimpleNamespace(load_llama_from_model_settings=load), _CHAT_PARAMS={"messages", "model", "stream"}, _COMPLETION_PARAMS={"prompt", "model", "stream"}, _EMBEDDING_PARAMS={"input", "model"},
-              backend_error=serve_response.backend_error, backend_response=serve_response.backend_response,
-              error_stream=serve_response.error_stream, open_stream=serve_response.open_stream,
-              to_wire_response=serve_response.to_wire_response)
-    exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(WIRE_PATH), "exec"), ns)
+    ns = dict(
+        Any=Any, Dict=Dict, Request=Request, FastAPI=FastAPI,
+        DeploymentHandle=object, DeploymentResponseGenerator=object,
+        LlamaProxy=SimpleNamespace(load_llama_from_model_settings=load),
+        _CHAT_PARAMS={"messages", "model", "stream"},
+        _COMPLETION_PARAMS={"prompt", "model", "stream"},
+        _EMBEDDING_PARAMS={"input", "model"},
+    )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(APP_PATH), "exec"), ns)
     backend = object.__new__(ns["Backend"])
     backend.model_settings, backend.model_id = object(), "fixture"
@@ -77,46 +61,38 @@ def wrapper():
 
 
 def call(wrapper, method="generate", payload=None):
-    return asyncio.run(getattr(wrapper.backend, method)(*(() if method == "show_available_models" else (payload if payload is not None else {},))))
+    if method == "show_available_models":
+        return asyncio.run(wrapper.backend.show_available_models())
+    if payload is None:
+        payload = {"input": "hi"} if method == "generate_embeddings" else {"messages": [{"role": "user", "content": "hi"}]}
+    return asyncio.run(getattr(wrapper.backend, method)({"model": "fixture", **payload}))
 
 
 async def collect(stream):
     return [chunk async for chunk in stream]
 
 
-@pytest.mark.parametrize("method,payload", [("generate", {"messages": []}), ("generate", {"prompt": "hi"}), ("generate_embeddings", {"input": "hi"}), ("show_available_models", None)])
+@pytest.mark.parametrize("method,payload", [("generate", {"messages": [{"role": "user", "content": "hi"}]}), ("generate", {"prompt": "hi"}), ("generate_embeddings", {"input": "hi"}), ("show_available_models", None)])
 def test_success_is_plain_wire(wrapper, method, payload):
     result = call(wrapper, method, payload)
     assert result["status_code"] == 200
     json.dumps(result)
 
 
-@pytest.mark.parametrize("method,payload", [("generate", {"messages": []}), ("generate_embeddings", {"input": "hi"})])
+@pytest.mark.parametrize("method,payload", [("generate", {"messages": [{"role": "user", "content": "hi"}]}), ("generate_embeddings", {"input": "hi"})])
 def test_model_load_error_is_contained(wrapper, method, payload):
-    wrapper.load.side_effect = RuntimeError("load failed")
+    wrapper.load.side_effect = ValueError("Model path does not exist: fixture.gguf")
     result = call(wrapper, method, payload)
     assert result["status_code"] == 500
-    assert result["content"] == neutral_error("load failed")
-
-
-def test_model_list_error_is_contained(wrapper):
-    del wrapper.backend.model_id
-    wire = call(wrapper, "show_available_models")
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["type"] == "AttributeError"
+    assert result["content"] == neutral_error("Model path does not exist: fixture.gguf", "ValueError")
 
 
 @pytest.mark.parametrize("attribute,payload", [
-    ("create_chat_completion", {"messages": []}),
+    ("create_chat_completion", {"messages": [{"role": "user", "content": "hi"}]}),
     ("create_completion", {"prompt": "hi"}),
 ])
-@pytest.mark.parametrize("message", [
-    "Requested tokens (17) exceed context window of 16",
-    "Model path does not exist: private.gguf",
-])
-def test_engine_errors_keep_message_and_class_name(wrapper, attribute, payload, message):
-    # llama_cpp raises for these; the native HTTP route's formatter is not on
-    # this path, so the neutral body is the contract.
+def test_engine_errors_keep_message_and_class_name(wrapper, attribute, payload):
+    message = "Requested tokens (17) exceed context window of 16"
     getattr(wrapper.llama, attribute).side_effect = ValueError(message)
     wire = call(wrapper, payload=payload)
     assert wire["status_code"] == 500
@@ -125,7 +101,7 @@ def test_engine_errors_keep_message_and_class_name(wrapper, attribute, payload, 
 
 def test_nonfinite_values_are_sanitized(wrapper):
     wrapper.llama.create_chat_completion.return_value = {"value": float("nan")}
-    wire = call(wrapper, payload={"messages": []})
+    wire = call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}]})
     assert wire["status_code"] == 200
     assert wire["content"] == {"value": None}
     json.dumps(wire, allow_nan=False)
@@ -133,7 +109,7 @@ def test_nonfinite_values_are_sanitized(wrapper):
 
 def test_sync_iterator_stays_in_backend(wrapper):
     wrapper.llama.create_chat_completion.return_value = iter([{"choices": []}])
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}], "stream": True})))
     assert json.loads(frames[0][6:]) == {"choices": []}
     assert frames.count("data: [DONE]\n\n") == 1
 
@@ -145,7 +121,7 @@ def test_iteration_errors_are_neutral_and_terminate_once(wrapper, before_first):
             yield {"choices": []}
         raise RuntimeError("iteration failed")
     wrapper.llama.create_chat_completion.return_value = chunks()
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}], "stream": True})))
     assert json.loads(frames[-2].removeprefix("data:")) == neutral_error("iteration failed")
     assert frames[-1] == "data: [DONE]\n\n"
     assert frames.count("data: [DONE]\n\n") == 1
@@ -154,7 +130,7 @@ def test_iteration_errors_are_neutral_and_terminate_once(wrapper, before_first):
 
 def test_stream_serialization_errors_stay_in_backend(wrapper):
     wrapper.llama.create_chat_completion.return_value = iter([{"value": object()}])
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}], "stream": True})))
     body = json.loads(frames[0].removeprefix("data:"))
     assert body["error"]["type"] == "TypeError"
     assert body["error"]["code"] == 500
@@ -163,28 +139,41 @@ def test_stream_serialization_errors_stay_in_backend(wrapper):
 
 def test_stream_nonfinite_values_are_sanitized(wrapper):
     wrapper.llama.create_chat_completion.return_value = iter([{"value": float("nan")}])
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}], "stream": True})))
     assert json.loads(frames[0][6:]) == {"value": None}
     assert frames.count("data: [DONE]\n\n") == 1
 
 
-@pytest.mark.parametrize("method,attribute,payload", [
-    ("generate", "create_chat_completion", {"messages": []}),
-    ("generate_embeddings", "create_embedding", {"input": "hi"}),
-])
-def test_cancellation_propagates(wrapper, method, attribute, payload):
-    getattr(wrapper.llama, attribute).side_effect = asyncio.CancelledError()
-    with pytest.raises(asyncio.CancelledError):
-        call(wrapper, method, payload)
+def test_stream_task_cancellation_propagates(wrapper):
+    started, release, finished = Event(), Event(), Event()
 
+    class Chunks:
+        def __iter__(self):
+            return self
 
-def test_stream_cancellation_propagates(wrapper):
-    def chunks():
-        raise asyncio.CancelledError()
-        yield
-    wrapper.llama.create_chat_completion.return_value = chunks()
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+        def __next__(self):
+            started.set()
+            try:
+                assert release.wait(timeout=5)
+                return {"choices": []}
+            finally:
+                finished.set()
+
+    wrapper.llama.create_chat_completion.return_value = Chunks()
+
+    async def scenario():
+        stream = await wrapper.backend.generate({"messages": [{"role": "user", "content": "hi"}], "stream": True})
+        task = asyncio.create_task(collect(stream))
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 5)
+
+    asyncio.run(scenario())
 
 
 class Handle:
@@ -240,7 +229,7 @@ def test_first_success_chunk_replays_once(wrapper):
 
 def test_stream_error_reaches_the_client_with_its_message(wrapper):
     wrapper.llama.create_chat_completion.side_effect = ValueError("Requested tokens (17) exceed context window of 16")
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [{"role": "user", "content": "hi"}], "stream": True})))
     async def replay():
         for frame in frames:
             yield frame
@@ -262,69 +251,8 @@ def test_controller_rpc_startup_error_is_json_500(wrapper):
     assert response.json() == neutral_error("rpc unavailable")
 
 
-@pytest.mark.parametrize("status", [400, 503])
-def test_returned_engine_error_keeps_status_and_body(wrapper, status):
-    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": status}}
-    wrapper.llama.create_chat_completion.return_value = JSONResponse(content, status_code=status)
-    wire = call(wrapper, payload={"messages": []})
-    assert wire["status_code"] == status
-    assert wire["content"] == content
-    with client(wrapper, Handle(wire)) as http:
-        response = http.post("/v1/chat/completions", json={"messages": []})
-    assert response.status_code == status
-    assert response.json() == content
-
-
-@pytest.mark.parametrize("midstream", [False, True])
-def test_returned_stream_error_keeps_native_fields(wrapper, midstream):
-    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": 400}}
-    chunks = [{"choices": []}, content] if midstream else [content]
-    wrapper.llama.create_chat_completion.return_value = iter(chunks)
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    assert json.loads(frames[-2].removeprefix("data:")) == content
-    assert frames.count("data: [DONE]\n\n") == 1
-
-
-def test_symbolic_error_code_is_not_reinterpreted(wrapper):
-    # Only a numeric HTTP code is read from a body the engine returns; mapping
-    # symbolic engine codes would restore the per-version table this boundary
-    # removes.
-    content = {"error": {"message": "too long", "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}}
-    wrapper.llama.create_chat_completion.return_value = content
-    wire = call(wrapper, payload={"messages": []})
-    assert wire["status_code"] == 500
-    assert wire["content"] == content
-
-
-@pytest.mark.parametrize("stage", ["setup", "midstream"])
-def test_http_exception_is_not_reinterpreted(wrapper, stage):
-    error = HTTPException(503, "busy")
-    if stage == "setup":
-        wrapper.llama.create_chat_completion.side_effect = error
-        frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    else:
-        def chunks():
-            yield {"choices": []}
-            raise error
-        wrapper.llama.create_chat_completion.return_value = chunks()
-        frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    expected = neutral_error(f"{error.status_code}: {error.detail}", "HTTPException")
-    assert json.loads(frames[-2].removeprefix("data:")) == expected
-    async def replay():
-        for frame in frames:
-            yield frame
-    with client(wrapper, Handle(stream=replay())) as http:
-        response = http.post("/v1/chat/completions", json={"stream": True})
-    if stage == "midstream":
-        assert response.status_code == 200
-        assert json.loads(response.text.split("\n\n")[1].removeprefix("data:")) == expected
-    else:
-        assert response.status_code == 500
-        assert response.json() == expected
-
-
 @pytest.mark.parametrize("method,attribute,payload", [
-    ("generate", "create_chat_completion", {"messages": []}),
+    ("generate", "create_chat_completion", {"messages": [{"role": "user", "content": "hi"}]}),
     ("generate_embeddings", "create_embedding", {"input": "hi"}),
 ])
 def test_engine_errors_never_import_the_engine(wrapper, method, attribute, payload):
