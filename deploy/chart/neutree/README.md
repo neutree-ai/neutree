@@ -65,7 +65,7 @@ All `cnpg.*` values are passed to that chart.
   rollback).
 - **Offline installs.** `global.image.registry` does not apply to the operator
   image. Mirror `ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1` and the
-  PostgreSQL image in `db.image` (`ghcr.io/cloudnative-pg/postgresql:17.6`),
+  PostgreSQL image in `db.image` (`ghcr.io/cloudnative-pg/postgresql:17.12-202611230809-standard-bookworm`),
   then set `cnpg.image.repository=<registry>/cloudnative-pg/cloudnative-pg`
   (and `cnpg.imagePullSecrets` if the registry needs them). Rendering fails
   when `global.image.registry` is set and `cnpg.image.repository` is not.
@@ -75,7 +75,7 @@ All `cnpg.*` values are passed to that chart.
 The offline bundle comes from `scripts/builder/build-package.sh --type
 controlplane`. It holds `images/all-images.tar` and `manifest.yaml`. Images in
 the tar keep their original names without the `docker.io/` prefix, for example
-`kong/kong:3.9` and `cloudnative-pg/postgresql:17.6`.
+`kong/kong:3.9` and `cloudnative-pg/postgresql:17.12-202611230809-standard-bookworm`.
 
 1. Load the tar on a host that can reach your registry, then retag and push
    each image under `<registry>`, keeping the rest of the path. The `images`

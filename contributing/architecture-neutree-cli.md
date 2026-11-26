@@ -60,7 +60,7 @@ Note: this is independent from the runtime cluster mode (K8s vs SSH) — the run
 
 ### PostgreSQL 13 → 17 on upgrade
 
-The compose stack runs `postgres:17` on the volume `neutree-core_pg17_data`. Earlier releases used PostgreSQL 13 on `neutree-core_pg_data`. When `launch neutree-core` finds the running `postgres` container on the old volume, it copies the data before `docker compose up` (`pg_migration.go`):
+The compose stack runs `postgres:17.12` on the volume `neutree-core_pg17_data`. Earlier releases used PostgreSQL 13 on `neutree-core_pg_data`. When `launch neutree-core` finds the running `postgres` container on the old volume, it copies the data before `docker compose up` (`pg_migration.go`):
 
 1. Pull missing images, refresh `db/` from the new `neutree-db-scripts`, start PostgreSQL 17 on the new volume as `neutree-pg-migration-target`.
 2. Stop the writers (`neutree-core`, `neutree-api`, `postgrest`, `auth`). Kong keeps routing from its cache; vector holds usage records and retries.

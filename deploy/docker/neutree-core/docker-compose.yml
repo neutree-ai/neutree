@@ -14,7 +14,7 @@ services:
       restart_policy:
         condition: none
   postgres:
-    image: postgres:17
+    image: postgres:17.12
     container_name: postgres
     environment:
       POSTGRES_USER: postgres
@@ -101,7 +101,7 @@ services:
         condition: none
 
   post-migration-hook:
-    image: postgres:17
+    image: postgres:17.12
     container_name: post-migration-hook
     networks:
       - neutree

@@ -252,7 +252,7 @@ func TestDBClusterSingle(t *testing.T) {
 	spec := renderedCluster(t, renderChart(t, nil))
 
 	require.EqualValues(t, 1, spec["instances"])
-	require.Equal(t, "ghcr.io/cloudnative-pg/postgresql:17.6", spec["imageName"])
+	require.Equal(t, "ghcr.io/cloudnative-pg/postgresql:17.12-202611230809-standard-bookworm", spec["imageName"])
 	require.Equal(t, true, spec["enableSuperuserAccess"])
 	require.Equal(t, "neutree-pg-superuser", spec["superuserSecret"].(map[string]interface{})["name"])
 	require.NotContains(t, spec, "postgresql", "a single instance has no synchronous replication")
@@ -440,7 +440,7 @@ func TestDBMigrationJob(t *testing.T) {
 	spec := job.Spec.Template.Spec
 	require.Equal(t, corev1.RestartPolicyNever, spec.RestartPolicy)
 	require.Equal(t, "neutree-sa", spec.ServiceAccountName)
-	require.Equal(t, "ghcr.io/cloudnative-pg/postgresql:17.6", spec.Containers[0].Image)
+	require.Equal(t, "ghcr.io/cloudnative-pg/postgresql:17.12-202611230809-standard-bookworm", spec.Containers[0].Image)
 
 	env := map[string]string{}
 	for _, e := range spec.Containers[0].Env {
