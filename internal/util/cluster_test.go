@@ -141,3 +141,39 @@ func TestGetClientFromClusterPreservesErrorContext(t *testing.T) {
 		"failed to get kubeconfig from cluster: failed to parse kubernetes cluster config: kubernetes cluster config is empty",
 	)
 }
+
+func TestGetKubeConfigFromCluster(t *testing.T) {
+	newCluster := func(kubeconfig string) *v1.Cluster {
+		return &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+			KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: kubeconfig},
+		}}}
+	}
+
+	tests := []struct {
+		name       string
+		kubeconfig string
+		want       string
+		errContain string
+	}{
+		{name: "valid kubeconfig", kubeconfig: "YXBpVmVyc2lvbjogdjE=", want: "apiVersion: v1"},
+		{name: "empty string", kubeconfig: "", errContain: "kubeconfig is empty"},
+		{name: "spaces only", kubeconfig: "ICAg", errContain: "kubeconfig is empty"},
+		{name: "newline only", kubeconfig: "Cg==", errContain: "kubeconfig is empty"},
+		{name: "invalid base64", kubeconfig: "not-base64!", errContain: "failed to decode kubeconfig"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetKubeConfigFromCluster(newCluster(tt.kubeconfig))
+			if tt.errContain != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errContain)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}

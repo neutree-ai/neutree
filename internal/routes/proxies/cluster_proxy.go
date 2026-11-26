@@ -128,6 +128,13 @@ func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Prov
 			}
 		}
 
+		if validationErr := validateClusterKubeconfigCreateInput(input); validationErr != nil {
+			c.JSON(validationErrStatus(validationErr), validationErr)
+			c.Abort()
+
+			return
+		}
+
 		if validationErr := validateClusterRouterProxyInput(input); validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
@@ -498,9 +505,7 @@ func validateInitializedClusterConfigurationUpdate(
 				return errors.New("updated Kubernetes config is required")
 			}
 
-			updatedKubeconfig := next.Spec.Config.KubernetesConfig.Kubeconfig
-
-			updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(updatedKubeconfig)
+			updatedAPIServer, err := parseClusterKubeconfigAPIServer(next)
 			if err != nil {
 				return fmt.Errorf("failed to parse updated kubeconfig: %w", err)
 			}
@@ -598,6 +603,42 @@ func validateClusterConfigurationUpdateInput(input *ValidationInput[v1.Cluster])
 
 	if err := validateInitializedClusterConfigurationUpdate(input.Current, input.New, configurationUpdate); err != nil {
 		return clusterConfigurationUpdateError(err)
+	}
+
+	return nil
+}
+
+// parseClusterKubeconfigAPIServer decodes the cluster's kubeconfig and returns
+// the API server it points at. It is shared by POST and PATCH validation.
+func parseClusterKubeconfigAPIServer(cluster *v1.Cluster) (string, error) {
+	kubeconfig, err := util.GetKubeConfigFromCluster(cluster)
+	if err != nil {
+		return "", err
+	}
+
+	return util.GetApiServerUrlFromDecodedKubeConfig(kubeconfig)
+}
+
+// validateClusterKubeconfigCreateInput rejects a kubeconfig that cannot be
+// decoded or parsed at create. An empty kubeconfig is left to the database
+// check (10021), so it is skipped here.
+func validateClusterKubeconfigCreateInput(input *ValidationInput[v1.Cluster]) *validationError {
+	if input.Operation != clusterValidationCreate || input.New == nil || input.New.Spec == nil ||
+		input.New.Spec.Type != v1.KubernetesClusterType {
+		return nil
+	}
+
+	config := input.New.Spec.Config
+	if config == nil || config.KubernetesConfig == nil || config.KubernetesConfig.Kubeconfig == "" {
+		return nil
+	}
+
+	if _, err := parseClusterKubeconfigAPIServer(input.New); err != nil {
+		return &validationError{
+			Code:    "10209",
+			Message: "invalid kubeconfig",
+			Hint:    err.Error(),
+		}
 	}
 
 	return nil
