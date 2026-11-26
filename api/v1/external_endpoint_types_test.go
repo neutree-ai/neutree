@@ -23,6 +23,17 @@ func TestExternalEndpointModelRouteStrategyIsOptional(t *testing.T) {
 	assert.Contains(t, string(data), `"strategy":"weighted"`)
 }
 
+func TestExternalEndpointModelRouteTargetWeightPreservesExplicitZero(t *testing.T) {
+	zero := 0
+	data, err := json.Marshal(ExternalEndpointModelRouteTarget{Weight: &zero})
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"weight":0`)
+
+	data, err = json.Marshal(ExternalEndpointModelRouteTarget{})
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), `"weight"`)
+}
+
 func TestAuthHeaderValue(t *testing.T) {
 	tests := []struct {
 		name string
