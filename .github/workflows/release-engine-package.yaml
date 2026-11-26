@@ -148,7 +148,7 @@ jobs:
             --version "$MANIFEST_VERSION" \
             --images "$IMAGE_SPEC" \
             --supported-tasks "$SUPPORTED_TASKS" \
-            --platform linux/amd64 \
+            --platform "linux/$PACKAGE_ARCH" \
             --schema "$SCHEMA_PATH" \
             --template-dir "$TEMPLATE_DIR" \
             --output "$archive_name" \
@@ -166,7 +166,10 @@ jobs:
           set -euo pipefail
           archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum="$archive.sha256"
-          manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH-manifest.yaml"
+          for artifact in "$archive" "$checksum" "$manifest"; do
+            [[ -s "$artifact" ]] || { echo "engine package artifact is missing or empty: $artifact" >&2; exit 1; }
+          done
           package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
           curl --fail -T "$archive" "$package_url"
           curl --fail -T "$checksum" "$package_url"
@@ -186,7 +189,7 @@ jobs:
           [[ -n "$SLACK_WEBHOOK_URL" ]] || exit 0
           archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum_name="$archive_name.sha256"
-          manifest_name="$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          manifest_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH-manifest.yaml"
           package_dir="${ENGINE_PACKAGE_FILE_SERVER_URL%/}"
           archive_url="$package_dir/$archive_name"
           checksum_url="$package_dir/$checksum_name"
