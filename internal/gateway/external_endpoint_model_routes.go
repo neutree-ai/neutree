@@ -49,6 +49,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 		}
 
 		targets := make([]map[string]interface{}, 0, len(route.Targets))
+		hasPositiveOrDefaultWeight := false
 
 		for _, target := range route.Targets {
 			if target.Upstream == "" {
@@ -61,6 +62,10 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 				return nil, fmt.Errorf("model route %q references unknown upstream %q", route.Model, target.Upstream)
 			}
 
+			if target.Weight == nil || *target.Weight > 0 {
+				hasPositiveOrDefaultWeight = true
+			}
+
 			if provider.err != nil {
 				continue
 			}
@@ -69,14 +74,18 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 				return nil, fmt.Errorf("model route %q target upstream_model must not be empty", route.Model)
 			}
 
-			if target.Priority < 0 || target.Weight < 0 || target.MaxInflightRequests < 0 {
+			if target.Priority < 0 || target.MaxInflightRequests < 0 ||
+				(target.Weight != nil && *target.Weight < 0) {
 				return nil, fmt.Errorf("model route %q target %q has a negative routing value", route.Model, target.Upstream)
 			}
 
-			weight := target.Weight
+			weight := 1
+			if target.Weight != nil {
+				weight = *target.Weight
+			}
 
 			if weight == 0 {
-				weight = 1
+				continue
 			}
 
 			compiled := map[string]interface{}{
@@ -88,6 +97,10 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			}
 
 			targets = append(targets, compiled)
+		}
+
+		if !hasPositiveOrDefaultWeight {
+			return nil, fmt.Errorf("model route %q must have at least one target with a positive weight", route.Model)
 		}
 
 		if len(targets) == 0 {

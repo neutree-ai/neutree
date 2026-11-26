@@ -61,11 +61,13 @@ type ExternalEndpointUpstreamEntry struct {
 // the concrete model name that provider receives. Routing fields are scoped
 // to the target because one provider may serve several virtual models.
 type ExternalEndpointModelRouteTarget struct {
-	Upstream            string `json:"upstream"`
-	UpstreamModel       string `json:"upstream_model"`
-	Priority            int    `json:"priority,omitempty"`
-	Weight              int    `json:"weight,omitempty"`
-	MaxInflightRequests int    `json:"max_inflight_requests,omitempty"`
+	Upstream      string `json:"upstream"`
+	UpstreamModel string `json:"upstream_model"`
+	Priority      int    `json:"priority,omitempty"`
+	// Weight is a pointer so an omitted value can retain the legacy default of
+	// 1 while an explicit zero disables this target in the gateway.
+	Weight              *int `json:"weight,omitempty"`
+	MaxInflightRequests int  `json:"max_inflight_requests,omitempty"`
 }
 
 // ExternalEndpointModelRoute defines one client-facing virtual model and its

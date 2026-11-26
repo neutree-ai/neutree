@@ -170,7 +170,7 @@ func TestCompileExternalEndpointModelRoutes(t *testing.T) {
 		RetryableConditions: []string{"http_429", "timeout"},
 		MaxAttempts:         1,
 		Targets: []v1.ExternalEndpointModelRouteTarget{{
-			Upstream: "openai", UpstreamModel: "gpt-4o", Priority: 0, Weight: 100,
+			Upstream: "openai", UpstreamModel: "gpt-4o", Priority: 0, Weight: pointy.Int(100),
 		}},
 	}}
 
@@ -185,12 +185,57 @@ func TestCompileExternalEndpointModelRoutes(t *testing.T) {
 	targets := routes[0]["targets"].([]map[string]interface{})
 	require.Len(t, targets, 1)
 	assert.Equal(t, "gpt-4o", targets[0]["upstream_model"])
+	assert.Equal(t, 100, targets[0]["weight"])
 	assert.NotContains(t, targets[0], "scheme")
 	assert.NotContains(t, targets[0], "host")
 	assert.NotContains(t, targets[0], "port")
 	assert.NotContains(t, targets[0], "path")
 	assert.NotContains(t, targets[0], "internal")
 	assert.NotContains(t, targets[0], "auth_header")
+}
+
+func TestCompileExternalEndpointModelRoutesFiltersZeroWeightTargets(t *testing.T) {
+	first := externalUpstream("https://first.example/v1", nil)
+	first.Name = "first"
+	second := externalUpstream("https://second.example/v1", nil)
+	second.Name = "second"
+	zero := 0
+	positive := 100
+	ee := testExternalEndpoint(first, second)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "company-chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{
+			{Upstream: "first", UpstreamModel: "gpt-4o", Weight: &zero},
+			{Upstream: "second", UpstreamModel: "gpt-4o", Weight: &positive},
+		},
+	}}
+
+	routes, err := compileExternalEndpointModelRoutes(ee, []resolvedUpstream{
+		{entry: first, scheme: "https", host: "first.example", port: 443, path: "/v1"},
+		{entry: second, scheme: "https", host: "second.example", port: 443, path: "/v1"},
+	})
+	require.NoError(t, err)
+	targets := routes[0]["targets"].([]map[string]interface{})
+	require.Len(t, targets, 1)
+	assert.Equal(t, "second", targets[0]["upstream"])
+}
+
+func TestCompileExternalEndpointModelRoutesRejectsAllExplicitZeroWeights(t *testing.T) {
+	entry := externalUpstream("https://example.com/v1", nil)
+	entry.Name = "provider"
+	zero := 0
+	ee := testExternalEndpoint(entry)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "company-chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{{
+			Upstream: "provider", UpstreamModel: "gpt-4o", Weight: &zero,
+		}},
+	}}
+
+	_, err := compileExternalEndpointModelRoutes(ee, []resolvedUpstream{{
+		entry: entry, scheme: "https", host: "example.com", port: 443, path: "/v1",
+	}})
+	assert.ErrorContains(t, err, "must have at least one target with a positive weight")
 }
 
 func TestCompileExternalEndpointModelRoutesRejectsUnknownProvider(t *testing.T) {
@@ -228,6 +273,7 @@ func TestCompileExternalEndpointModelRoutesSkipsFailedProvider(t *testing.T) {
 	targets := routes[0]["targets"].([]map[string]interface{})
 	require.Len(t, targets, 1)
 	assert.Equal(t, "healthy", targets[0]["upstream"])
+	assert.Equal(t, 1, targets[0]["weight"])
 }
 
 func TestGenerateExternalEndpointAIGatewayPluginPreservesEmptyModelRoutes(t *testing.T) {
