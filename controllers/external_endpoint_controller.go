@@ -100,17 +100,16 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
-	// The gateway config was pushed, but individual upstreams may have been left
-	// out because they no longer resolve (referenced endpoint or its cluster was
-	// deleted). Report that as Degraded rather than Running: the endpoint serves,
-	// yet some of its models do not. Requeueing is pointless here — recovery
-	// depends on the user restoring the endpoint or fixing the reference — so the
-	// reconcile succeeds and the detail lives in the status.
+	// Availability changes are applied even when every upstream is unavailable.
+	// The periodic reconcile restores targets when their observed state recovers.
 	phase := v1.ExternalEndpointPhaseRUNNING
 
 	degradedCount, degradedErr := summarizeDegradedUpstreams(upstreamStatuses)
 	if degradedCount > 0 {
 		phase = v1.ExternalEndpointPhaseDEGRADED
+		if degradedCount == len(upstreamStatuses) {
+			phase = v1.ExternalEndpointPhaseFAILED
+		}
 
 		klog.Warningf("external_endpoint %s/%s is degraded: %d of %d upstreams unavailable",
 			obj.Metadata.Workspace, obj.Metadata.Name, degradedCount, len(upstreamStatuses))

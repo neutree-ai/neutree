@@ -531,6 +531,7 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 
 func TestEndpointControllerPrepareStatusForUpdatePreservesResourcesWhenNewStatusOmitsThem(t *testing.T) {
 	oldResources := endpointResourcesForTest(8192, 50)
+	oldResources.ReadyReplicas = 2
 	endpoint := &v1.Endpoint{
 		Status: &v1.EndpointStatus{
 			Phase:     v1.EndpointPhaseRUNNING,
@@ -541,7 +542,27 @@ func TestEndpointControllerPrepareStatusForUpdatePreservesResourcesWhenNewStatus
 
 	(&EndpointController{}).prepareStatusForUpdate(endpoint, newStatus)
 
-	assert.Equal(t, oldResources, newStatus.Resources)
+	want := endpointResourcesForTest(8192, 50)
+	assert.Equal(t, want, newStatus.Resources)
+
+	deployingWithReady := &v1.EndpointStatus{
+		Phase:     v1.EndpointPhaseDEPLOYING,
+		Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
+	}
+	(&EndpointController{}).prepareStatusForUpdate(endpoint, deployingWithReady)
+	wantWithReady := endpointResourcesForTest(8192, 50)
+	wantWithReady.ReadyReplicas = 1
+	assert.Equal(t, wantWithReady, deployingWithReady.Resources)
+
+	cpuDeploying := &v1.Endpoint{
+		Status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseDEPLOYING,
+			Resources: &v1.EndpointResourceStatus{ReadyReplicas: 1},
+		},
+	}
+	cpuRunning := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+	(&EndpointController{}).prepareStatusForUpdate(cpuDeploying, cpuRunning)
+	assert.Nil(t, cpuRunning.Resources)
 }
 
 func TestEndpointControllerPrepareStatusForUpdateKeepsNewResourcesWhenPresent(t *testing.T) {

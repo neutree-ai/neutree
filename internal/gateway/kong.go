@@ -991,12 +991,10 @@ func getEndpointRoutePath(ep *v1.Endpoint) string {
 
 // SyncExternalEndpoint synchronizes an external endpoint configuration to Kong.
 //
-// Upstream entries are resolved independently: an entry that fails to resolve
-// (its internal endpoint was deleted, its cluster was deleted, its URL is
-// malformed) is reported as Failed in the returned statuses and left out of the
-// gateway configuration, while every other entry is still pushed. Only when no
-// entry resolves does the whole sync fail, since Kong needs at least one
-// reachable target to build the service.
+// Upstream entries are resolved independently. An unavailable entry is
+// reported as Failed and excluded from routing. Even when
+// all entries are unavailable, push the model routes so requests receive 503
+// instead of continuing to use stale gateway targets.
 func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
 	// An endpoint with no upstreams at all is a spec problem, not a resolution
 	// failure — keep saying so explicitly rather than reporting "nothing
@@ -1016,17 +1014,19 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 		}
 	}
 
-	if len(ready) == 0 {
-		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
-			ee.Key(), joinUpstreamErrors(statuses))
-	}
-
 	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
-	gwService, err := k.syncExternalEndpointService(ee, ready[0])
+	// Kong requires a service address even when no target is available. The
+	// plugin rejects inference requests before proxying in that state.
+	serviceTarget := resolvedUpstream{scheme: "http", host: "127.0.0.1", port: 1, path: "/"}
+	if len(ready) > 0 {
+		serviceTarget = ready[0]
+	}
+
+	gwService, err := k.syncExternalEndpointService(ee, serviceTarget)
 	if err != nil {
 		return statuses, errors.Wrapf(err, "failed to sync external endpoint service %s", ee.Metadata.Name)
 	}
@@ -1125,6 +1125,21 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 	}
 
 	ep := &endpoints[0]
+	if !isEndpointRoutable(ep) {
+		switch {
+		case ep.GetDeletionTimestamp() != "":
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s is deleting", endpointName)
+		case ep.Spec != nil && ep.Spec.Replicas.Num != nil && *ep.Spec.Replicas.Num <= 0:
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s is paused", endpointName)
+		case ep.Status == nil:
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s has no observed status", endpointName)
+		case ep.Status.Phase == v1.EndpointPhaseDEPLOYING,
+			ep.Status.Phase == v1.EndpointPhaseMODELDOWNLOADING:
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s has no ready replicas (phase: %s)", endpointName, ep.Status.Phase)
+		default:
+			return "", "", 0, "", fmt.Errorf("internal endpoint %s is not Running (phase: %s)", endpointName, ep.Status.Phase)
+		}
+	}
 
 	clusters, err := k.storage.ListCluster(storage.ListOption{
 		Filters: []storage.Filter{
@@ -1148,16 +1163,59 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 		return "", "", 0, "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
 	}
 
-	if clusters[0].Status == nil {
+	cluster := &clusters[0]
+	if cluster.GetDeletionTimestamp() != "" {
+		return "", "", 0, "", fmt.Errorf("cluster %s is deleting", ep.Spec.Cluster)
+	}
+
+	if cluster.Status != nil {
+		switch cluster.Status.Phase {
+		case v1.ClusterPhaseDeleting:
+			return "", "", 0, "", fmt.Errorf("cluster %s is deleting", ep.Spec.Cluster)
+		case v1.ClusterPhaseDeleted:
+			return "", "", 0, "", fmt.Errorf("cluster %s is deleted", ep.Spec.Cluster)
+		}
+	}
+
+	if cluster.Status == nil {
 		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
 	}
 
-	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
+	address, err := utils.GetEndpointServeAddress(cluster, ep)
 	if err != nil {
 		return "", "", 0, "", errors.Wrapf(err, "failed to get endpoint serve address")
 	}
 
 	return address.Scheme, address.Host, address.Port, address.Path, nil
+}
+
+// isEndpointRoutable evaluates the endpoint availability state machine:
+//
+//	Routable = desiredActive && actualServing
+//
+// where desiredActive reads Spec/Metadata (not deleting and target replicas > 0)
+// and actualServing reads Status (Phase == Running, or a transitional phase
+// with ReadyReplicas > 0).
+func isEndpointRoutable(ep *v1.Endpoint) bool {
+	if ep == nil || ep.Status == nil {
+		return false
+	}
+
+	desiredActive := ep.GetDeletionTimestamp() == "" &&
+		(ep.Spec == nil || ep.Spec.Replicas.Num == nil || *ep.Spec.Replicas.Num > 0)
+	actualServing := ep.Status.Phase == v1.EndpointPhaseRUNNING ||
+		(ep.Status.Phase == v1.EndpointPhaseDEPLOYING && endpointReadyReplicas(ep) > 0) ||
+		(ep.Status.Phase == v1.EndpointPhaseMODELDOWNLOADING && endpointReadyReplicas(ep) > 0)
+
+	return desiredActive && actualServing
+}
+
+func endpointReadyReplicas(ep *v1.Endpoint) int {
+	if ep == nil || ep.Status == nil || ep.Status.Resources == nil {
+		return 0
+	}
+
+	return ep.Status.Resources.ReadyReplicas
 }
 
 // resolvedUpstream is the outcome of resolving one spec upstream entry into a
@@ -1184,7 +1242,13 @@ type resolvedUpstream struct {
 func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resolvedUpstream {
 	resolved := make([]resolvedUpstream, 0, len(ee.Spec.Upstreams))
 
-	for _, entry := range ee.Spec.Upstreams {
+	for i, entry := range ee.Spec.Upstreams {
+		// model_mapping has no provider identifiers; assign local names when
+		// compiling that input into the same gateway model-route format.
+		if len(ee.Spec.ModelRoutes) == 0 {
+			entry.Name = fmt.Sprintf("provider-%d", i+1)
+		}
+
 		r := resolvedUpstream{entry: entry}
 
 		switch {
@@ -1269,26 +1333,9 @@ func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstrea
 	return models
 }
 
-// joinUpstreamErrors renders every failed entry into a single message, used when
-// no upstream resolved at all. It reads the already-projected statuses so that
-// "failed" has exactly one definition.
-func joinUpstreamErrors(statuses []v1.ExternalEndpointUpstreamStatus) string {
-	msgs := make([]string, 0, len(statuses))
-
-	for _, s := range statuses {
-		if s.Phase == v1.ExternalEndpointUpstreamPhaseFailed {
-			msgs = append(msgs, s.ErrorMessage)
-		}
-	}
-
-	return strings.Join(msgs, "; ")
-}
-
 func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint, target resolvedUpstream) (*kong.Service, error) {
-	// The Kong service only needs one reachable target: the ai-gateway plugin
-	// rewrites the upstream per request from its own upstream list. Using the
-	// first *resolvable* entry (rather than Upstreams[0]) is what keeps a broken
-	// leading entry from blocking the whole config push.
+	// The plugin selects the actual upstream per request. An empty target set
+	// uses a non-serving address and is rejected by the plugin with 503.
 	serviceScheme := target.scheme
 	serviceHost := target.host
 	servicePort := target.port
@@ -1447,15 +1494,9 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 	config := map[string]interface{}{
 		"route_prefix":  getExternalEndpointRoutePath(ee),
 		"upstreams":     upstreams,
+		"model_routes":  modelRoutes,
 		"endpoint_type": endpointTypeExternal,
 		"endpoint_name": ee.Metadata.Name,
-	}
-	// Preserve an explicitly configured model-routes mode even when every
-	// target was filtered because its provider is currently unresolved. An
-	// omitted field makes the Lua plugin fall back to legacy model_mapping and
-	// can accidentally route a model through a different configuration.
-	if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
-		config["model_routes"] = modelRoutes
 	}
 
 	return &kong.Plugin{
