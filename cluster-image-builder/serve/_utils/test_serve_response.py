@@ -117,7 +117,7 @@ def test_is_streaming_accepts_the_engine_boolean_spellings(payload, expected):
     assert responses.is_streaming(payload) is expected
 
 
-@pytest.mark.parametrize("payload", [{"stream": 2}, {"stream": "maybe"}, {"stream": []}, [1]])
+@pytest.mark.parametrize("payload", [{"stream": 2}, {"stream": 0.5}, {"stream": "maybe"}, {"stream": []}, {"stream": {}}, [1]])
 def test_is_streaming_rejects_other_values(payload):
     with pytest.raises(responses.RequestInputError):
         responses.is_streaming(payload)

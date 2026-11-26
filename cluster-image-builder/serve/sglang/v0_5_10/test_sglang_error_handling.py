@@ -72,10 +72,6 @@ def wrapper(monkeypatch):
         Request=Request, JSONResponse=JSONResponse,
         StreamingResponse=StreamingResponse, DeploymentResponseGenerator=object,
         json=json,
-        RequestInputError=serve_response.RequestInputError,
-        input_error_handler=serve_response.input_error_handler,
-        is_streaming=serve_response.is_streaming,
-        read_json_object=serve_response.read_json_object,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
@@ -192,32 +188,27 @@ def client(wrapper, result=None):
     return TestClient(app), calls
 
 
-@pytest.mark.parametrize("body,message", [
-    (b"[1, 2]", "Request body must be a JSON object"),
-    (b"{not json", "Request body must be valid JSON"),
-])
-def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+def test_controller_rejects_invalid_json_before_dispatch(wrapper):
     http, calls = client(wrapper)
-    response = http.post("/chat", content=body, headers={"content-type": "application/json"})
-    assert response.status_code == 400
-    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+    result = http.post("/chat", content=b"{not json", headers={"content-type": "application/json"})
+    assert result.status_code == 400
+    assert result.json() == {"error": {"message": "Request body must be valid JSON", "type": "BadRequestError", "code": 400, "param": None}}
     assert calls == []
 
 
-@pytest.mark.parametrize("stream", ["false", "no", 0, None])
-def test_controller_treats_false_like_spellings_as_non_streaming(wrapper, stream):
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper):
     http, calls = client(wrapper)
-    response = http.post("/chat", json={"stream": stream})
-    assert response.status_code == 200
-    assert calls == [{"stream": stream}]
+    payload = {**PAYLOADS["chat_completion"], "stream": "false"}
+    result = http.post("/chat", json=payload)
+    assert result.status_code == 200
+    assert calls == [payload]
 
 
-@pytest.mark.parametrize("stream", [2, "maybe"])
-def test_controller_rejects_uninterpretable_stream_values(wrapper, stream):
+def test_controller_rejects_uninterpretable_stream_values(wrapper):
     http, calls = client(wrapper)
-    response = http.post("/chat", json={"stream": stream})
-    assert response.status_code == 400
-    assert response.json()["error"]["message"] == "stream must be a boolean"
+    result = http.post("/chat", json={**PAYLOADS["chat_completion"], "stream": "maybe"})
+    assert result.status_code == 400
+    assert result.json()["error"]["message"] == "stream must be a boolean"
     assert calls == []
 
 

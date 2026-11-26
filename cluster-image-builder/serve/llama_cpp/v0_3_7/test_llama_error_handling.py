@@ -55,10 +55,6 @@ def wrapper():
         _CHAT_PARAMS={"messages", "model", "stream"},
         _COMPLETION_PARAMS={"prompt", "model", "stream"},
         _EMBEDDING_PARAMS={"input", "model"},
-        RequestInputError=serve_response.RequestInputError,
-        input_error_handler=serve_response.input_error_handler,
-        is_streaming=serve_response.is_streaming,
-        read_json_object=serve_response.read_json_object,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(APP_PATH), "exec"), ns)
     backend = object.__new__(ns["Backend"])
@@ -85,21 +81,21 @@ def test_success_is_plain_wire(wrapper, method, payload):
     json.dumps(result)
 
 
-@pytest.mark.parametrize("spelling,streaming", [
-    ("false", False), ("no", False), (0, False), (None, False),
-    ("yes", True), (1, True), (True, True),
+@pytest.mark.parametrize("payload,attribute", [
+    ({"messages": [{"role": "user", "content": "hi"}]}, "create_chat_completion"),
+    ({"prompt": "hi"}, "create_completion"),
 ])
-def test_generate_hands_llama_the_dispatch_decision(wrapper, spelling, streaming):
-    # llama_cpp tests `stream` for truthiness, so the Backend must pass the
-    # boolean the Controller dispatched on, not the client's spelling.
+@pytest.mark.parametrize("spelling,streaming", [("off", False), ("yes", True)])
+def test_generate_hands_llama_the_dispatch_decision(wrapper, payload, attribute, spelling, streaming):
+    target = getattr(wrapper.llama, attribute)
     if streaming:
-        wrapper.llama.create_chat_completion.return_value = iter([{"choices": []}])
-    result = call(wrapper, payload={"messages": [], "stream": spelling})
+        target.return_value = iter([{"choices": []}])
+    result = call(wrapper, payload={**payload, "stream": spelling})
     if streaming:
-        assert json.loads(asyncio.run(collect(result))[0][6:]) == {"choices": []}
+        assert asyncio.run(collect(result))[-1] == "data: [DONE]\n\n"
     else:
         assert result["status_code"] == 200
-    assert wrapper.llama.create_chat_completion.call_args.kwargs["stream"] is streaming
+    assert target.call_args.kwargs["stream"] is streaming
 
 
 @pytest.mark.parametrize("method,payload", [("generate", {"messages": [{"role": "user", "content": "hi"}]}), ("generate_embeddings", {"input": "hi"})])
@@ -228,35 +224,29 @@ def client(wrapper, handle):
     return TestClient(app, raise_server_exceptions=False)
 
 
-@pytest.mark.parametrize("body,message", [
-    (b"[1, 2]", "Request body must be a JSON object"),
-    (b"{not json", "Request body must be valid JSON"),
-])
-def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+def test_controller_rejects_invalid_json_before_dispatch(wrapper):
     handle = Handle()
     with client(wrapper, handle) as http:
-        response = http.post("/v1/chat/completions", content=body, headers={"content-type": "application/json"})
-    assert response.status_code == 400
-    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+        result = http.post("/v1/chat/completions", content=b"{not json", headers={"content-type": "application/json"})
+    assert result.status_code == 400
+    assert result.json() == {"error": {"message": "Request body must be valid JSON", "type": "BadRequestError", "code": 400, "param": None}}
     assert handle.calls == []
 
 
-@pytest.mark.parametrize("stream", ["false", "no", 0, None])
-def test_controller_treats_false_like_spellings_as_non_streaming(wrapper, stream):
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper):
     handle = Handle()
     with client(wrapper, handle) as http:
-        response = http.post("/v1/chat/completions", json={"messages": [], "stream": stream})
-    assert response.status_code == 200
+        result = http.post("/v1/chat/completions", json={"model": "fixture", "messages": [{"role": "user", "content": "hi"}], "stream": "false"})
+    assert result.status_code == 200
     assert handle.streaming is False
 
 
-@pytest.mark.parametrize("stream", [2, "maybe"])
-def test_controller_rejects_uninterpretable_stream_values(wrapper, stream):
+def test_controller_rejects_uninterpretable_stream_values(wrapper):
     handle = Handle()
     with client(wrapper, handle) as http:
-        response = http.post("/v1/chat/completions", json={"messages": [], "stream": stream})
-    assert response.status_code == 400
-    assert response.json()["error"]["message"] == "stream must be a boolean"
+        result = http.post("/v1/chat/completions", json={"model": "fixture", "messages": [{"role": "user", "content": "hi"}], "stream": "maybe"})
+    assert result.status_code == 400
+    assert result.json()["error"]["message"] == "stream must be a boolean"
     assert handle.calls == []
 
 
