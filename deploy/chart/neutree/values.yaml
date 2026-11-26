@@ -136,7 +136,7 @@ db:
   image:
     registry: ghcr.io
     repository: cloudnative-pg/postgresql
-    tag: "17.6"
+    tag: "17.12-202611230809-standard-bookworm"
     pullPolicy: IfNotPresent
   user: postgres
   password: pgpassword

@@ -99,7 +99,7 @@ func writeMigrationCompose(t *testing.T) (string, string) {
 	file := filepath.Join(dir, "docker-compose.yml")
 	require.NoError(t, os.WriteFile(file, []byte(`services:
   postgres:
-    image: mirror.example.com/postgres:17
+    image: mirror.example.com/postgres:17.12
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret-pw
@@ -163,7 +163,7 @@ func TestMigrateLegacyPostgresCopies(t *testing.T) {
 	assert.Contains(t, target, pgVolume+":"+pgDataDir)
 	assert.Less(t, f.index(t, "volume create --label com.docker.compose.project=neutree-core --label com.docker.compose.volume=pg17_data "+pgVolume),
 		f.index(t, "run -d --name "+pgMigrationTarget))
-	assert.True(t, strings.HasSuffix(target, " mirror.example.com/postgres:17"))
+	assert.True(t, strings.HasSuffix(target, " mirror.example.com/postgres:17.12"))
 
 	assert.Less(t, stop, f.index(t, "stop neutree-api"))
 	assert.Less(t, f.index(t, "stop neutree-api"), f.index(t, "stop postgrest"))
@@ -284,7 +284,7 @@ func TestPrepareNeutreeCoreDeployConfigRendersPostgres17(t *testing.T) {
 	coreWorkDir := filepath.Join(workDir, "neutree-core")
 	m := &pgMigration{composeFile: filepath.Join(coreWorkDir, "docker-compose.yml")}
 	require.NoError(t, m.loadComposeService())
-	assert.Equal(t, "mirror.example.com/library/postgres:17", m.image)
+	assert.Equal(t, "mirror.example.com/library/postgres:17.12", m.image)
 	assert.Equal(t, "secret-pw", m.env["POSTGRES_PASSWORD"])
 
 	project, err := cli.ProjectFromOptions(&cli.ProjectOptions{ConfigPaths: []string{m.composeFile}})
