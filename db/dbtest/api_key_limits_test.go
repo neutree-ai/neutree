@@ -153,6 +153,24 @@ func TestApiKeyLimits(t *testing.T) {
 		}
 	})
 
+	t.Run("set_api_key_limits advances update_timestamp", func(t *testing.T) {
+		var advanced bool
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			if _, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, '{"token_quota":{"limit":500,"period":"daily"},"concurrency":3}'::jsonb)`, apiKeyID); e != nil {
+				return e
+			}
+			return tx.QueryRowContext(ctx, `
+				SELECT (metadata).update_timestamp > (metadata).creation_timestamp
+				FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&advanced)
+		})
+		if err != nil {
+			t.Fatalf("set_api_key_limits / read timestamps: %v", err)
+		}
+		if !advanced {
+			t.Fatalf("expected update_timestamp to be later than creation_timestamp after set_api_key_limits")
+		}
+	})
+
 	t.Run("set_api_key_limits rejects non-owner", func(t *testing.T) {
 		err := execWithContext(t, db, []SetContextFunc{setUserContext(other.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
 			_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, '{}'::jsonb)`, apiKeyID)
