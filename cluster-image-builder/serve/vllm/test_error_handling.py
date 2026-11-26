@@ -81,6 +81,8 @@ def wrapper(request):
             for method in cls.body:
                 method.decorator_list = []
             body.append(cls)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
+            body.append(copy.deepcopy(node))
     factory = Mock(return_value=ErrorResponse(error=ErrorInfo(
         message="engine failure", type="InternalServerError", code=500,
     )))
@@ -167,6 +169,15 @@ def test_inference_errors_delegate_the_original_exception(wrapper, method, attri
     wrapper.factory.assert_called_once_with(error)
     assert wire["status_code"] == status
     assert wire["content"] == native.model_dump(mode="json")
+
+
+def test_generate_follows_the_controller_stream_spelling(wrapper):
+    async def chunks():
+        yield 'data: {"choices":[]}\n\n'
+
+    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": 1})))
+    assert frames == ['data: {"choices":[]}\n\n']
 
 
 def test_model_listing_failure_stays_neutral(wrapper):
@@ -262,10 +273,10 @@ def client_for(wrapper, handle):
 
 
 @pytest.mark.parametrize("payload,streaming", [
-    ({"stream": True}, True),
-    ({"stream": False}, False),
+    ({"stream": "true"}, True),
+    ({"stream": "false"}, False),
 ])
-def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming):
+def test_controller_dispatches_on_engine_boolean_semantics(wrapper, payload, streaming):
     async def stream_body():
         yield "data: first\n\n"
     payload = {**PAYLOADS["generate"], **payload}
@@ -275,6 +286,24 @@ def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming)
     assert response.status_code == 200, response.text
     assert handle.calls == [payload]
     assert handle.stream is streaming
+
+
+def test_controller_rejects_invalid_json_before_dispatch(wrapper):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        result = client.post("/v1/chat/completions", content=b"{not json", headers={"content-type": "application/json"})
+    assert result.status_code == 400
+    assert result.json() == {"error": {"message": "Request body must be valid JSON", "type": "BadRequestError", "code": 400, "param": None}}
+    assert handle.calls == []
+
+
+def test_controller_rejects_uninterpretable_stream_values(wrapper):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        result = client.post("/v1/chat/completions", json={**PAYLOADS["generate"], "stream": "maybe"})
+    assert result.status_code == 400
+    assert result.json()["error"]["message"] == "stream must be a boolean"
+    assert handle.calls == []
 
 
 def test_controller_rejects_malformed_wire_response(wrapper):

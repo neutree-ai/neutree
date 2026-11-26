@@ -188,6 +188,30 @@ def client(wrapper, result=None):
     return TestClient(app), calls
 
 
+def test_controller_rejects_invalid_json_before_dispatch(wrapper):
+    http, calls = client(wrapper)
+    result = http.post("/chat", content=b"{not json", headers={"content-type": "application/json"})
+    assert result.status_code == 400
+    assert result.json() == {"error": {"message": "Request body must be valid JSON", "type": "BadRequestError", "code": 400, "param": None}}
+    assert calls == []
+
+
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper):
+    http, calls = client(wrapper)
+    payload = {**PAYLOADS["chat_completion"], "stream": "false"}
+    result = http.post("/chat", json=payload)
+    assert result.status_code == 200
+    assert calls == [payload]
+
+
+def test_controller_rejects_uninterpretable_stream_values(wrapper):
+    http, calls = client(wrapper)
+    result = http.post("/chat", json={**PAYLOADS["chat_completion"], "stream": "maybe"})
+    assert result.status_code == 400
+    assert result.json()["error"]["message"] == "stream must be a boolean"
+    assert calls == []
+
+
 def test_models_error_is_not_model_info(wrapper):
     wire = {"__neutree_wire_response__": True, "status_code": 503, "content": {"object": "error", "code": 503, "message": "unavailable"}}
     http, _ = client(wrapper, wire)

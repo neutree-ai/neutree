@@ -35,6 +35,8 @@ def wrapper():
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "app" for t in node.targets):
             body.append(copy.deepcopy(node))
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
+            body.append(copy.deepcopy(node))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_filter_supported":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
@@ -77,6 +79,23 @@ def test_success_is_plain_wire(wrapper, method, payload):
     result = call(wrapper, method, payload)
     assert result["status_code"] == 200
     json.dumps(result)
+
+
+@pytest.mark.parametrize("payload,attribute", [
+    ({"messages": [{"role": "user", "content": "hi"}]}, "create_chat_completion"),
+    ({"prompt": "hi"}, "create_completion"),
+])
+@pytest.mark.parametrize("spelling,streaming", [("off", False), ("yes", True)])
+def test_generate_hands_llama_the_dispatch_decision(wrapper, payload, attribute, spelling, streaming):
+    target = getattr(wrapper.llama, attribute)
+    if streaming:
+        target.return_value = iter([{"choices": []}])
+    result = call(wrapper, payload={**payload, "stream": spelling})
+    if streaming:
+        assert asyncio.run(collect(result))[-1] == "data: [DONE]\n\n"
+    else:
+        assert result["status_code"] == 200
+    assert target.call_args.kwargs["stream"] is streaming
 
 
 @pytest.mark.parametrize("method,payload", [("generate", {"messages": [{"role": "user", "content": "hi"}]}), ("generate_embeddings", {"input": "hi"})])
@@ -203,6 +222,32 @@ def client(wrapper, handle):
     app.post("/v1/embeddings")(controller.embeddings)
     app.get("/v1/models")(controller.models)
     return TestClient(app, raise_server_exceptions=False)
+
+
+def test_controller_rejects_invalid_json_before_dispatch(wrapper):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        result = http.post("/v1/chat/completions", content=b"{not json", headers={"content-type": "application/json"})
+    assert result.status_code == 400
+    assert result.json() == {"error": {"message": "Request body must be valid JSON", "type": "BadRequestError", "code": 400, "param": None}}
+    assert handle.calls == []
+
+
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        result = http.post("/v1/chat/completions", json={"model": "fixture", "messages": [{"role": "user", "content": "hi"}], "stream": "false"})
+    assert result.status_code == 200
+    assert handle.streaming is False
+
+
+def test_controller_rejects_uninterpretable_stream_values(wrapper):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        result = http.post("/v1/chat/completions", json={"model": "fixture", "messages": [{"role": "user", "content": "hi"}], "stream": "maybe"})
+    assert result.status_code == 400
+    assert result.json()["error"]["message"] == "stream must be a boolean"
+    assert handle.calls == []
 
 
 def test_first_error_restores_http_status(wrapper):
