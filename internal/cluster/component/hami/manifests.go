@@ -63,6 +63,10 @@ scheduler:
   admissionWebhook:
     enabled: true
     manageNamespaceSelector: true
+    failurePolicy: Fail
+    whitelistNamespaces: []
+    objectSelector:
+      matchExpressions: []
   patch:
     enabled: false
   certManager:
@@ -113,6 +117,7 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 	sanitized := deepCopyChartValues(configPatch)
 	delete(sanitized, "devicePlugin")
 	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "objectSelector")
 
 	return sanitized
 }
@@ -166,6 +171,11 @@ func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]inte
 	deviceRegistry, deviceRepository := h.imageRegistryAndRepository(profile.DevicePluginRepository)
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
+			"admissionWebhook": map[string]interface{}{
+				"namespaceSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{"kubernetes.io/metadata.name": h.namespace},
+				},
+			},
 			"kubeScheduler": map[string]interface{}{
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},

@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kubeversion "k8s.io/apimachinery/pkg/version"
@@ -389,69 +390,67 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	assertHasObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
 }
 
-func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testing.T) {
-	cluster := newTestCluster()
-	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
-		"scheduler": map[string]interface{}{
-			"admissionWebhook": map[string]interface{}{
-				"manageNamespaceSelector": false,
-				"namespaceSelector": map[string]interface{}{
-					"matchExpressions": []interface{}{
-						map[string]interface{}{
-							"key":      "kubernetes.io/metadata.name",
-							"operator": "In",
-							"values":   []interface{}{"neutree-system"},
+func TestHAMiComponentProtectsAdmissionWebhookPolicy(t *testing.T) {
+	const namespace = "neutree-cluster-test"
+	for _, version := range []string{"v1.2.0", "v1.3.0"} {
+		for _, override := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/override=%t", version, override), func(t *testing.T) {
+				cluster := newTestCluster()
+				cluster.Spec.Version = version
+				if override {
+					cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+						"scheduler": map[string]interface{}{
+							"admissionWebhook": map[string]interface{}{
+								"failurePolicy":           "Ignore",
+								"manageNamespaceSelector": false,
+								"whitelistNamespaces":     []interface{}{namespace},
+								"namespaceSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{"kubernetes.io/metadata.name": "other"},
+									"matchExpressions": []interface{}{map[string]interface{}{
+										"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": []interface{}{namespace},
+									}},
+								},
+								"objectSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{"custom": "required"},
+									"matchExpressions": []interface{}{map[string]interface{}{
+										"key": "hami.io/webhook", "operator": "In", "values": []interface{}{"ignore"},
+									}},
+								},
+							},
 						},
-					},
-				},
-			},
-		},
-	}
+					}
+				}
 
-	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+				component := NewHAMiComponent(cluster, namespace, "registry.example.com/neutree",
+					"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+				objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+				require.NoError(t, err)
+				webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+				require.NotNil(t, webhook)
+				configuration := &admissionregistrationv1.MutatingWebhookConfiguration{}
+				require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(webhook.Object, configuration))
+				require.NotEmpty(t, configuration.Webhooks)
+				for _, entry := range configuration.Webhooks {
+					require.NotNil(t, entry.FailurePolicy)
+					assert.Equal(t, admissionregistrationv1.Fail, *entry.FailurePolicy)
+					namespaceSelector, err := metav1.LabelSelectorAsSelector(entry.NamespaceSelector)
+					require.NoError(t, err)
+					assert.True(t, namespaceSelector.Matches(labels.Set{"kubernetes.io/metadata.name": namespace}))
+					assert.False(t, namespaceSelector.Matches(labels.Set{"kubernetes.io/metadata.name": "other"}))
+					assert.False(t, namespaceSelector.Matches(labels.Set{"kubernetes.io/metadata.name": "kube-system"}))
+					podSelector, err := metav1.LabelSelectorAsSelector(entry.ObjectSelector)
+					require.NoError(t, err)
+					assert.True(t, podSelector.Matches(labels.Set{}), "ordinary Pods must require admission")
+					assert.False(t, podSelector.Matches(labels.Set{"hami.io/webhook": "ignore"}))
+				}
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.V130HAMI)
-	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
-	require.NoError(t, err)
-	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
-	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["manageNamespaceSelector"])
-
-	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
-	require.NoError(t, err)
-
-	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
-	require.NotNil(t, webhook)
-
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.NotEmpty(t, webhooks)
-
-	for _, entry := range webhooks {
-		webhookEntry, ok := entry.(map[string]interface{})
-		require.True(t, ok)
-
-		namespaceSelector, found, err := unstructured.NestedMap(webhookEntry, "namespaceSelector")
-		require.NoError(t, err)
-		require.True(t, found)
-
-		expressions, found, err := unstructured.NestedSlice(namespaceSelector, "matchExpressions")
-		require.NoError(t, err)
-		require.True(t, found)
-
-		for _, expression := range expressions {
-			match, ok := expression.(map[string]interface{})
-			require.True(t, ok)
-
-			if match["key"] != "kubernetes.io/metadata.name" || match["operator"] != "In" {
-				continue
-			}
-
-			values, ok := match["values"].([]interface{})
-			require.True(t, ok)
-			assert.NotEqual(t, []interface{}{"neutree-system"}, values,
-				"webhook must not accept a custom owning-namespace selector")
+				scheduler := findObject(t, objs.Items, "Deployment", SchedulerName)
+				require.NotNil(t, scheduler)
+				podLabels, found, err := unstructured.NestedStringMap(scheduler.Object, "spec", "template", "metadata", "labels")
+				require.NoError(t, err)
+				require.True(t, found)
+				assert.Equal(t, "ignore", podLabels["hami.io/webhook"], "scheduler recovery must bypass its own webhook")
+			})
 		}
 	}
 }
