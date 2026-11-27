@@ -49,6 +49,10 @@ type Envelope struct {
 	BlockHashes                    []uint64
 }
 
+func isNull(raw json.RawMessage) bool {
+	return len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
 func Inspect(raw []byte) (Envelope, error) {
 	e := Envelope{Raw: raw, Fields: map[string]json.RawMessage{}}
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -94,8 +98,8 @@ func Inspect(raw []byte) (Envelope, error) {
 	}
 
 	for _, key := range []string{"model", "stream", "stream_options", "session_id", "prompt_cache_key"} {
-		val, ok := e.Fields[key]
-		if !ok {
+		val := e.Fields[key]
+		if isNull(val) {
 			continue
 		}
 
@@ -121,21 +125,48 @@ func Inspect(raw []byte) (Envelope, error) {
 		}
 	}
 
-	if v := e.Fields["messages"]; v != nil {
-		err = e.inspectPrefix(v)
-	}
+	err = e.inspectPrefix()
 
 	return e, err
 }
 
-func (e *Envelope) inspectPrefix(v json.RawMessage) error {
-	var msgs []struct {
-		Role    string
-		Content json.RawMessage
+type prefixMessage struct {
+	Role    string
+	Content json.RawMessage
+}
+
+func (e *Envelope) inspectPrefix() error {
+	var msgs []prefixMessage
+	// Embedding inputs may be token IDs. Only Responses message items carry roles.
+	if raw := e.Fields["messages"]; raw != nil {
+		if err := json.Unmarshal(raw, &msgs); err != nil {
+			return err
+		}
+	} else if raw := e.Fields["input"]; len(raw) > 0 {
+		switch raw[0] {
+		case '"':
+			msgs = []prefixMessage{{Role: roleUser, Content: raw}}
+		case '[':
+			items := bytes.TrimSpace(raw[1:])
+			if len(items) > 0 && items[0] == '{' {
+				if err := json.Unmarshal(raw, &msgs); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
-	if err := json.Unmarshal(v, &msgs); err != nil {
-		return err
+	system := e.Fields["system"]
+	if isNull(system) {
+		system = e.Fields["instructions"]
+	}
+
+	if !isNull(system) {
+		msgs = append([]prefixMessage{{roleSystem, system}}, msgs...)
+	}
+
+	if len(msgs) == 0 {
+		return nil
 	}
 
 	h := fnv.New64a()
@@ -143,14 +174,18 @@ func (e *Envelope) inspectPrefix(v json.RawMessage) error {
 	// Chained 256-byte text blocks are a demo affinity signal. Engine KV sources
 	// may replace them with tokenizer-native hashes in the request hook.
 	for _, m := range msgs {
-		if m.Role != "system" && m.Role != "user" {
+		if m.Role == "developer" {
+			m.Role = roleSystem
+		}
+
+		if m.Role != roleSystem && m.Role != roleUser {
 			continue
 		}
 
-		if m.Role == "user" {
+		if m.Role == roleUser {
 			users++
 			if users > 2 {
-				break
+				continue
 			}
 		}
 		var compact bytes.Buffer
@@ -193,19 +228,77 @@ func (e *Envelope) inspectPrefix(v json.RawMessage) error {
 	return nil
 }
 
-func RewriteSame(wire ID, e Envelope, defaults map[string]json.RawMessage) ([]byte, error) {
+func applyModelDefaults(wire ID, fields, defaults map[string]json.RawMessage) (bool, error) {
 	changed := false
 
 	for k, v := range defaults {
-		if _, ok := e.Fields[k]; !ok {
-			e.Fields[k] = v
+		if isNull(v) {
+			continue
+		}
+
+		if wire == OpenAIChat && (k == maxTokens || k == completionMaxTokens || k == responsesMaxTokens) {
+			if !isNull(fields[maxTokens]) || !isNull(fields[completionMaxTokens]) {
+				continue
+			}
+
+			if k == responsesMaxTokens {
+				k = maxTokens
+			}
+		} else if wire.Path() != "" {
+			var err error
+
+			k, v, err = wireParam(wire, k, v)
+			if err != nil {
+				return false, err
+			}
+		}
+
+		if isNull(fields[k]) {
+			fields[k] = v
 			changed = true
 		}
 	}
 
+	return changed, nil
+}
+
+func RewriteSame(wire ID, e Envelope, defaults map[string]json.RawMessage) ([]byte, error) {
+	changed, err := applyModelDefaults(wire, e.Fields, defaults)
+	if err != nil {
+		return nil, err
+	}
+
+	if wire.Path() != "" {
+		if err := ValidateRequest(wire, e); err != nil {
+			return nil, err
+		}
+		// Validation accepts references only when null. Omit those SDK placeholders on the wire.
+		for _, key := range nullableReferences {
+			if _, ok := e.Fields[key]; ok {
+				delete(e.Fields, key)
+
+				changed = true
+			}
+		}
+	}
+
+	if wire == OpenAIResponses {
+		updated, err := applyResponseDefaults(e.Fields)
+		if err != nil {
+			return nil, err
+		}
+
+		changed = changed || updated
+	}
+
+	if wire == AnthropicMessages && isNull(e.Fields[maxTokens]) {
+		e.Fields["max_tokens"] = json.RawMessage("4096")
+		changed = true
+	}
+
 	if (wire == OpenAIChat || wire == OpenAICompletions) && e.Stream && !e.ClientUsage {
 		opts := map[string]json.RawMessage{}
-		if v := e.Fields["stream_options"]; v != nil && !bytes.Equal(v, []byte("null")) {
+		if v := e.Fields["stream_options"]; !isNull(v) {
 			if err := json.Unmarshal(v, &opts); err != nil {
 				return nil, err
 			}
@@ -220,5 +313,46 @@ func RewriteSame(wire ID, e Envelope, defaults map[string]json.RawMessage) ([]by
 		return e.Raw, nil
 	}
 
+	if wire == OpenAIChat {
+		for _, key := range [...]string{maxTokens, completionMaxTokens} {
+			if isNull(e.Fields[key]) {
+				delete(e.Fields, key)
+			}
+		}
+	}
+
 	return json.Marshal(e.Fields)
+}
+
+// Responses enables storage and strict function schemas when those flags are omitted.
+func applyResponseDefaults(fields map[string]json.RawMessage) (bool, error) {
+	changed := false
+
+	if isNull(fields["store"]) {
+		fields["store"] = json.RawMessage("false")
+		changed = true
+	}
+
+	if raw := fields["tools"]; !isNull(raw) {
+		var tools []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &tools); err != nil {
+			return false, err
+		}
+
+		rewrite := false
+
+		for _, tool := range tools {
+			if isNull(tool["strict"]) {
+				tool["strict"] = json.RawMessage("false")
+				rewrite = true
+			}
+		}
+
+		if rewrite {
+			fields["tools"], _ = json.Marshal(tools)
+			changed = true
+		}
+	}
+
+	return changed, nil
 }

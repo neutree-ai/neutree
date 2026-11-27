@@ -5,6 +5,9 @@ import "encoding/json"
 type Block struct {
 	Kind, Text, ID, Name, Signature string
 	Data                            json.RawMessage
+	Source                          ID
+	Content                         []Block // tool result content, including images
+	IsError                         bool
 }
 
 type Message struct {
@@ -13,10 +16,21 @@ type Message struct {
 }
 
 type Request struct {
-	Model    string
-	Stream   bool
-	Messages []Message
-	Tools    []json.RawMessage
+	Model      string
+	Stream     bool
+	Messages   []Message
+	Tools      []Tool
+	ToolChoice string
+	ToolName   string
+	Parallel   *bool
+	Params     map[string]json.RawMessage // canonical keys: temperature, top_p, max_tokens, stop
+}
+
+type Tool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type Response struct {
@@ -26,14 +40,16 @@ type Response struct {
 }
 
 type Event struct {
-	Kind  string
-	Index int
-	Block Block
-	Usage *Usage
-	Raw   json.RawMessage
+	ID, Model, FinishReason string
+	Kind                    string
+	Index                   int
+	Block                   Block
+	Usage                   *Usage
+	Raw                     json.RawMessage
 }
 
 type EncodeOpts struct {
+	Created      int64
 	ID, Model    string
 	IncludeUsage bool
 	Defaults     map[string]json.RawMessage
@@ -76,48 +92,6 @@ type ChatResult struct {
 	}
 	Usage *Usage
 	Error json.RawMessage
-}
-
-func (u *Usage) UnmarshalJSON(b []byte) error {
-	type wire Usage
-	var v struct {
-		wire
-		PromptDetails struct {
-			Cached   *int64 `json:"cached_tokens"`
-			Creation *int64 `json:"cache_creation_tokens"`
-			Write    *int64 `json:"cache_write_tokens"`
-		} `json:"prompt_tokens_details"`
-		CompletionDetails struct {
-			Reasoning *int64 `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	}
-
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-
-	*u = Usage(v.wire)
-	if v.PromptDetails.Cached != nil {
-		u.CacheRead = v.PromptDetails.Cached
-	}
-
-	if v.PromptDetails.Creation != nil {
-		u.CacheWrite = v.PromptDetails.Creation
-	}
-
-	if v.PromptDetails.Write != nil {
-		u.CacheWrite = v.PromptDetails.Write
-	}
-
-	if v.CompletionDetails.Reasoning != nil {
-		u.Reasoning = v.CompletionDetails.Reasoning
-	}
-
-	if u.Total == 0 {
-		u.Total = u.Prompt + u.Completion
-	}
-
-	return nil
 }
 
 func ErrorFrame(id ID, sequence int, message string) []byte {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"unicode"
 
 	"github.com/neutree-ai/neutree/internal/icp/event"
 )
@@ -24,8 +25,9 @@ const (
 )
 
 type Route struct {
-	RoutingLogic  string                                `json:"routing_logic"`
-	ModelDefaults map[string]map[string]json.RawMessage `json:"model_defaults"`
+	UpstreamProtocol string                                `json:"upstream_protocol,omitempty"`
+	RoutingLogic     string                                `json:"routing_logic"`
+	ModelDefaults    map[string]map[string]json.RawMessage `json:"model_defaults"`
 }
 
 type ConfigSnapshot struct {
@@ -44,6 +46,10 @@ func normalizeRoute(r Route) (Route, error) {
 		r.RoutingLogic = "roundrobin"
 	}
 
+	if id := r.UpstreamProtocol; strings.TrimSpace(id) != id || strings.IndexFunc(id, unicode.IsControl) >= 0 {
+		return r, fmt.Errorf("invalid upstream protocol %q", id)
+	}
+
 	for model, params := range r.ModelDefaults {
 		if model == "" {
 			return r, errors.New("empty default model key")
@@ -51,7 +57,7 @@ func normalizeRoute(r Route) (Route, error) {
 
 		for key, v := range params {
 			switch strings.ToLower(key) {
-			case "model", "stream", "messages", "input", "stream_options":
+			case "model", "stream", "messages", "input", "stream_options", "conversation", "previous_response_id", "background", "store", "tools":
 				return r, fmt.Errorf("reserved model default %q", key)
 			}
 

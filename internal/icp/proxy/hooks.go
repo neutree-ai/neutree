@@ -47,6 +47,7 @@ type SemanticHook interface {
 }
 
 type exchange struct {
+	upstreamWire protocol.ID
 	RequestContext
 	clientCodec, upstreamCodec                                                 protocol.Codec
 	hooks                                                                      []RequestHook
