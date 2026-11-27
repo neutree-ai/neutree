@@ -137,6 +137,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	}
 
 	gw, err := gateway.GetGateway(o.Gateway.Type, gateway.GatewayOptions{
+		InternalToken:     o.Gateway.InternalToken,
 		ProxyUrl:          o.Gateway.ProxyUrl,
 		AdminUrl:          o.Gateway.AdminUrl,
 		LogRemoteWriteUrl: o.Gateway.LogRemoteWriteUrl,

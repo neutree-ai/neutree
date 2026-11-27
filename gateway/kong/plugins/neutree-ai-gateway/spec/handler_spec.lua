@@ -420,3 +420,70 @@ describe("set_upstream_target()", function()
         assert.is_nil(calls.target)
     end)
 end)
+
+describe("trusted front proxy routing", function()
+    local old, finish
+    local routing = package.loaded["kong.plugins.neutree-ai-gateway.routing"]
+    before_each(function()
+        old, finish = kong, routing.finish
+    end)
+    after_each(function()
+        _G.kong, routing.finish = old, finish
+    end)
+
+    for _, tc in ipairs({
+        { target = "alias", internal = true, media = "multipart/form-data", path = "/backend/v1/audio/transcriptions" },
+        { target = "alias", media = "application/json", path = "/backend/audio/transcriptions" },
+        { target = "served", media = "application/json; charset=utf-8", path = "/backend/audio/transcriptions" },
+        { target = "served", media = "multipart/form-data; boundary=abc", status = 400 },
+    }) do
+        it(tc.target .. " / " .. tc.media, function()
+            local reads, cleared, encoded, path = 0, {}
+            local shared = { neutree_internal_unpacked = true, neutree_request_model = "alias", neutree_request_stream = false }
+            _G.kong = {
+                ctx = {shared = shared, plugin = {}},
+                request = {
+                    get_path = function() return "/v1/audio/transcriptions" end,
+                    get_method = function() return "POST" end,
+                    get_header = function() return tc.media end,
+                    get_raw_body = function(limit)
+                        assert.are.equal(16*1024*1024, limit)
+                        reads = reads + 1
+                        return '{"model":"alias","tools":[]}'
+                    end,
+                },
+                service = {set_target = function() end, request = {
+                    set_scheme = function() end,
+                    clear_header = function(k) cleared[k] = true end,
+                    set_raw_body = function(data) encoded = data end,
+                    set_path = function(value) path = value end,
+                }},
+                response = {exit = function(status) return status end},
+            }
+            local result = handler:access({ upstreams = {{
+                host = "127.0.0.1", port = 80, path = "/backend", name = "provider", internal = tc.internal,
+                model_mapping = {alias = tc.target},
+            }} })
+            assert.are.equal(tc.status, result)
+            assert.are.equal(tc.path, path)
+            if encoded then
+                assert.is_truthy(encoded:find('"tools":[]', 1, true))
+                assert.are.equal("served", cjson.decode(encoded).model)
+            end
+            assert.are.equal(tc.target == "served" and not tc.status and 1 or 0, reads)
+            if tc.target == "served" and not tc.status then assert.is_truthy(encoded) end
+            if not tc.status then
+                assert.are.equal(not tc.internal, cleared["X-Neutree-Internal-Session"] == true)
+            end
+            assert.are.equal("provider", shared.neutree_selected_upstream)
+            assert.are.equal(tc.target, shared.neutree_upstream_model)
+            local released
+            routing.finish = function(state) released = state end
+            handler:header_filter({})
+            handler:body_filter({})
+            handler:log({})
+            assert.are.equal(kong.ctx.plugin.routing_state, released)
+            assert.is_table(released)
+        end)
+    end
+end)

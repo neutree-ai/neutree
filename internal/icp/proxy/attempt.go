@@ -203,8 +203,8 @@ func (s *Server) relayResponse(w http.ResponseWriter, x *exchange, a *Attempt, r
 		resp.Header.Del("Content-Length")
 
 		err = x.streamResponse(body, deliver)
-	case x.managed && resp.StatusCode/100 != 2 && (x.clientCodec != nil || x.Wire == protocol.AnthropicMessages):
-		b, err := io.ReadAll(io.LimitReader(body, traceLimit))
+	case x.managed && (x.Wire != "" || jsonBody) && resp.StatusCode/100 != 2:
+		b, err := readBounded(body, 16<<20)
 		if err != nil {
 			return err
 		}
@@ -212,7 +212,7 @@ func (s *Server) relayResponse(w http.ResponseWriter, x *exchange, a *Attempt, r
 		resp.Header.Del("Content-Length")
 		resp.Header.Set("Content-Type", "application/json")
 
-		return deliver(protocol.HTTPError(x.Wire, resp.StatusCode, b), false)
+		return deliver(protocol.HTTPError(x.Wire, resp.StatusCode, b, x.clientCodec == nil), false)
 	case x.managed && (x.Wire != "" || jsonBody) && resp.StatusCode == 200:
 		var b []byte
 

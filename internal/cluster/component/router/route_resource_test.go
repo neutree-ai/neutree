@@ -3,8 +3,10 @@ package router
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/icp/proxy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -70,6 +72,18 @@ func Test_BuildRouterDeployment(t *testing.T) {
 				"--max-connections-per-backend", "0", "--connect-timeout-seconds", "0",
 				"--sock-connect-timeout-seconds", "0.25", "--sock-read-timeout-seconds", "600",
 			}, deployment.Spec.Template.Spec.Containers[0].Args)
+			opts, err := proxy.ParseOptions(deployment.Spec.Template.Spec.Containers[0].Args)
+			require.NoError(t, err)
+			assert.Equal(t, proxy.Cluster, opts.Mode)
+			assert.Equal(t, "0.0.0.0", opts.Host)
+			assert.Equal(t, 8000, opts.Port)
+			assert.Equal(t, deployment.Namespace, opts.Namespace)
+			assert.Equal(t, "cluster=test-cluster,workspace=test-workspace,app=inference", opts.Selector)
+			assert.Equal(t, "session_id", opts.SessionKey)
+			assert.Zero(t, opts.Connections)
+			assert.Zero(t, opts.Connect)
+			assert.Equal(t, 250*time.Millisecond, opts.Dial)
+			assert.Equal(t, 600*time.Second, opts.Idle)
 			assert.Equal(t, "test-image-pull-secret", deployment.Spec.Template.Spec.ImagePullSecrets[0].Name, "Deployment image pull secret mismatch")
 			actualCPU := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["cpu"]
 			actualMemory := deployment.Spec.Template.Spec.Containers[0].Resources.Limits["memory"]

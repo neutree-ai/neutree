@@ -8,18 +8,21 @@ import (
 
 // HTTPError preserves the upstream diagnostic with the client's error envelope.
 // Kong may supply just a message on authentication or quota rejection.
-func HTTPError(client ID, status int, raw []byte) []byte {
+func HTTPError(client ID, status int, raw []byte, sameWire bool) []byte {
 	var upstream struct {
 		Type, Message string
 		Error         struct {
-			Type, Code string
-			Message    *string
+			Type    string
+			Code    json.RawMessage
+			Message *string
 		}
 	}
 
 	err := json.Unmarshal(raw, &upstream)
-	if err == nil && client == AnthropicMessages && upstream.Type == "error" && upstream.Error.Type != "" && upstream.Error.Message != nil {
-		return raw
+	if err == nil && sameWire && upstream.Error.Message != nil {
+		if client != AnthropicMessages || (upstream.Type == "error" && upstream.Error.Type != "") {
+			return raw
+		}
 	}
 
 	var message string
@@ -62,8 +65,11 @@ func HTTPError(client ID, status int, raw []byte) []byte {
 	body := map[string]any{"error": detail}
 	if client == AnthropicMessages {
 		body["type"] = "error"
-	} else if upstream.Error.Code != "" {
-		detail["code"] = upstream.Error.Code
+	} else if !isNull(upstream.Error.Code) {
+		var code string
+		if json.Unmarshal(upstream.Error.Code, &code) == nil {
+			detail["code"] = code
+		}
 	}
 
 	b, _ := json.Marshal(body)

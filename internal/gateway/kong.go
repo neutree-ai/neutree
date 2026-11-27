@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -26,6 +27,7 @@ func init() { //nolint:gochecknoinits
 }
 
 type Kong struct {
+	internalToken     string
 	kongClient        *kong.Client
 	storage           storage.Storage
 	logRemoteWriteUrl string
@@ -43,6 +45,7 @@ func newKong(opts GatewayOptions) (Gateway, error) {
 	}
 
 	return &Kong{
+		internalToken:     opts.InternalToken,
 		kongClient:        kongClient,
 		storage:           opts.Storage,
 		logRemoteWriteUrl: opts.LogRemoteWriteUrl,
@@ -625,12 +628,20 @@ func (k *Kong) generateKeyAuthenticationPlugin() *kong.Plugin {
 	}
 }
 
+//go:embed internal_access.lua
+var internalAccess string
+
+//go:embed internal_response.lua
+var internalResponse string
+
 func (k *Kong) generateRewriteApiKeyHeaderPlugin() *kong.Plugin {
 	return &kong.Plugin{
 		Name:         pointy.String("pre-function"),
 		InstanceName: pointy.String("neutree-rewrite-api-key-header"),
 		Config: map[string]interface{}{
+			"header_filter": []string{internalResponse},
 			"access": []string{
+				fmt.Sprintf("local expected = %q\n", k.internalToken) + internalAccess,
 				`local auth_header = kong.request.get_header("Authorization")
 if auth_header then
   local _, _, token = string.find(auth_header, "Bearer%s+(.+)")
@@ -774,13 +785,13 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 		return errors.Wrapf(err, "failed to normalize merged plugin config")
 	}
 
-	result, diff, err := util.JsonEqual(normalizedCur, normalizedMerged)
+	result, _, err := util.JsonEqual(normalizedCur, normalizedMerged)
 	if err != nil {
 		return errors.Wrapf(err, "failed to compare plugin config")
 	}
 
 	if !result {
-		klog.Infof("plugin config changed, updating plugin: %s, diff: %s", *plugin.InstanceName, diff)
+		klog.Infof("plugin config changed, updating plugin: %s", *plugin.InstanceName)
 
 		curPlugin.Config = plugin.Config
 
@@ -809,11 +820,17 @@ func isManagedAIRoutePlugin(plugin *kong.Plugin) bool {
 }
 
 func (k *Kong) syncEndpointRoute(ep *v1.Endpoint, gwService *kong.Service) (*kong.Route, error) {
+	return k.syncInferenceRoute("neutree-endpoint-"+util.HashString(ep.Key()), getEndpointRoutePath(ep), gwService)
+}
+
+func (k *Kong) syncInferenceRoute(name, path string, gwService *kong.Service) (*kong.Route, error) {
 	route := &kong.Route{
-		Name:      pointy.String("neutree-endpoint-" + util.HashString(ep.Key())),
-		Paths:     []*string{pointy.String(getEndpointRoutePath(ep))},
-		Service:   gwService,
-		Protocols: []*string{pointy.String("http"), pointy.String("https")},
+		Name:              pointy.String(name),
+		Paths:             []*string{pointy.String(path)},
+		Service:           gwService,
+		RequestBuffering:  pointy.Bool(false),
+		ResponseBuffering: pointy.Bool(false),
+		Protocols:         []*string{pointy.String("http"), pointy.String("https")},
 	}
 
 	curRoute, err := k.kongClient.Routes.Get(context.Background(), route.Name)
@@ -828,7 +845,10 @@ func (k *Kong) syncEndpointRoute(ep *v1.Endpoint, gwService *kong.Service) (*kon
 		}
 	}
 
-	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID {
+	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID ||
+		curRoute.RequestBuffering == nil || *curRoute.RequestBuffering || curRoute.ResponseBuffering == nil || *curRoute.ResponseBuffering {
+		curRoute.RequestBuffering = route.RequestBuffering
+		curRoute.ResponseBuffering = route.ResponseBuffering
 		curRoute.Paths = route.Paths
 		curRoute.Service = route.Service
 
@@ -1407,36 +1427,7 @@ func (k *Kong) deleteExternalEndpointService(ee *v1.ExternalEndpoint) error {
 }
 
 func (k *Kong) syncExternalEndpointRoute(ee *v1.ExternalEndpoint, gwService *kong.Service) (*kong.Route, error) {
-	route := &kong.Route{
-		Name:      pointy.String("neutree-external-endpoint-" + util.HashString(ee.Key())),
-		Paths:     []*string{pointy.String(getExternalEndpointRoutePath(ee))},
-		Service:   gwService,
-		Protocols: []*string{pointy.String("http"), pointy.String("https")},
-	}
-
-	curRoute, err := k.kongClient.Routes.Get(context.Background(), route.Name)
-	if err != nil && !isResourceNotFoundError(err) {
-		return nil, errors.Wrapf(err, "failed to get route by name %s", *route.Name)
-	}
-
-	if isResourceNotFoundError(err) {
-		curRoute, err = k.kongClient.Routes.Create(context.Background(), route)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to create route by name %s", *route.Name)
-		}
-	}
-
-	if *curRoute.Paths[0] != *route.Paths[0] || *curRoute.Service.ID != *route.Service.ID {
-		curRoute.Paths = route.Paths
-		curRoute.Service = route.Service
-
-		_, err = k.kongClient.Routes.Update(context.Background(), curRoute)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to update route by name %s", *route.Name)
-		}
-	}
-
-	return curRoute, nil
+	return k.syncInferenceRoute("neutree-external-endpoint-"+util.HashString(ee.Key()), getExternalEndpointRoutePath(ee), gwService)
 }
 
 func (k *Kong) deleteExternalEndpointRoute(ee *v1.ExternalEndpoint) error {

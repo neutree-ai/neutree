@@ -159,6 +159,7 @@ local function fail(code, msg)
 end
 
 function AIStatisticsPluginHandler:access(conf)
+    if kong.ctx.shared.neutree_internal_unpacked then return end
     local request_path = kong.request.get_path()
     local route_type
 
@@ -207,7 +208,7 @@ function AIStatisticsPluginHandler:access(conf)
 end
 
 function AIStatisticsPluginHandler:body_filter(conf)
-    if kong.ctx.plugin.skip then
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
@@ -220,7 +221,7 @@ function AIStatisticsPluginHandler:body_filter(conf)
 end
 
 function AIStatisticsPluginHandler:header_filter(conf)
-    if kong.ctx.plugin.skip then
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
@@ -240,7 +241,7 @@ function AIStatisticsPluginHandler:header_filter(conf)
 end
 
 function AIStatisticsPluginHandler:log(conf)
-    if kong.ctx.plugin.skip then
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
