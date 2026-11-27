@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"time"
 
@@ -26,9 +27,12 @@ func (x *exchange) streamResponse(body *idleReader, deliver func([]byte, bool) e
 	var decoder protocol.StreamDecoder
 	var encoder protocol.StreamEncoder
 
-	if x.clientCodec != nil {
+	if x.upstreamCodec != nil {
 		decoder = x.upstreamCodec.NewStreamDecoder()
-		encoder = x.clientCodec.NewStreamEncoder(protocol.EncodeOpts{ID: x.ID, Model: x.model, IncludeUsage: x.Envelope.ClientUsage})
+	}
+
+	if x.clientCodec != nil {
+		encoder = x.clientCodec.NewStreamEncoder(protocol.EncodeOpts{ID: x.ID, Created: x.started.Unix(), Model: x.model, IncludeUsage: x.Envelope.ClientUsage})
 	}
 
 	sequence := 0
@@ -39,29 +43,13 @@ func (x *exchange) streamResponse(body *idleReader, deliver func([]byte, bool) e
 			return nil
 		}
 
-		if decoder != nil {
-			return decoder.Push(f, func(ev protocol.Event) error {
-				if ev.Usage != nil {
-					x.usage = ev.Usage
-				}
-
-				if err := x.semanticEvent(&ev); err != nil {
-					return err
-				}
-
-				return encoder.Push(ev, func(out protocol.Frame) error {
-					if err := deliver(out.Raw, true); err != nil {
-						return err
-					}
-
-					sequence++
-
-					return nil
-				})
-			})
+		var err error
+		if decoder == nil {
+			err = x.forwardFrame(f, deliver)
+		} else {
+			err = x.transcodeFrame(f, decoder, encoder, deliver, &sequence)
 		}
 
-		err := x.forwardFrame(f, deliver, &sequence)
 		if err == nil && x.terminal {
 			// Read the HTTP trailer to recycle the connection, even after the protocol has ended.
 			tail = time.AfterFunc(100*time.Millisecond, func() { body.cancel(context.DeadlineExceeded) })
@@ -77,7 +65,6 @@ func (x *exchange) streamResponse(body *idleReader, deliver func([]byte, bool) e
 
 	if err == nil && decoder != nil {
 		err = decoder.Finish()
-		x.terminal = err == nil
 	}
 
 	if err == nil && !x.terminal {
@@ -92,59 +79,102 @@ func (x *exchange) streamResponse(body *idleReader, deliver func([]byte, bool) e
 	return err
 }
 
-func (x *exchange) forwardFrame(f protocol.Frame, deliver func([]byte, bool) error, sequence *int) error {
-	if f.HasData {
-		if f.Name == errorType || f.Name == "response.failed" {
-			x.finish = errorType
-			x.terminal = true
+func (x *exchange) transcodeFrame(f protocol.Frame, decoder protocol.StreamDecoder, encoder protocol.StreamEncoder,
+	deliver func([]byte, bool) error, sequence *int,
+) error {
+	var terminal bool
+	err := decoder.Push(f, func(ev protocol.Event) error {
+		x.observeEvent(ev)
+
+		if err := x.semanticEvent(&ev); err != nil {
+			return err
 		}
 
-		switch x.Wire {
-		case protocol.OpenAIChat, protocol.OpenAICompletions, protocol.OpenAIEmbeddings, protocol.OpenAIRerank:
-			if bytes.Equal(f.Data, []byte("[DONE]")) {
-				x.terminal = true
-			} else {
-				var chunk protocol.ChatResult
-				if err := json.Unmarshal(f.Data, &chunk); err != nil {
+		if encoder != nil {
+			if err := encoder.Push(ev, func(out protocol.Frame) error {
+				if err := deliver(out.Raw, true); err != nil {
 					return err
 				}
-
-				if chunk.Error != nil {
-					x.terminal = true
-					x.finish = errorType
-				}
-
-				x.observe(chunk)
-
-				ev := protocol.Event{Kind: "chunk", Raw: f.Data, Usage: chunk.Usage}
-				if err := x.semanticEvent(&ev); err != nil {
-					return err
-				}
-
-				if (x.Wire == protocol.OpenAIChat || x.Wire == protocol.OpenAICompletions) && !x.Envelope.ClientUsage && chunk.Usage != nil && len(chunk.Choices) == 0 {
-					return nil
-				}
+				*sequence++
+				return nil
+			}); err != nil {
+				return err
 			}
-		case protocol.AnthropicMessages:
-			if f.Name == "message_stop" {
-				x.terminal = true
-			}
-		case protocol.OpenAIResponses:
-			var e struct {
+		}
+
+		terminal = terminal || ev.Kind == "end" || ev.Kind == errorType
+
+		return nil
+	})
+
+	if encoder == nil {
+		var unsupported *protocol.UnsupportedError
+		if err != nil && !errors.As(err, &unsupported) {
+			return err
+		}
+		// A native Responses upstream owns its sequence numbers.
+		if x.Wire == protocol.OpenAIResponses && f.HasData {
+			var frame struct {
 				Sequence int `json:"sequence_number"`
 			}
 
-			if json.Unmarshal(f.Data, &e) == nil {
-				*sequence = e.Sequence + 1
+			if json.Unmarshal(f.Data, &frame) == nil {
+				*sequence = frame.Sequence + 1
+			}
+		}
+
+		err = deliver(f.Raw, true)
+	}
+
+	if err == nil && terminal {
+		x.terminal = true
+	}
+
+	return err
+}
+
+func (x *exchange) forwardFrame(f protocol.Frame, deliver func([]byte, bool) error) error {
+	var terminal bool
+
+	if f.HasData {
+		if f.Name == errorType || f.Name == "response.failed" {
+			x.finish = errorType
+			terminal = true
+		}
+
+		if bytes.Equal(f.Data, []byte("[DONE]")) {
+			terminal = true
+		} else {
+			var chunk protocol.ChatResult
+			if err := json.Unmarshal(f.Data, &chunk); err != nil {
+				return err
 			}
 
-			if f.Name == "response.completed" || f.Name == "response.incomplete" {
-				x.terminal = true
+			if chunk.Error != nil {
+				terminal = true
+				x.finish = errorType
+			}
+
+			x.observe(chunk)
+
+			ev := protocol.Event{Kind: "chunk", Raw: f.Data, Usage: chunk.Usage}
+			if err := x.semanticEvent(&ev); err != nil {
+				return err
+			}
+
+			if (x.Wire == protocol.OpenAIChat || x.Wire == protocol.OpenAICompletions) && !x.Envelope.ClientUsage && chunk.Usage != nil && len(chunk.Choices) == 0 {
+				return nil
 			}
 		}
 	}
 
-	return deliver(f.Raw, true)
+	if err := deliver(f.Raw, true); err != nil {
+		return err
+	}
+
+	x.terminal = terminal
+
+	return nil
 }
 
 func (x *exchange) jsonResponse(body io.Reader) ([]byte, error) {
@@ -169,8 +199,14 @@ func (x *exchange) jsonResponse(body io.Reader) ([]byte, error) {
 	}
 
 	var canonical protocol.Response
+
 	if x.upstreamCodec != nil {
-		canonical, err = x.upstreamCodec.DecodeResponse(b)
+		if x.clientCodec == nil {
+			canonical, err = protocol.ObserveResponse(x.Wire, b)
+		} else {
+			canonical, err = x.upstreamCodec.DecodeResponse(b)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +238,7 @@ func (x *exchange) jsonResponse(body io.Reader) ([]byte, error) {
 	}
 
 	if x.clientCodec != nil {
-		return x.clientCodec.EncodeResponse(canonical, protocol.EncodeOpts{ID: x.ID, Model: x.model})
+		return x.clientCodec.EncodeResponse(canonical, protocol.EncodeOpts{ID: x.ID, Created: x.started.Unix(), Model: x.model})
 	}
 
 	return b, nil
@@ -223,5 +259,27 @@ func (x *exchange) observe(c protocol.ChatResult) {
 
 	if len(c.Choices) > 0 && c.Choices[0].FinishReason != "" {
 		x.finish = c.Choices[0].FinishReason
+	}
+}
+
+func (x *exchange) observeEvent(ev protocol.Event) {
+	if ev.ID != "" {
+		x.messageID = ev.ID
+	}
+
+	if ev.Model != "" {
+		x.responseModel = ev.Model
+	}
+
+	if ev.FinishReason != "" {
+		x.finish = ev.FinishReason
+	}
+
+	if ev.Kind == errorType {
+		x.finish = errorType
+	}
+
+	if ev.Usage != nil {
+		x.usage = ev.Usage
 	}
 }

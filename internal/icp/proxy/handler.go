@@ -40,7 +40,7 @@ func NewServer(o Options, s *state.Store, t *state.RuntimeTable) *Server {
 
 	return &Server{
 		Options: o, Store: s, Runtime: t,
-		Pickers: router.NewRegistry(), Codecs: make(map[protocol.ID]protocol.Codec),
+		Pickers: router.NewRegistry(), Codecs: protocol.Codecs(),
 		transport: &http.Transport{
 			DialContext: dialer.DialContext, ResponseHeaderTimeout: o.First, DisableCompression: true,
 			MaxIdleConnsPerHost: 100, IdleConnTimeout: 90 * time.Second,
@@ -56,7 +56,14 @@ type failure struct {
 }
 
 func (f *failure) Error() string { return f.msg }
-func bad(err error) error        { return &failure{400, "invalid_request_error", err.Error()} }
+func bad(err error) error {
+	var unsupported *protocol.UnsupportedError
+	if errors.As(err, &unsupported) {
+		return &failure{400, "unsupported_feature", err.Error()}
+	}
+
+	return &failure{400, "invalid_request_error", err.Error()}
+}
 func (x *exchange) fail(w http.ResponseWriter, err error) {
 	x.Err = err
 	if x.committed {
@@ -282,11 +289,17 @@ func (s *Server) forward(w http.ResponseWriter, out *http.Request, x *exchange, 
 		out.Header.Set("Accept-Encoding", "identity")
 	}
 
-	if x.clientCodec != nil {
-		path = strings.TrimSuffix(path, suffix) + "/v1/chat/completions"
+	if upstreamPath := x.upstreamWire.Path(); x.managed && upstreamPath != "" {
+		path = strings.TrimSuffix(path, suffix) + upstreamPath
 
-		out.Header.Del("Anthropic-Version")
-		out.Header.Del("Anthropic-Beta")
+		if x.upstreamWire == protocol.AnthropicMessages {
+			if x.clientCodec != nil || out.Header.Get("Anthropic-Version") == "" {
+				out.Header.Set("Anthropic-Version", "2023-06-01")
+			}
+		} else if x.clientCodec != nil {
+			out.Header.Del("Anthropic-Version")
+			out.Header.Del("Anthropic-Beta")
+		}
 	}
 
 	if err := s.dispatch(w, out, x, path, view); err != nil {
@@ -370,12 +383,9 @@ func (s *Server) prepare(x *exchange, out *http.Request, path, key string, passt
 	}
 
 	x.managed = front
-	if front && (x.Wire == protocol.AnthropicMessages || x.Wire == protocol.OpenAIResponses) {
-		x.clientCodec = s.Codecs[x.Wire]
-		x.upstreamCodec = s.Codecs[protocol.OpenAIChat]
-
-		if x.clientCodec == nil || x.upstreamCodec == nil {
-			return &failure{501, "protocol_conversion_unavailable", "cross-protocol conversion is unavailable"}
+	if front {
+		if err := s.selectCodecs(x, protocol.ID(x.Config.Routes[key].UpstreamProtocol)); err != nil {
+			return err
 		}
 	}
 
@@ -388,6 +398,34 @@ func (s *Server) prepare(x *exchange, out *http.Request, path, key string, passt
 	}
 
 	return s.prepareJSON(x, out, key, fromFirstHop)
+}
+
+func (s *Server) selectCodecs(x *exchange, configured protocol.ID) error {
+	if x.Wire.Path() == "" {
+		return nil
+	}
+
+	x.upstreamWire = configured
+	if configured == "" {
+		x.upstreamWire = protocol.OpenAIChat
+	}
+
+	upstream := s.Codecs[x.upstreamWire]
+	cross := x.upstreamWire != x.Wire
+
+	if (configured != "" || cross) && upstream == nil || cross && s.Codecs[x.Wire] == nil {
+		return &failure{501, "protocol_conversion_unavailable", "protocol conversion unavailable"}
+	}
+
+	if cross {
+		x.clientCodec = s.Codecs[x.Wire]
+	}
+
+	if cross || x.Wire != protocol.OpenAIChat {
+		x.upstreamCodec = upstream
+	}
+
+	return nil
 }
 
 func (s *Server) prepareJSON(x *exchange, out *http.Request, key string, fromFirstHop bool) error {

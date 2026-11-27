@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/neutree-ai/neutree/internal/icp/protocol"
 	"github.com/neutree-ai/neutree/internal/icp/state"
 )
 
@@ -202,6 +203,16 @@ func (s *Server) relayResponse(w http.ResponseWriter, x *exchange, a *Attempt, r
 		resp.Header.Del("Content-Length")
 
 		err = x.streamResponse(body, deliver)
+	case x.managed && resp.StatusCode/100 != 2 && (x.clientCodec != nil || x.Wire == protocol.AnthropicMessages):
+		b, err := io.ReadAll(io.LimitReader(body, traceLimit))
+		if err != nil {
+			return err
+		}
+
+		resp.Header.Del("Content-Length")
+		resp.Header.Set("Content-Type", "application/json")
+
+		return deliver(protocol.HTTPError(x.Wire, resp.StatusCode, b), false)
 	case x.managed && (x.Wire != "" || jsonBody) && resp.StatusCode == 200:
 		var b []byte
 
