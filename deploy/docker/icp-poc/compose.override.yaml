@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  neutree-gateway:
+    # Default uses a published image; for local host binary trial without an image push,
+    # set NEUTREE_GATEWAY_IMAGE=alpine:3.20, NEUTREE_GATEWAY_ENTRYPOINT=/usr/local/bin/neutree-gateway,
+    # and mount your compiled Linux binary to /usr/local/bin/neutree-gateway (see README.md).
+    image: ${NEUTREE_GATEWAY_IMAGE:-neutree/neutree-gateway:latest}
+    container_name: neutree-gateway
+    entrypoint: ["${NEUTREE_GATEWAY_ENTRYPOINT:-/usr/local/bin/neutree-gateway}"]
+    command:
+      - --listen=:8080
+      - --admin-listen=127.0.0.1:8081
+      - --legacy-kong-url=http://kong:8000
+      - --postgrest-url=http://postgrest:6432
+      - --storage-jwt-secret=${NEUTREE_JWT_SECRET}
+      - --managed-routes=${ICP_MANAGED_ROUTES:-*}
+      - --callback-secret=${ICP_CALLBACK_SECRET:-}
+      - --sync-interval=${ICP_SYNC_INTERVAL:-15s}
+    ports:
+      - "${ICP_GATEWAY_PORT:-8080}:8080"
+    networks:
+      - neutree
+    depends_on:
+      postgrest:
+        condition: service_started
+      kong:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
