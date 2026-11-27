@@ -3,9 +3,9 @@ import enum
 import logging
 import time
 import json
-from typing import Dict, Optional, Any, AsyncGenerator, List
+from typing import Annotated, Dict, Optional, Any, AsyncGenerator, List
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from starlette.responses import StreamingResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette_context.plugins import RequestIdPlugin
@@ -17,6 +17,7 @@ from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
+from vllm import envs
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 # v0.24.0 modules are organized into endpoint-specific sub-packages.
@@ -34,10 +35,13 @@ from vllm.entrypoints.pooling.embed.serving import ServingEmbedding
 from vllm.entrypoints.pooling.scoring.protocol import RerankRequest
 from vllm.entrypoints.pooling.scoring.serving import ServingScores
 
+from vllm.entrypoints.speech_to_text.transcription.protocol import TranscriptionRequest
+
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.vllm_transcription import transcription_response, transcription_results
 from serve._utils.vllm_task_translate import task_kwargs as _task_kwargs
 
 
@@ -208,6 +212,7 @@ class Backend:
             stat_loggers=[NeutreeRayStatLogger],
         )
         self.model_config = None
+        self.openai_serving_transcription = None
         self.openai_serving_chat = None
         self.openai_serving_render = None
         self.openai_serving_embedding = None
@@ -330,6 +335,26 @@ class Backend:
                 enable_flash_late_interaction=self.enable_flash_late_interaction,
             )
         return self.openai_serving_score
+
+    async def _ensure_transcription(self):
+        if self.openai_serving_transcription is None:
+            if "transcription" not in await self._ensure_supported_tasks():
+                raise ValueError("The model does not support Transcriptions API")
+            from vllm.entrypoints.speech_to_text.transcription.serving import OpenAIServingTranscription
+
+            models = await self._ensure_models()
+            self.openai_serving_transcription = OpenAIServingTranscription(
+                self.engine,
+                models,
+                request_logger=None,
+                return_tokens_as_token_ids=self.return_tokens_as_token_ids,
+                enable_force_include_usage=self.enable_force_include_usage,
+            )
+        return self.openai_serving_transcription
+
+    async def create_transcription(self, audio_data: bytes, payload: Any):
+        async for result in transcription_results(self, TranscriptionRequest, audio_data, payload):
+            yield result
 
     async def generate(self, payload: Any):
         await self._ensure_chat()
@@ -514,6 +539,12 @@ class Controller:
             # Handle non-streaming response as before
             result = await self.backend.options(stream=False).generate.remote(req_obj)
             return _result_to_response(result)
+
+    @app.post("/v1/audio/transcriptions")
+    async def transcriptions(self, request: Annotated[TranscriptionRequest, Form()]):
+        return await transcription_response(
+            self.backend, request, envs.VLLM_MAX_AUDIO_CLIP_FILESIZE_MB,
+        )
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
