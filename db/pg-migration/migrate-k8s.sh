@@ -2,7 +2,8 @@
 # Copies the database of the PostgreSQL Deployment used by earlier releases
 # into the CloudNativePG Cluster. Runs on every helm upgrade and is safe to
 # re-run: it exits early once the copy is complete, and a failed attempt is
-# redone from scratch.
+# redone from scratch. Before the copy it rebuilds the indexes of databases
+# whose collation version changed with the image (refresh-collation.sh).
 #
 # Environment: NAMESPACE, CLUSTER, RESOURCES_CONFIGMAP and CREATE_RESOURCES
 # (the manifest of the Cluster is in /resources; "true" when helm does not
@@ -102,11 +103,24 @@ if [ -n "$hibernated" ]; then
   done
 fi
 
+# After helm changes the image, the Ready condition can still be the one from
+# before the operator started replacing the instances.
+instances_on_image() {
+  local instances image
+  read -r instances image < <(kubectl -n "$NAMESPACE" get "clusters.postgresql.cnpg.io/$CLUSTER" \
+    -o jsonpath='{.spec.instances} {.spec.imageName}')
+  kubectl -n "$NAMESPACE" get pods -l "cnpg.io/cluster=$CLUSTER,cnpg.io/podRole=instance" \
+    -o jsonpath='{range .items[*]}{.spec.containers[?(@.name=="postgres")].image}{"\n"}{end}' |
+    awk -v want="$image" -v n="$instances" '$0 != want { bad = 1 } END { exit !(NR == n && !bad) }'
+}
+
 log "waiting for Cluster $CLUSTER to be ready"
-until kubectl -n "$NAMESPACE" wait "clusters.postgresql.cnpg.io/$CLUSTER" --for=condition=Ready --timeout=60s; do
-  log "Cluster $CLUSTER not ready yet"
+until instances_on_image &&
+    kubectl -n "$NAMESPACE" wait "clusters.postgresql.cnpg.io/$CLUSTER" --for=condition=Ready --timeout=60s; do
+  log "Cluster $CLUSTER not ready yet"; sleep 5
 done
 pgm_wait_target
+bash "$(dirname "$0")/refresh-collation.sh"
 
 # Created here rather than with a CloudNativePG Database: its finalizer needs
 # the operator, which helm uninstall removes at the same time.

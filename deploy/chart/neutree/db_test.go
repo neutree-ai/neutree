@@ -1,6 +1,9 @@
 package neutree
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -501,4 +504,82 @@ func podContainers(t *testing.T, resources *unstructured.UnstructuredList, kind,
 
 func podInitContainers(t *testing.T, resources *unstructured.UnstructuredList, kind, name string) []corev1.Container {
 	return podSpec(t, resources, kind, name).InitContainers
+}
+
+// The migration Job rebuilds indexes after a collation change before it
+// releases any client, and only once every instance runs the new image.
+func TestDBMigrationRefreshesCollation(t *testing.T) {
+	var scripts corev1.ConfigMap
+	renderedObject(t, renderChart(t, nil), "ConfigMap", "neutree-pg-migration", &scripts)
+	require.Contains(t, scripts.Data, "refresh-collation.sh")
+
+	migrate := scripts.Data["migrate-k8s.sh"]
+	order := []string{
+		"until instances_on_image &&",
+		"pgm_wait_target\n",
+		`bash "$(dirname "$0")/refresh-collation.sh"`,
+		`create database \"$GRAFANA_DATABASE\"`,
+		"insert into neutree_pg_migration",
+		"\npgm_copy\n",
+	}
+	last := -1
+	for _, s := range order {
+		i := strings.Index(migrate, s)
+		require.Greater(t, i, last, "migrate-k8s.sh: %q out of order", s)
+		last = i
+	}
+}
+
+func TestRefreshCollationScript(t *testing.T) {
+	var scripts corev1.ConfigMap
+	renderedObject(t, renderChart(t, nil), "ConfigMap", "neutree-pg-migration", &scripts)
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "refresh-collation.sh")
+	require.NoError(t, os.WriteFile(script, []byte(scripts.Data["refresh-collation.sh"]), 0o600))
+	// Records each call; the stale databases come from STALE, and REINDEX of
+	// FAIL_DB fails as a duplicate under a unique index would.
+	fakePsql := `#!/bin/sh
+case " $* " in
+  *" -c "*) echo "query" >> "$LOG"; printf '%b' "$STALE"; exit 0 ;;
+esac
+sql=$(cat)
+db=$(echo " $* " | sed 's/.* -d \([^ ]*\) .*/\1/')
+echo "$db: $sql" >> "$LOG"
+case "$sql" in reindex*) [ "$db" = "$FAIL_DB" ] && { echo 'ERROR:  could not create unique index' >&2; exit 3; } ;; esac
+exit 0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "psql"), []byte(fakePsql), 0o700))
+
+	run := func(stale, failDB string) ([]string, string, error) {
+		log := filepath.Join(t.TempDir(), "calls")
+		cmd := exec.Command("bash", script)
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TARGET_HOST=db",
+			"LOG="+log, "STALE="+stale, "FAIL_DB="+failDB)
+		out, err := cmd.CombinedOutput()
+		calls, readErr := os.ReadFile(log)
+		require.NoError(t, readErr)
+
+		return strings.Split(strings.TrimSpace(string(calls)), "\n"), string(out), err
+	}
+
+	calls, _, err := run("", "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"query"}, calls, "nothing to do when the versions match")
+
+	calls, _, err = run(`neutree 2.31 2.36\ntemplate1 2.31 2.36\n`, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"query",
+		`neutree: reindex database :"db";`,
+		`neutree: alter database :"db" refresh collation version;`,
+		`template1: reindex database :"db";`,
+		`template1: alter database :"db" refresh collation version;`,
+	}, calls)
+
+	calls, out, err := run(`neutree 2.31 2.36\ntemplate1 2.31 2.36\n`, "neutree")
+	require.Error(t, err, "a failed rebuild must fail the Job")
+	require.Equal(t, []string{"query", `neutree: reindex database :"db";`}, calls,
+		"the version must not be refreshed over indexes that were not rebuilt")
+	require.Contains(t, out, "REINDEX of database neutree failed")
 }
