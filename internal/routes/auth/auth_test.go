@@ -213,6 +213,20 @@ func TestResolveEmailByUsername_UsernameFound(t *testing.T) {
 	assert.Equal(t, "secret", resultBody["password"])
 }
 
+func TestResolveEmailByUsername_EmailSkipsLookup(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":    "admin@example.com",
+		"password": "secret",
+	})
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	assert.Equal(t, body, result)
+	mockStorage.AssertNotCalled(t, "ListUserProfile", mock.Anything)
+}
+
 func TestResolveEmailByUsername_UsernameNotFound(t *testing.T) {
 	mockStorage := storagemocks.NewMockStorage(t)
 
@@ -256,30 +270,6 @@ func TestResolveEmailByUsername_StorageError(t *testing.T) {
 	err := json.Unmarshal(result, &resultBody)
 	assert.NoError(t, err)
 	assert.Equal(t, "admin", resultBody["email"])
-}
-
-func TestResolveEmailByUsername_EmailInputAlsoResolved(t *testing.T) {
-	mockStorage := storagemocks.NewMockStorage(t)
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"email":    "user@old-domain.com",
-		"password": "secret",
-	})
-
-	mockStorage.On("ListUserProfile", mock.MatchedBy(func(opt storage.ListOption) bool {
-		return opt.Filters[0].Value == `"user@old-domain.com"`
-	})).Return([]v1.UserProfile{
-		{
-			Spec: &v1.UserProfileSpec{Email: "user@new-domain.com"},
-		},
-	}, nil)
-
-	result := resolveEmailByUsername(mockStorage, body)
-
-	var resultBody map[string]interface{}
-	err := json.Unmarshal(result, &resultBody)
-	assert.NoError(t, err)
-	assert.Equal(t, "user@new-domain.com", resultBody["email"])
 }
 
 // The name of an external user is not resolved to its profile email (the

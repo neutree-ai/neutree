@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/supabase-community/gotrue-go/types"
@@ -177,7 +178,8 @@ func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	}
 
 	identifier, _ := reqBody["email"].(string)
-	if identifier == "" {
+	// User names cannot contain "@" (DB name validation), so this is an email.
+	if identifier == "" || strings.Contains(identifier, "@") {
 		return body
 	}
 

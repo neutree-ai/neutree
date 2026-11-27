@@ -698,6 +698,43 @@ func TestPrepareNeutreeCoreDeployConfig_VectorLogSinkWiring(t *testing.T) {
 	assert.NotContains(t, string(compose), "9598:9598", "Vector metrics stay on the compose network")
 }
 
+// The rendered compose file must carry the GoTrue pool and audit settings.
+func TestPrepareNeutreeCoreDeployConfig_AuthLoginTuning(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
+		ConfigPaths: []string{filepath.Join(tempDir, "neutree-core", "docker-compose.yml")},
+	})
+	require.NoError(t, err)
+
+	auth, err := project.GetService("auth")
+	require.NoError(t, err)
+
+	want := map[string]string{
+		"GOTRUE_DB_MAX_POOL_SIZE":           "10",
+		"GOTRUE_DB_MAX_IDLE_POOL_SIZE":      "5",
+		"GOTRUE_DB_CONN_MAX_IDLE_TIME":      "60s",
+		"GOTRUE_AUDIT_LOG_DISABLE_POSTGRES": "true",
+	}
+	for k, v := range want {
+		require.NotNil(t, auth.Environment[k], k)
+		assert.Equal(t, v, *auth.Environment[k], k)
+	}
+}
+
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 	policy := neutreeCoreCompatibilityPolicyForCurrentRelease
 	coreVersion := currentNeutreeCoreReleaseVersion()

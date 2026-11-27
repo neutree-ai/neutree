@@ -339,6 +339,7 @@ func TestDBConnections(t *testing.T) {
 		require.Equal(t, "postgres://auth_admin:auth_admin_password@"+dbHost+":5432/neutree?sslmode=disable&connect_timeout=3",
 			env("Deployment", "neutree-auth", "auth", "DATABASE_URL"))
 		require.Equal(t, "5", env("Deployment", "neutree-auth", "auth", "GOTRUE_DB_MAX_IDLE_POOL_SIZE"))
+		require.Equal(t, "true", env("Deployment", "neutree-auth", "auth", "GOTRUE_AUDIT_LOG_DISABLE_POSTGRES"))
 
 		kongWorkloads := map[string][]string{
 			"Deployment/neutree-kong":                    {"clear-stale-pid", "wait-for-db", "proxy"},
