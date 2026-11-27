@@ -2,10 +2,17 @@
 --
 -- The token quota's *remaining* count is the only dynamic value, so unlike the
 -- static access limits it is NOT reconciled onto the consumer; this plugin pulls
--- it from neutree-api
--- (api.get_api_key_remaining) at request time, cached briefly in kong.cache.
+-- it from neutree-api (api.get_api_key_remaining) and caches it per worker.
 --   remaining <= 0      -> 429 quota_exceeded
---   fetch fails/uncertain -> allowed (FAIL-OPEN: prefer inference availability)
+--   never fetched successfully -> allowed (FAIL-OPEN: prefer inference availability)
+--
+-- The cache is stale-while-revalidate (NEU-900): once an entry is older than
+-- cache_ttl, the request is still decided by the cached value and a background
+-- timer refreshes it, so a slow or failing control plane never sits on the
+-- request path. A failed refresh keeps the last known value with no age limit:
+-- during a database failover or outage a key keeps being limited by its last
+-- balance instead of becoming unlimited. Only an entry that never fetched
+-- successfully fails open, and it is retried in the background as well.
 -- The plugin is attached only when the key has a token quota or a token pool
 -- applies to its owner (a group's, or one set on the owner); the remaining count
 -- is already the min of them all.
@@ -21,15 +28,14 @@
 
 local http = require("resty.http")
 local cjson = require("cjson.safe")
+local lrucache = require("resty.lrucache")
+local semaphore = require("ngx.semaphore")
 
 local QuotaHandler = {
     PRIORITY = 890, -- below neutree-ai-access (895): 403 gating precedes 429 quota
     VERSION = "1.0.0",
 }
 
--- Returns a table so kong.cache can memoize:
---   { remaining = <number> }  -> enforce
---   { unlimited = true }      -> never block (no quota set)
 -- Cap how much of an upstream body we log so a large/HTML error page can't spam
 -- logs or leak details.
 local MAX_LOG_BODY = 256
@@ -88,9 +94,12 @@ local function request_dimensions()
            str_or_nil(shared.neutree_endpoint_name)
 end
 
-local function fetch_remaining(conf, api_key_id, model, ep_type, ep_name)
+-- Returns the gate ({ remaining = n } or { unlimited = true }), or nil + err when
+-- the control plane gave no usable answer. Runs in timers too, so it must not
+-- touch request-scoped PDK APIs; it logs through ngx.log for the same reason.
+local function fetch_remaining(conf, timeout, api_key_id, model, ep_type, ep_name)
     local httpc = http.new()
-    httpc:set_timeout(conf.timeout or 2000)
+    httpc:set_timeout(timeout)
 
     local res, err = httpc:request_uri(conf.api_url .. "/rpc/get_api_key_remaining", {
         method = "POST",
@@ -107,20 +116,16 @@ local function fetch_remaining(conf, api_key_id, model, ep_type, ep_name)
         },
     })
 
-    -- Fail-open on any fetch problem and CACHE the decision (return a value, not
-    -- an error) so kong.cache memoizes "unlimited" for cache_ttl instead of
-    -- re-calling the control plane + logging on every request during an outage.
     if not res then
-        kong.log.warn("neutree-ai-quota: remaining fetch failed: ", tostring(err))
-        return { unlimited = true }
+        return nil, "remaining fetch failed: " .. tostring(err)
     end
 
     if res.status ~= 200 then
-        kong.log.warn("neutree-ai-quota: remaining fetch status ", tostring(res.status),
-            " body ", trunc_body(res.body))
-        return { unlimited = true }
+        return nil, "remaining fetch status " .. tostring(res.status) ..
+            " body " .. trunc_body(res.body)
     end
 
+    -- null is a real answer: no quota applies to this key.
     local body = res.body
     if not body or body == "" or body == "null" then
         return { unlimited = true }
@@ -133,11 +138,82 @@ local function fetch_remaining(conf, api_key_id, model, ep_type, ep_name)
     end
 
     if n == nil then
-        kong.log.warn("neutree-ai-quota: unparseable remaining: ", trunc_body(body))
-        return { unlimited = true }
+        return nil, "unparseable remaining: " .. trunc_body(body)
     end
 
     return { remaining = n }
+end
+
+-- Per-worker entries: { gate = <last good gate or nil>, checked_at = <last
+-- attempt>, refreshing = <bool>, inflight = <semaphore while the first fetch
+-- runs> }. Bounded by LRU so idle (key, model, endpoint) tuples age out; an
+-- evicted entry just takes the first-fetch path again.
+local CACHE_SIZE = 10000
+local entries = assert(lrucache.new(CACHE_SIZE))
+
+-- Runs one fetch and records it on the entry. A failure leaves the previous
+-- gate in place.
+local function fetch_into(entry, conf, timeout, api_key_id, model, ep_type, ep_name)
+    local ok, gate, err = pcall(fetch_remaining, conf, timeout, api_key_id, model, ep_type, ep_name)
+    entry.checked_at = ngx.now()
+    if ok and gate then
+        entry.gate = gate
+        return
+    end
+    if not ok then
+        err = gate
+    end
+    ngx.log(ngx.WARN, "neutree-ai-quota: ", tostring(err),
+        entry.gate and " (keeping last known value)" or " (no value yet, allowing)")
+end
+
+-- A refresh is off the request path, so it can outwait a slow but live control
+-- plane; with the request timeout it would keep timing out under PG latency and
+-- the cached value would never move.
+local REFRESH_TIMEOUT_MS = 10000
+
+local function refresh(premature, entry, conf, api_key_id, model, ep_type, ep_name)
+    if not premature then
+        local timeout = math.max(conf.timeout or 2000, REFRESH_TIMEOUT_MS)
+        fetch_into(entry, conf, timeout, api_key_id, model, ep_type, ep_name)
+    end
+    entry.refreshing = false
+end
+
+local function maybe_refresh(entry, ttl, conf, api_key_id, model, ep_type, ep_name)
+    if entry.refreshing or ngx.now() - entry.checked_at < ttl then
+        return
+    end
+    entry.refreshing = true
+    local ok, err = ngx.timer.at(0, refresh, entry, conf, api_key_id, model, ep_type, ep_name)
+    if not ok then
+        entry.refreshing = false
+        kong.log.err("neutree-ai-quota: cannot schedule refresh: ", err)
+    end
+end
+
+-- Synchronous fetch for a tuple this worker has never seen. Concurrent first
+-- requests for the same tuple wait on the one fetch rather than each calling
+-- the control plane.
+local function first_fetch(cache_key, conf, api_key_id, model, ep_type, ep_name)
+    local entry = { checked_at = 0, refreshing = false, inflight = semaphore.new(), waiters = 0 }
+    entries:set(cache_key, entry)
+
+    fetch_into(entry, conf, conf.timeout or 2000, api_key_id, model, ep_type, ep_name)
+
+    local sema = entry.inflight
+    entry.inflight = nil
+    if entry.waiters > 0 then
+        sema:post(entry.waiters)
+    end
+    return entry
+end
+
+local function wait_first_fetch(entry, conf)
+    entry.waiters = entry.waiters + 1
+    -- Bounded by the fetch timeout plus slack; on timeout the caller sees no
+    -- gate yet and fails open like the fetching request would.
+    entry.inflight:wait(((conf.timeout or 2000) + 500) / 1000)
 end
 
 -- Length-prefixed cache-key segment: unambiguous for any byte content.
@@ -164,17 +240,17 @@ function QuotaHandler:access(conf)
         cache_part(model) .. cache_part(ep_type) .. cache_part(ep_name)
     local ttl = conf.cache_ttl or 5
 
-    local gate, err = kong.cache:get(cache_key, { ttl = ttl, neg_ttl = ttl },
-        fetch_remaining, conf, api_key_id, model, ep_type, ep_name)
-    if err then
-        -- FAIL-OPEN: cannot determine remaining -> allow the request through,
-        -- preferring inference availability over strict enforcement during a
-        -- control-plane/DB outage.
-        kong.log.err("neutree-ai-quota: ", err)
-        return
+    local entry = entries:get(cache_key)
+    if not entry then
+        entry = first_fetch(cache_key, conf, api_key_id, model, ep_type, ep_name)
+    elseif entry.inflight then
+        wait_first_fetch(entry, conf)
+    else
+        maybe_refresh(entry, ttl, conf, api_key_id, model, ep_type, ep_name)
     end
 
-    if gate.unlimited then
+    local gate = entry.gate
+    if not gate or gate.unlimited then
         return
     end
 
