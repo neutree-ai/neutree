@@ -147,6 +147,7 @@ local function filter_response(conf, fields, chunks)
         ngx.arg[1] = chunk
         ngx.arg[2] = i == #chunks
         handler:body_filter(conf)
+        if i < #chunks then assert.is_nil(ngx.arg[1], "partial model list escaped before filtering") end
         response[#response + 1] = ngx.arg[1] or ""
     end
 

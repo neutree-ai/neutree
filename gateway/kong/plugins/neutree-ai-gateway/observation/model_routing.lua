@@ -55,22 +55,20 @@ function M.target(target)
     event.routing.selected_target = { upstream = target.upstream, upstream_model = target.upstream_model }
 end
 
+local inference_paths = {
+    ["/anthropic/v1/messages"] = true, ["/v1/messages"] = true, ["/v1/responses"] = true,
+    ["/v1/chat/completions"] = true, ["/v1/completions"] = true, ["/v1/embeddings"] = true, ["/v1/rerank"] = true,
+}
 local function resolve(route_id, path)
     local conf = routes[route_id]
     if not conf then return end
     local prefix = conf.route_prefix or ""
     if path:sub(1, #prefix) ~= prefix then return end
     local suffix = path:sub(#prefix + 1)
-    local inference = suffix == "/anthropic/v1/messages" or suffix == "/anthropic/v1/messages/"
-    if not inference then
-        for _, endpoint in ipairs({ "/v1/chat/completions", "/v1/embeddings", "/v1/rerank" }) do
-            if suffix == endpoint and (not conf.route_type or conf.route_type == endpoint) then
-                inference = true
-                break
-            end
-        end
+    suffix = suffix:gsub("/$", "")
+    if inference_paths[suffix] or suffix:match("^/v1/audio/[^/]+$") then
+        return { request = { endpoint = prefix }, routing = {} }
     end
-    if inference then return { request = { endpoint = prefix }, routing = {} } end
 end
 
 -- Request facts only; the collector decides which outcomes enter each metric.

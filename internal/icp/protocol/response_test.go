@@ -149,3 +149,19 @@ func TestObserveNativeResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAIErrorEnvelope(t *testing.T) {
+	const native = `{ "error": {"message":"denied","code":42}, "request_id":"upstream" }`
+	for _, wire := range []ID{OpenAIChat, OpenAIResponses} {
+		if got := string(HTTPError(wire, 403, []byte(native), true)); got != native {
+			t.Fatalf("%s lost native fields: %s", wire, got)
+		}
+		var wrapped struct {
+			Error struct{ Type, Message string }
+		}
+		raw := HTTPError(wire, 403, []byte(`{"message":"denied"}`), true)
+		if err := json.Unmarshal(raw, &wrapped); err != nil || wrapped.Error.Type != "permission_error" || wrapped.Error.Message != "denied" {
+			t.Fatal(wire, string(raw), err)
+		}
+	}
+}

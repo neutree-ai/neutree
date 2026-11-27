@@ -1289,6 +1289,72 @@ local function handle_anthropic_stream_body()
     ngx.arg[1] = table.concat(output_parts)
 end
 
+local function select_model_target(conf, model)
+    local state, matched_entry, detail = begin_routing(conf, model)
+    if not state then
+        if matched_entry == "counter_unavailable" then
+            kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
+            return nil, fail(500, "Unable to check upstream capacity")
+        end
+        if matched_entry == "capacity_exhausted" then
+            return nil, fail(503, "All upstreams are at capacity for model: " .. model)
+        end
+        if matched_entry == "no_available_target" then
+            return nil, fail(503, "All upstreams are temporarily unavailable for model: " .. model)
+        end
+        return nil, fail(400, "No upstream configured for model: " .. model)
+    end
+
+    kong.ctx.plugin.routing_state = state
+    if not state.legacy then observation.target(state.current) end
+    local entry = target_entry(conf, state)
+    if not entry then return nil, fail(502, "Missing selected upstream") end
+    return entry
+end
+
+local function route_unpacked(conf, suffix)
+    local shared = kong.ctx.shared
+    local model = shared.neutree_request_model
+    observation.start(conf)
+    observation.model(conf, model, shared.neutree_request_stream)
+    if not (conf.model_routes or conf.upstreams) then return end
+
+    local entry, err = select_model_target(conf, model)
+    if not entry then return err end
+    local mapped = target_mapping(kong.ctx.plugin.routing_state, model)
+    shared.neutree_selected_upstream = entry.name or entry.upstream
+    shared.neutree_upstream_model = mapped
+    if mapped ~= model then
+        local media = (kong.request.get_header("Content-Type") or ""):match("^%s*([^;%s]+)")
+        if not media or media:lower() ~= "application/json" then
+            return fail(400, "Model mapping requires an application/json request")
+        end
+        local limit = 16 * 1024 * 1024
+        local raw = kong.request.get_raw_body(limit)
+        if not raw or #raw > limit then
+            return fail(413, "Model mapping requires a request body within 16 MiB")
+        end
+        local body = cjson.decode(raw)
+        if type(body) ~= "table" or body.model ~= model then
+            return fail(400, "Invalid JSON model for mapping")
+        end
+        body.model = mapped
+        local encoded, encode_err = cjson.encode(body)
+        if not encoded then return fail(400, encode_err) end
+        kong.service.request.set_raw_body(encoded)
+    end
+
+    if not entry.internal then
+        for _, key in ipairs({ "Prefix-Hash", "Block-Hashes", "Session" }) do
+            kong.service.request.clear_header("X-Neutree-Internal-" .. key)
+        end
+        suffix = strip_api_version_prefix(suffix)
+    end
+    local _, target_err = set_upstream_target(entry)
+    if target_err then return target_err end
+    kong.service.request.set_path(build_upstream_path(entry, suffix))
+end
+
 function AIGatewayHandler:configure(configs)
     observation.configure(configs)
 end
@@ -1311,6 +1377,10 @@ function AIGatewayHandler:access(conf)
 
     if maybe_return_model_list(conf, suffix) then
         return
+    end
+
+    if kong.ctx.shared.neutree_internal_unpacked then
+        return route_unpacked(conf, suffix)
     end
 
     if is_anthropic_messages_path(suffix) then
@@ -1478,24 +1548,9 @@ function AIGatewayHandler:access(conf)
             return fail(400, "missing 'model' field in request body")
         end
 
-        local state, matched_entry, detail = begin_routing(conf, ai_request.model)
-        if not state then
-            if matched_entry == "counter_unavailable" then
-                kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
-                return fail(500, "Unable to check upstream capacity")
-            end
-            if matched_entry == "capacity_exhausted" then
-                return fail(503, "All upstreams are at capacity for model: " .. ai_request.model)
-            end
-            if matched_entry == "no_available_target" then
-                return fail(503, "All upstreams are temporarily unavailable for model: " .. ai_request.model)
-            end
-            return fail(400, "No upstream configured for model: " .. ai_request.model)
-        end
-
-        kong.ctx.plugin.routing_state = state
-        if not state.legacy then observation.target(state.current) end
-        matched_entry = target_entry(conf, state)
+        local matched_entry, selection_err = select_model_target(conf, ai_request.model)
+        if not matched_entry then return selection_err end
+        local state = kong.ctx.plugin.routing_state
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
             return route_err
@@ -1532,7 +1587,7 @@ function AIGatewayHandler:access(conf)
 end
 
 function AIGatewayHandler:header_filter(conf)
-    if kong.ctx.plugin.skip then
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
@@ -1564,7 +1619,7 @@ function AIGatewayHandler:header_filter(conf)
 end
 
 function AIGatewayHandler:body_filter(conf)
-    if kong.ctx.plugin.skip then
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
@@ -1591,16 +1646,12 @@ function AIGatewayHandler:body_filter(conf)
 end
 
 function AIGatewayHandler:log(conf)
-    if kong.ctx.plugin.skip then
+    routing.finish(kong.ctx.plugin.routing_state)
+    if kong.ctx.shared.neutree_internal_unpacked or kong.ctx.plugin.skip then
         return
     end
 
     local response_status = kong.service.response.get_status()
-
-    if kong.ctx.plugin.routing_state then
-        routing.finish(kong.ctx.plugin.routing_state)
-    end
-
     -- Emit raw req/res trace for every request (incl. failures).
     local response_body = kong.ctx.plugin.response_body_raw
     if response_body == nil and kong.ctx.plugin.sse_raw_buffer ~= nil then

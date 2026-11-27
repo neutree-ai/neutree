@@ -13,6 +13,7 @@ var (
 )
 
 type GatewayOptions struct {
+	InternalToken     string
 	ProxyUrl          string
 	AdminUrl          string
 	LogRemoteWriteUrl string
