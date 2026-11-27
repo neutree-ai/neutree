@@ -102,6 +102,8 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]Res
 		availableResource   map[corev1.ResourceName]k8sresource.Quantity
 		labels              map[string]string
 		annotations         map[string]string
+		ready               bool
+		controlPlane        bool
 		pods                []resourceparser.KubernetesPodResourceContext
 	}
 	nodesByID := make(map[string]*nodeResourceInfo)
@@ -116,6 +118,8 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]Res
 			availableResource:   node.Status.Allocatable.DeepCopy(),
 			labels:              node.Labels,
 			annotations:         node.Annotations,
+			ready:               nodeReady(node),
+			controlPlane:        nodeControlPlane(node),
 		}
 	}
 
@@ -169,6 +173,9 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]Res
 		}
 
 		node := resourceNodeFromStatus(nodeID, resourceStatus)
+		node.Status.Ready = boolPointer(nodeInfo.ready)
+		node.Status.ControlPlane = boolPointer(nodeInfo.controlPlane)
+
 		if node.Status != nil && len(devices) > 0 {
 			node.Status.Devices = devices
 		}
@@ -183,6 +190,31 @@ func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]Res
 	})
 
 	return nodes, nil
+}
+
+func nodeReady(node corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+
+	return false
+}
+
+func nodeControlPlane(node corev1.Node) bool {
+	_, controlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
+	if controlPlane {
+		return true
+	}
+
+	_, master := node.Labels["node-role.kubernetes.io/master"]
+
+	return master
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func (c *K8sResourceClient) ListEndpointInstances(
