@@ -20,6 +20,13 @@ All `cnpg.*` values are passed to that chart.
 - **Operator upgrades** come with chart upgrades. In-place updates of the
   instance manager are on (`ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES`), so an
   operator upgrade neither restarts the PostgreSQL pods nor switches over.
+- **PostgreSQL image upgrades.** A new `db.image` can bring another glibc,
+  which sorts text differently. Once every instance runs the new image, the
+  migration Job rebuilds the indexes of each database whose collation version
+  changed (`REINDEX DATABASE`) and then records the new version; schema
+  migrations wait for it. If a unique index cannot be rebuilt because rows are
+  duplicates under the new collation, the Job fails and names the index:
+  remove the duplicate rows, then run `helm upgrade` again.
 - **First install.** The CRDs and the operator's webhook are not ready while
   helm creates the release, so helm does not create the `Cluster` on the
   first install. The migration Job `<release>-pg-migration-<revision>`
